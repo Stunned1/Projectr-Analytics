@@ -1,6 +1,10 @@
 'use client'
 
 import { useState } from 'react'
+import dynamic from 'next/dynamic'
+
+// Dynamically import map to avoid SSR issues with deck.gl
+const CommandMap = dynamic(() => import('@/components/CommandMap'), { ssr: false })
 
 interface DataRow {
   metric_name: string
@@ -147,7 +151,13 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-zinc-950 text-white">
-      <div className="max-w-4xl mx-auto px-6 py-12">
+      {/* Map — full width, fixed height */}
+      <div className="w-full h-[60vh] relative">
+        <CommandMap zip={result?.zip ?? null} marketData={result} />
+      </div>
+
+      {/* Data panel */}
+      <div className="max-w-4xl mx-auto px-6 py-8">
 
         <div className="mb-10">
           <h1 className="text-2xl font-bold tracking-tight">Projectr Command Center</h1>

@@ -60,30 +60,40 @@ function parseGtfsStops(zipBuffer: Buffer): TransitStop[] {
 }
 
 // ── Fetch via Overpass (OSM) ──────────────────────────────────────────────────
-async function fetchOverpassStops(geo: GeoResult, radiusDeg = 0.15): Promise<TransitStop[]> {
+async function fetchOverpassStops(geo: GeoResult, radiusDeg = 0.15, retries = 2): Promise<TransitStop[]> {
   const { lat, lng } = geo
   const bbox = `${lat - radiusDeg},${lng - radiusDeg},${lat + radiusDeg},${lng + radiusDeg}`
   const query = `[out:json];node["highway"="bus_stop"](${bbox});out;`
 
-  const res = await fetch('https://overpass-api.de/api/interpreter', {
-    method: 'POST',
-    body: `data=${encodeURIComponent(query)}`,
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    signal: AbortSignal.timeout(10000),
-  })
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 2000 * attempt))
 
-  if (!res.ok) return []
-  const data = await res.json()
-  const elements = data?.elements ?? []
+      const res = await fetch('https://overpass-api.de/api/interpreter', {
+        method: 'POST',
+        body: `data=${encodeURIComponent(query)}`,
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        signal: AbortSignal.timeout(12000),
+      })
 
-  return elements
-    .filter((e: { lat?: number; lon?: number }) => e.lat && e.lon)
-    .map((e: { id: number; lat: number; lon: number; tags?: { name?: string } }) => ({
-      stop_id: String(e.id),
-      stop_name: e.tags?.name ?? 'Bus Stop',
-      lat: e.lat,
-      lng: e.lon,
-    }))
+      if (!res.ok) continue
+      const text = await res.text()
+      if (!text.startsWith('{')) continue // HTML rate limit response
+      const data = JSON.parse(text)
+      const elements = data?.elements ?? []
+
+      return elements
+        .filter((e: { lat?: number; lon?: number }) => e.lat && e.lon)
+        .map((e: { id: number; lat: number; lon: number; tags?: { name?: string } }) => ({
+          stop_id: String(e.id),
+          stop_name: e.tags?.name ?? 'Bus Stop',
+          lat: e.lat,
+          lng: e.lon,
+        }))
+    } catch { continue }
+  }
+
+  return []
 }
 
 // ── Fetch via direct GTFS zip ─────────────────────────────────────────────────

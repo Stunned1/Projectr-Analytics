@@ -1,6 +1,28 @@
 # Projectr-Analytics
 um haha yes!!
 
+## Changelog
+
+### 4.8.2026
+
+- Scaffolded Next.js 16 app with TypeScript, Tailwind CSS, Recharts, Lucide Icons
+- Set up Supabase project with PostGIS — universal `projectr_master_data` table, `zillow_zip_snapshot`, `zillow_metro_snapshot`, and `zip_metro_lookup` tables with RLS policies and upsert constraints
+- Built full data pipeline with 7-day Supabase cache and cold-start fetch logic
+- FRED integration — monthly unemployment rate + real GDP via dynamic series search
+- Census ACS integration — population, median income, gross rent, migration, housing units, vacancy rate, 3yr population growth (2019→2022)
+- HUD/Census B25031 fallback — fair market rents by bedroom (studio through 4BR), with optional HUD API token upgrade path
+- Census BPS integration — building permit counts, units, and construction value (2021–2023) via direct CSV download
+- Zillow Research ingestion script (`npm run ingest:zillow`) — processes 6 CSVs into Supabase: ZORI, ZHVI, ZHVF (zip-level) + Days on Market, Price Cuts, Inventory (metro-level)
+- `zip_metro_lookup` table with `metro_name_short` for metro velocity joins
+- GTFS transit stop fetcher — Overpass API (OSM) for all markets with retry/backoff, direct BT GTFS zip fallback for Blacksburg
+- Google Trends fetcher — city-level search interest with automatic state-level fallback for small markets
+- Census TIGER ZIP boundary API (`/api/boundaries`) — returns GeoJSON polygon for any US zip, 30-day cache
+- API routes: `/api/market`, `/api/transit`, `/api/trends`, `/api/boundaries`, `/api/normalize` (Gemini triage)
+- Basic data visualization UI — stat cards, sparklines, transit stop table, Google Trends sparkline
+- Google Maps + deck.gl map with `GoogleMapsOverlay` (interleaved vector mode), ZIP boundary choropleth colored by ZORI rent, transit stop ScatterplotLayer, layer toggle controls
+- Dev sidebar on map showing every data point with visualization status, layer type, and notes for non-mappable metrics
+- Added containment-based multi-ZIP Radius Underwriter to MVP.txt for future implementation
+
 ## Known Bugs
 
 - **DC Metro velocity null** — Zips in the Washington-Arlington-Alexandria metro return `metro_velocity: null` because the metro name is too long to match the short name stored in `zillow_metro_snapshot`. The `getZillowData` function in `app/api/market/route.ts` needs smarter truncation logic for multi-city metro names.
@@ -38,3 +60,7 @@ Once downloaded, run:
 cd projectr-analytics
 npm run ingest:zillow
 ```
+
+## Deferred
+
+- **Permit Pin Locations (ArcGIS REST)** — Individual building permit pins require a jurisdiction-specific ArcGIS FeatureServer URL (e.g. Montgomery County VA, Prince William County VA). There is no universal national feed. Not feasible for a multi-market tool without a paid aggregator (Regrid, BuildZoom). For now, permit data is shown as county-level counts/values from Census BPS. Revisit if scoping to a single demo market only.

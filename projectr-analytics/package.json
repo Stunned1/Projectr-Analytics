@@ -10,9 +10,14 @@
     "ingest:zillow": "tsx scripts/ingest-zillow.ts"
   },
   "dependencies": {
+    "@deck.gl/google-maps": "^9.2.11",
+    "@deck.gl/layers": "^9.2.11",
+    "@deck.gl/react": "^9.2.11",
     "@google/generative-ai": "^0.24.1",
     "@supabase/supabase-js": "^2.102.1",
+    "@vis.gl/react-google-maps": "^1.8.2",
     "adm-zip": "^0.5.17",
+    "deck.gl": "^9.2.11",
     "google-trends-api": "^4.9.2",
     "lucide-react": "^1.7.0",
     "next": "16.2.2",
