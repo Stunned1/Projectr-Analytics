@@ -1,16 +1,18 @@
 /**
- * Zillow Research CSV Ingestion Script
+ * Zillow CSV Ingestion Script
  *
- * Downloads ZORI (rent index) and ZHVI (home value index) zip-level CSVs
- * from Zillow Research and streams them into Supabase.
+ * Processes all 6 Zillow CSVs from ../zillow-csv's/ and loads them into Supabase.
+ *
+ * What it does:
+ *  - Zip-level (ZORI, ZHVI, ZHVF): computes latest value + 12m growth, upserts into zillow_zip_snapshot
+ *  - Metro-level (Inventory, DoZ, Price Cuts): takes latest value, upserts into zillow_metro_snapshot
+ *  - Builds zip_metro_lookup from the ZORI file (has City, Metro, CountyName columns)
  *
  * Run: npm run ingest:zillow
- *
- * Zillow updates data on the 16th of each month.
- * These CSVs are wide-format: each row = one zip, columns = monthly dates.
- * We pivot them into our long-format universal schema.
  */
 
+import * as fs from 'fs'
+import * as path from 'path'
 import * as dotenv from 'dotenv'
 import { createClient } from '@supabase/supabase-js'
 
@@ -21,117 +23,302 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
-// Zillow Research public CSV URLs (zip-level, updated monthly)
-const ZILLOW_SOURCES = [
-  {
-    url: 'https://files.zillowstatic.com/research/public_csvs/zori/Zip_zori_uc_sfrcondomfr_sm_month.csv',
-    metric: 'ZORI_Rent_Index',
-    description: 'Zillow Observed Rent Index by ZIP',
-  },
-  {
-    url: 'https://files.zillowstatic.com/research/public_csvs/zhvi/Zip_zhvi_uc_sfrcondo_tier_0.33_0.67_sm_sa_month.csv',
-    metric: 'ZHVI_Home_Value',
-    description: 'Zillow Home Value Index by ZIP',
-  },
-]
+const CSV_DIR = path.resolve(__dirname, '../../zillow-csv\'s')
+const BATCH_SIZE = 500
 
-const BATCH_SIZE = 500 // Supabase insert batch size
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-async function ingestSource(source: typeof ZILLOW_SOURCES[0]) {
-  console.log(`\nFetching: ${source.description}`)
-  console.log(`URL: ${source.url}`)
-
-  const res = await fetch(source.url)
-  if (!res.ok) {
-    console.error(`Failed to fetch ${source.url}: ${res.status}`)
-    return
-  }
-
-  const text = await res.text()
+function parseCSV(filePath: string): { headers: string[]; rows: string[][] } {
+  const text = fs.readFileSync(filePath, 'utf-8')
   const lines = text.split('\n').filter(Boolean)
   const headers = lines[0].split(',').map((h) => h.trim().replace(/"/g, ''))
+  const rows = lines.slice(1).map((l) => l.split(',').map((c) => c.trim().replace(/"/g, '')))
+  return { headers, rows }
+}
 
-  // Zillow CSV columns: RegionID, SizeRank, RegionName (zip), RegionType, StateName, State, City, Metro, CountyName, [date columns...]
-  const zipIdx = headers.findIndex((h) => h === 'RegionName')
-  const stateIdx = headers.findIndex((h) => h === 'State')
-  const cityIdx = headers.findIndex((h) => h === 'City')
-
-  if (zipIdx < 0) {
-    console.error('Could not find RegionName column')
-    return
-  }
-
-  // Date columns start after the metadata columns (anything that looks like YYYY-MM-DD)
-  const dateColumns = headers
+function getDateCols(headers: string[]): { header: string; idx: number }[] {
+  return headers
     .map((h, i) => ({ header: h, idx: i }))
     .filter(({ header }) => /^\d{4}-\d{2}-\d{2}$/.test(header))
+}
 
-  console.log(`Found ${dateColumns.length} date columns, ${lines.length - 1} zip rows`)
+function latestValue(row: string[], dateCols: { idx: number }[]): number | null {
+  // Walk backwards to find the most recent non-empty value
+  for (let i = dateCols.length - 1; i >= 0; i--) {
+    const v = parseFloat(row[dateCols[i].idx])
+    if (!isNaN(v)) return v
+  }
+  return null
+}
 
-  // Only ingest the last 36 months to keep DB lean
-  const recentDates = dateColumns.slice(-36)
+function latestDate(row: string[], dateCols: { header: string; idx: number }[]): string | null {
+  for (let i = dateCols.length - 1; i >= 0; i--) {
+    const v = parseFloat(row[dateCols[i].idx])
+    if (!isNaN(v)) return dateCols[i].header
+  }
+  return null
+}
 
-  let totalInserted = 0
-  let batch: object[] = []
+function growth12m(row: string[], dateCols: { idx: number }[]): number | null {
+  if (dateCols.length < 13) return null
+  const recent = parseFloat(row[dateCols[dateCols.length - 1].idx])
+  // Find a valid value ~12 months back
+  for (let i = dateCols.length - 13; i >= Math.max(0, dateCols.length - 15); i--) {
+    const old = parseFloat(row[dateCols[i].idx])
+    if (!isNaN(old) && old > 0 && !isNaN(recent)) {
+      return parseFloat((((recent - old) / old) * 100).toFixed(2))
+    }
+  }
+  return null
+}
 
-  for (const line of lines.slice(1)) {
-    const cols = line.split(',').map((c) => c.trim().replace(/"/g, ''))
-    const zip = cols[zipIdx]
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-    // Skip non-zip or invalid rows
+async function upsertBatch<T extends object>(table: string, batch: T[], retries = 3) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    const { error } = await supabase.from(table).upsert(batch as never[], { ignoreDuplicates: false })
+    if (!error) return
+    if (attempt < retries) {
+      await sleep(1000 * attempt) // 1s, 2s backoff
+    } else {
+      console.error(`  ✗ Batch error on ${table} (gave up after ${retries} attempts):`, error.message)
+    }
+  }
+}
+
+// ── ZIP-LEVEL: ZORI ───────────────────────────────────────────────────────────
+
+async function ingestZori() {
+  console.log('\n📊 ZORI (Rent Index) — zip level')
+  const { headers, rows } = parseCSV(path.join(CSV_DIR, 'Zip_zori_uc_sfrcondomfr_sm_month.csv'))
+  const dateCols = getDateCols(headers)
+  const zipIdx = headers.indexOf('RegionName')
+  const cityIdx = headers.indexOf('City')
+  const metroIdx = headers.indexOf('Metro')
+  const countyIdx = headers.indexOf('CountyName')
+  const stateIdx = headers.indexOf('State')
+  const regionIdIdx = headers.indexOf('RegionID')
+
+  const snapshots: object[] = []
+  const lookups: object[] = []
+
+  for (const row of rows) {
+    const zip = row[zipIdx]
     if (!zip || !/^\d{5}$/.test(zip)) continue
 
-    for (const { header: date, idx } of recentDates) {
-      const raw = cols[idx]
-      if (!raw || raw === '') continue
-      const value = parseFloat(raw)
-      if (isNaN(value)) continue
+    const latest = latestValue(row, dateCols)
+    const asOf = latestDate(row, dateCols)
+    const growth = growth12m(row, dateCols)
 
-      batch.push({
-        submarket_id: zip,
-        geometry: null,
-        metric_name: source.metric,
-        metric_value: value,
-        time_period: date,
-        data_source: 'Zillow Research',
-        visual_bucket: 'TIME_SERIES',
+    snapshots.push({
+      zip,
+      zori_latest: latest,
+      zori_growth_12m: growth,
+      as_of_date: asOf,
+    })
+
+    // Build lookup entry
+    const metro = row[metroIdx] ?? null
+    const regionId = row[regionIdIdx] ?? null
+    if (metro) {
+      lookups.push({
+        zip,
+        metro_region_id: regionId,
+        metro_name: metro,
+        state: row[stateIdx] ?? null,
+        city: row[cityIdx] ?? null,
+        county_name: row[countyIdx] ?? null,
       })
+    }
 
-      if (batch.length >= BATCH_SIZE) {
-        const { error } = await supabase.from('projectr_master_data').upsert(batch as never[], {
-          onConflict: 'submarket_id,metric_name,time_period,data_source',
-          ignoreDuplicates: false,
-        })
-        if (error) console.error('Batch insert error:', error.message)
-        else totalInserted += batch.length
-        process.stdout.write(`\r  Inserted: ${totalInserted} rows...`)
-        batch = []
-      }
+    if (snapshots.length >= BATCH_SIZE) {
+      await upsertBatch('zillow_zip_snapshot', snapshots.splice(0))
+      await sleep(200)
+      process.stdout.write('.')
+    }
+    if (lookups.length >= BATCH_SIZE) {
+      await upsertBatch('zip_metro_lookup', lookups.splice(0))
+      await sleep(200)
     }
   }
 
-  // Flush remaining
-  if (batch.length > 0) {
-    const { error } = await supabase.from('projectr_master_data').upsert(batch as never[], {
-      onConflict: 'submarket_id,metric_name,time_period,data_source',
-      ignoreDuplicates: false,
-    })
-    if (error) console.error('Final batch error:', error.message)
-    else totalInserted += batch.length
-  }
-
-  console.log(`\n  Done. Total rows inserted: ${totalInserted}`)
+  if (snapshots.length) await upsertBatch('zillow_zip_snapshot', snapshots)
+  if (lookups.length) await upsertBatch('zip_metro_lookup', lookups)
+  console.log(`\n  ✓ Done`)
 }
 
-async function main() {
-  console.log('=== Zillow Research Ingestion ===')
-  console.log(`Supabase: ${process.env.NEXT_PUBLIC_SUPABASE_URL}`)
+// ── ZIP-LEVEL: ZHVI ───────────────────────────────────────────────────────────
 
-  for (const source of ZILLOW_SOURCES) {
-    await ingestSource(source)
+async function ingestZhvi() {
+  console.log('\n🏠 ZHVI (Home Value Index) — zip level')
+  const { headers, rows } = parseCSV(path.join(CSV_DIR, 'Zip_zhvi_uc_sfrcondo_tier_0.33_0.67_sm_sa_month.csv'))
+  const dateCols = getDateCols(headers)
+  const zipIdx = headers.indexOf('RegionName')
+
+  const snapshots: object[] = []
+
+  for (const row of rows) {
+    const zip = row[zipIdx]
+    if (!zip || !/^\d{5}$/.test(zip)) continue
+
+    snapshots.push({
+      zip,
+      zhvi_latest: latestValue(row, dateCols),
+      zhvi_growth_12m: growth12m(row, dateCols),
+      as_of_date: latestDate(row, dateCols),
+    })
+
+    if (snapshots.length >= BATCH_SIZE) {
+      await upsertBatch('zillow_zip_snapshot', snapshots.splice(0))
+      await sleep(200)
+      process.stdout.write('.')
+    }
   }
 
-  console.log('\n=== Ingestion complete ===')
+  if (snapshots.length) await upsertBatch('zillow_zip_snapshot', snapshots)
+  console.log(`\n  ✓ Done`)
+}
+
+// ── ZIP-LEVEL: ZHVF (forecast growth) ────────────────────────────────────────
+
+async function ingestZhvf() {
+  console.log('\n📈 ZHVF (Home Value Forecast) — zip level')
+  const { headers, rows } = parseCSV(path.join(CSV_DIR, 'Zip_zhvf_growth_uc_sfrcondo_tier_0.33_0.67_sm_sa_month.csv'))
+  const dateCols = getDateCols(headers)
+  const zipIdx = headers.indexOf('RegionName')
+
+  const snapshots: object[] = []
+
+  for (const row of rows) {
+    const zip = row[zipIdx]
+    if (!zip || !/^\d{5}$/.test(zip)) continue
+
+    // ZHVF is already a growth % — take the latest 1yr forecast column
+    const latest = latestValue(row, dateCols)
+
+    snapshots.push({
+      zip,
+      zhvf_growth_1yr: latest !== null ? parseFloat((latest * 100).toFixed(2)) : null,
+      as_of_date: latestDate(row, dateCols),
+    })
+
+    if (snapshots.length >= BATCH_SIZE) {
+      await upsertBatch('zillow_zip_snapshot', snapshots.splice(0))
+      await sleep(200)
+      process.stdout.write('.')
+    }
+  }
+
+  if (snapshots.length) await upsertBatch('zillow_zip_snapshot', snapshots)
+  console.log(`\n  ✓ Done`)
+}
+
+// ── METRO-LEVEL: Days on Market ───────────────────────────────────────────────
+
+async function ingestDoz() {
+  console.log('\n⏱  Days on Market — metro level')
+  const { headers, rows } = parseCSV(path.join(CSV_DIR, 'Metro_mean_doz_pending_uc_sfrcondo_sm_month.csv'))
+  const dateCols = getDateCols(headers)
+  const regionIdIdx = headers.indexOf('RegionID')
+  const regionNameIdx = headers.indexOf('RegionName')
+  const stateIdx = headers.indexOf('StateName')
+
+  const snapshots: object[] = []
+
+  for (const row of rows) {
+    const regionId = row[regionIdIdx]
+    const regionName = row[regionNameIdx]
+    if (!regionId || !regionName) continue
+
+    snapshots.push({
+      region_id: regionId,
+      region_name: regionName,
+      state_name: row[stateIdx] ?? null,
+      doz_pending_latest: latestValue(row, dateCols),
+      as_of_date: latestDate(row, dateCols),
+    })
+  }
+
+  if (snapshots.length) await upsertBatch('zillow_metro_snapshot', snapshots)
+  console.log(`  ✓ ${snapshots.length} metros`)
+}
+
+// ── METRO-LEVEL: Price Cuts ───────────────────────────────────────────────────
+
+async function ingestPriceCuts() {
+  console.log('\n✂️  Price Cuts — metro level')
+  const { headers, rows } = parseCSV(path.join(CSV_DIR, 'Metro_perc_listings_price_cut_uc_sfrcondo_sm_month.csv'))
+  const dateCols = getDateCols(headers)
+  const regionIdIdx = headers.indexOf('RegionID')
+  const regionNameIdx = headers.indexOf('RegionName')
+  const stateIdx = headers.indexOf('StateName')
+
+  const snapshots: object[] = []
+
+  for (const row of rows) {
+    const regionId = row[regionIdIdx]
+    const regionName = row[regionNameIdx]
+    if (!regionId || !regionName) continue
+
+    const latest = latestValue(row, dateCols)
+    snapshots.push({
+      region_id: regionId,
+      region_name: regionName,
+      state_name: row[stateIdx] ?? null,
+      price_cut_pct_latest: latest !== null ? parseFloat((latest * 100).toFixed(2)) : null,
+      as_of_date: latestDate(row, dateCols),
+    })
+  }
+
+  if (snapshots.length) await upsertBatch('zillow_metro_snapshot', snapshots)
+  console.log(`  ✓ ${snapshots.length} metros`)
+}
+
+// ── METRO-LEVEL: Inventory ────────────────────────────────────────────────────
+
+async function ingestInventory() {
+  console.log('\n📦 Inventory — metro level')
+  const { headers, rows } = parseCSV(path.join(CSV_DIR, 'Metro_invt_fs_uc_sfrcondo_sm_month.csv'))
+  const dateCols = getDateCols(headers)
+  const regionIdIdx = headers.indexOf('RegionID')
+  const regionNameIdx = headers.indexOf('RegionName')
+  const stateIdx = headers.indexOf('StateName')
+
+  const snapshots: object[] = []
+
+  for (const row of rows) {
+    const regionId = row[regionIdIdx]
+    const regionName = row[regionNameIdx]
+    if (!regionId || !regionName) continue
+
+    snapshots.push({
+      region_id: regionId,
+      region_name: regionName,
+      state_name: row[stateIdx] ?? null,
+      inventory_latest: latestValue(row, dateCols),
+      as_of_date: latestDate(row, dateCols),
+    })
+  }
+
+  if (snapshots.length) await upsertBatch('zillow_metro_snapshot', snapshots)
+  console.log(`  ✓ ${snapshots.length} metros`)
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
+
+async function main() {
+  console.log('=== Zillow CSV Ingestion ===')
+  console.log(`Source: ${CSV_DIR}`)
+  console.log(`Supabase: ${process.env.NEXT_PUBLIC_SUPABASE_URL}`)
+
+  await ingestZori()   // zip snapshots + lookup table
+  await ingestZhvi()   // zip snapshots (home values)
+  await ingestZhvf()   // zip snapshots (forecast)
+  await ingestDoz()    // metro snapshots (days on market)
+  await ingestPriceCuts() // metro snapshots (price cuts)
+  await ingestInventory() // metro snapshots (inventory)
+
+  console.log('\n=== All done ===')
 }
 
 main().catch(console.error)

@@ -50,6 +50,8 @@ export function transformCensusData(
     B19013_001E: 'Median_Household_Income',
     B25064_001E: 'Median_Gross_Rent',
     B07003_004E: 'Moved_From_Different_State',
+    B25002_001E: 'Total_Housing_Units',
+    B25002_003E: 'Vacant_Units',
   }
   return Object.entries(variables)
     .filter(([key]) => metricMap[key] && variables[key] !== null)
