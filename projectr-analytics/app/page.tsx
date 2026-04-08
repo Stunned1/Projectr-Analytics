@@ -10,6 +10,24 @@ interface DataRow {
   visual_bucket: string
 }
 
+interface TransitData {
+  stop_count: number
+  geojson: {
+    features: Array<{
+      properties: { stop_id: string; stop_name: string }
+      geometry: { coordinates: [number, number] }
+    }>
+  }
+}
+
+interface TrendsData {
+  is_fallback: boolean
+  keyword_scope: string
+  latest_score: number | null
+  data_points: number
+  series: Array<{ date: string; value: number }>
+}
+
 interface MarketData {
   zip: string
   cached: boolean
@@ -83,6 +101,8 @@ export default function Home() {
   const [zip, setZip] = useState('')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<MarketData | null>(null)
+  const [transit, setTransit] = useState<TransitData | null>(null)
+  const [trends, setTrends] = useState<TrendsData | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   async function fetchMarket(e: React.FormEvent) {
@@ -91,11 +111,21 @@ export default function Home() {
     setLoading(true)
     setError(null)
     setResult(null)
+    setTransit(null)
+    setTrends(null)
     try {
-      const res = await fetch(`/api/market?zip=${zip}`)
-      const data = await res.json()
+      const [marketRes, transitRes, trendsRes] = await Promise.all([
+        fetch(`/api/market?zip=${zip}`),
+        fetch(`/api/transit?zip=${zip}`),
+        fetch(`/api/trends?zip=${zip}`),
+      ])
+      const data = await marketRes.json()
+      const transitData = await transitRes.json()
+      const trendsData = await trendsRes.json()
       if (data.error) { setError(data.error); return }
       setResult(data)
+      if (!transitData.error) setTransit(transitData)
+      if (!trendsData.error) setTrends(trendsData)
     } catch {
       setError('Failed to fetch data')
     } finally {
@@ -276,6 +306,84 @@ export default function Home() {
                     </div>
                   )
                 })}
+              </Section>
+            )}
+
+            {/* Transit stops */}
+            {transit && (
+              <Section title={`Transit Connectivity (GTFS / OpenStreetMap)`}>
+                <div className="grid grid-cols-1 gap-3">
+                  <StatCard
+                    label="Transit Stops Nearby"
+                    value={transit.stop_count.toLocaleString()}
+                    sub={transit.stop_count > 0 ? 'Bus stops within ~10 mile radius' : 'No stops found'}
+                  />
+                </div>
+                {transit.stop_count > 0 && (
+                  <div className="mt-3 bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-zinc-800">
+                          <th className="text-left text-zinc-500 px-4 py-2 font-normal">Stop Name</th>
+                          <th className="text-right text-zinc-500 px-4 py-2 font-normal">Coordinates</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {transit.geojson.features.slice(0, 10).map((f) => (
+                          <tr key={f.properties.stop_id} className="border-b border-zinc-800/50 last:border-0">
+                            <td className="px-4 py-2 text-zinc-300">{f.properties.stop_name}</td>
+                            <td className="px-4 py-2 text-zinc-500 text-right font-mono">
+                              {f.geometry.coordinates[1].toFixed(4)}, {f.geometry.coordinates[0].toFixed(4)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {transit.stop_count > 10 && (
+                      <p className="text-zinc-600 text-xs px-4 py-2">
+                        +{transit.stop_count - 10} more stops
+                      </p>
+                    )}
+                  </div>
+                )}
+              </Section>
+            )}
+
+            {/* Google Trends search sentiment */}
+            {trends && trends.data_points > 0 && (
+              <Section title="Search Sentiment (Google Trends)">
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <StatCard
+                    label="Latest Interest Score"
+                    value={trends.latest_score != null ? `${trends.latest_score} / 100` : '—'}
+                    sub={trends.keyword_scope}
+                  />
+                  <StatCard
+                    label="Data Scope"
+                    value={trends.is_fallback ? 'State-level' : 'City-level'}
+                    sub={trends.is_fallback ? 'Local volume too low, using state proxy' : 'Direct local search data'}
+                  />
+                </div>
+                {trends.series.length > 1 && (
+                  <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
+                    <p className="text-zinc-400 text-xs uppercase tracking-widest mb-3">
+                      Search Interest Over Time
+                    </p>
+                    <div className="flex items-end gap-0.5 h-12">
+                      {trends.series.map((p, i) => (
+                        <div
+                          key={i}
+                          title={`${p.date?.slice(0, 10)}: ${p.value}`}
+                          className="flex-1 bg-blue-600 rounded-sm opacity-80"
+                          style={{ height: `${Math.max(p.value, 4)}%` }}
+                        />
+                      ))}
+                    </div>
+                    <p className="text-zinc-600 text-xs mt-2">
+                      {trends.series[0]?.date?.slice(0, 7)} → {trends.series.at(-1)?.date?.slice(0, 7)}
+                    </p>
+                  </div>
+                )}
               </Section>
             )}
 
