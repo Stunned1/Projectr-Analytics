@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { APIProvider, Map, useMap } from '@vis.gl/react-google-maps'
 import { GoogleMapsOverlay } from '@deck.gl/google-maps'
 import { GeoJsonLayer, ScatterplotLayer } from '@deck.gl/layers'
@@ -63,13 +63,27 @@ function rentToColor(value: number | null): [number, number, number, number] {
   return [Math.round(t * 220), Math.round((1 - t) * 80), Math.round((1 - t) * 220), 160]
 }
 
-// ── DeckGL overlay (must be inside <Map>) ─────────────────────────────────────
+// ── Map panner — pans imperatively when zip changes ──────────────────────────
+function MapPanner({ center, zoom, zip }: { center: { lat: number; lng: number }; zoom: number; zip: string | null }) {
+  const map = useMap()
+  const lastZip = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!map || !zip || zip === lastZip.current) return
+    lastZip.current = zip
+    map.panTo(center)
+    map.setZoom(zoom)
+  }, [map, center, zoom, zip])
+
+  return null
+}
 
 function DeckGlOverlay({ layers }: { layers: Layer[] }) {
   const deck = useMemo(() => new GoogleMapsOverlay({ interleaved: true }), [])
   const map = useMap()
 
   useEffect(() => {
+    if (!map) return
     deck.setMap(map)
     return () => deck.setMap(null)
   }, [map, deck])
@@ -80,6 +94,8 @@ function DeckGlOverlay({ layers }: { layers: Layer[] }) {
 
   return null
 }
+
+// ── DeckGL overlay (must be inside <Map>) ─────────────────────────────────────
 
 // ── Main component ────────────────────────────────────────────────────────────
 
@@ -192,14 +208,15 @@ export default function CommandMap({ zip, marketData }: CommandMapProps) {
     <div className="relative w-full h-full">
       <APIProvider apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY!}>
         <Map
-          mapId={process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID ?? process.env.NEXT_PUBLIC_GOOGLE_MAPS_ID ?? ''}
-          center={center}
-          zoom={zoom}
+          mapId={process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID ?? ''}
+          defaultCenter={center}
+          defaultZoom={zoom}
           colorScheme="DARK"
           disableDefaultUI={false}
           gestureHandling="greedy"
           style={{ width: '100%', height: '100%' }}
         >
+          <MapPanner center={center} zoom={zoom} zip={zip} />
           <DeckGlOverlay layers={deckLayers} />
         </Map>
       </APIProvider>

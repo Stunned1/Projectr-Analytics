@@ -22,6 +22,7 @@ um haha yes!!
 - Google Maps + deck.gl map with `GoogleMapsOverlay` (interleaved vector mode), ZIP boundary choropleth colored by ZORI rent, transit stop ScatterplotLayer, layer toggle controls
 - Dev sidebar on map showing every data point with visualization status, layer type, and notes for non-mappable metrics
 - Added containment-based multi-ZIP Radius Underwriter to MVP.txt for future implementation
+- Fixed Google Maps drag/movement snapping back to original position
 
 ## Known Bugs
 
