@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "ingest:zillow": "tsx scripts/ingest-zillow.ts"
+    "ingest:zillow": "tsx scripts/ingest-zillow.ts",
+    "populate:centroids": "tsx scripts/populate-centroids.ts"
   },
   "dependencies": {
     "@deck.gl/google-maps": "^9.2.11",
