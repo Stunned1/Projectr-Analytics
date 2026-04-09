@@ -39,6 +39,7 @@ HUD_API_TOKEN                    # optional, falls back to Census ACS rent data
 ## Changelog
 
 **Data Pipeline**
+
 _4.8.2026_
 - Set up Supabase project with PostGIS — universal `projectr_master_data` table, `zillow_zip_snapshot`, `zillow_metro_snapshot`, and `zip_metro_lookup` tables with RLS policies and upsert constraints
 - FRED integration — monthly unemployment rate + real GDP via dynamic series search
@@ -54,12 +55,14 @@ _4.8.2026_
 - Neighbor proximity API (`/api/neighbors`) — returns 20 closest ZIPs in same metro sorted by geographic distance
 
 **Infrastructure**
+
 _4.8.2026_
 - Scaffolded Next.js 16 app with TypeScript, Tailwind CSS, Recharts, Lucide Icons
 - Built full data pipeline with 7-day Supabase cache and cold-start fetch logic
 - API routes: `/api/market`, `/api/transit`, `/api/trends`, `/api/boundaries`, `/api/neighbors`, `/api/normalize` (Gemini triage)
 
 **Map & Visualization**
+
 _4.8.2026_
 - Google Maps + deck.gl map with `GoogleMapsOverlay` (interleaved vector mode)
 - ZIP boundary choropleth colored by ZORI rent, normalized across all loaded ZIPs for relative contrast
@@ -71,6 +74,7 @@ _4.8.2026_
 - Fixed Google Maps drag/movement snapping back to original position
 
 **UI**
+
 _4.8.2026_
 - Basic data visualization page — stat cards, sparklines, transit stop table, Google Trends sparkline
 - Search bar with zip validation
