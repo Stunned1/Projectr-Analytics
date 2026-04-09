@@ -148,12 +148,18 @@ function DeckGlOverlay({ layers }: { layers: Layer[] }) {
   useEffect(() => {
     if (!map) return
     if (attachedMapRef.current === map && isAttachedRef.current) return
-    deck.setMap(map)
-    attachedMapRef.current = map
-    isAttachedRef.current = true
+    // Small delay to ensure map is fully initialized before attaching overlay
+    const timer = setTimeout(() => {
+      try {
+        deck.setMap(map)
+        attachedMapRef.current = map
+        isAttachedRef.current = true
+      } catch { /* map not ready */ }
+    }, 100)
     return () => {
+      clearTimeout(timer)
       if (attachedMapRef.current === map && isAttachedRef.current) {
-        deck.setMap(null)
+        try { deck.setMap(null) } catch { /* ignore */ }
         attachedMapRef.current = null
         isAttachedRef.current = false
       }
@@ -162,7 +168,7 @@ function DeckGlOverlay({ layers }: { layers: Layer[] }) {
 
   useEffect(() => {
     if (!map || !isAttachedRef.current) return
-    deck.setProps({ layers })
+    try { deck.setProps({ layers }) } catch { /* ignore */ }
   }, [layers, deck, map])
 
   return null
