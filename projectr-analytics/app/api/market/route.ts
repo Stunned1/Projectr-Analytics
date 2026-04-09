@@ -59,7 +59,12 @@ export async function GET(request: NextRequest) {
 
     if (cached && cached.length > 0) {
       const { zillow, metro_velocity } = await getZillowData(zip)
-      return NextResponse.json({ zip, cached: true, data: cached, zillow, metro_velocity })
+      // Still geocode so the client gets geo + FIPS for map layers
+      const geo = await geocodeZip(zip)
+      return NextResponse.json({
+        zip, cached: true, data: cached, zillow, metro_velocity,
+        geo: geo ? { lat: geo.lat, lng: geo.lng, city: geo.city, state: geo.state, stateFips: geo.stateFips, countyFips: geo.countyFips } : undefined,
+      })
     }
 
     // Step 2: Geocode
@@ -88,7 +93,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       zip,
       cached: false,
-      geo: { lat: geo.lat, lng: geo.lng, city: geo.city, state: geo.state },
+      geo: { lat: geo.lat, lng: geo.lng, city: geo.city, state: geo.state, stateFips: geo.stateFips, countyFips: geo.countyFips },
       data: allRows,
       zillow,
       metro_velocity,

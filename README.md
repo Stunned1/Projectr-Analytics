@@ -39,6 +39,7 @@ HUD_API_TOKEN                    # optional, falls back to Census ACS rent data
 ## Changelog
 
 **Data Pipeline**
+
 _4.8.2026_
 - Set up Supabase project with PostGIS — universal `projectr_master_data` table, `zillow_zip_snapshot`, `zillow_metro_snapshot`, and `zip_metro_lookup` tables with RLS policies and upsert constraints
 - FRED integration — monthly unemployment rate + real GDP via dynamic series search
@@ -53,13 +54,20 @@ _4.8.2026_
 - Populated lat/lng centroids for 7,661 ZIPs in `zip_metro_lookup` via zippopotam + Census geocoder fallback
 - Neighbor proximity API (`/api/neighbors`) — returns 20 closest ZIPs in same metro sorted by geographic distance
 
+_4.9.2026_
+- Added Census block group API (`/api/blockgroups`) — sub-ZIP boundaries + population density from Census TIGER + ACS
+- Added OSM buildings API (`/api/buildings`) — building footprints with floor count via Overpass
+- Market API now returns `stateFips` and `countyFips` in geo object
+
 **Infrastructure**
+
 _4.8.2026_
 - Scaffolded Next.js 16 app with TypeScript, Tailwind CSS, Recharts, Lucide Icons
 - Built full data pipeline with 7-day Supabase cache and cold-start fetch logic
 - API routes: `/api/market`, `/api/transit`, `/api/trends`, `/api/boundaries`, `/api/neighbors`, `/api/normalize` (Gemini triage)
 
 **Map & Visualization**
+
 _4.8.2026_
 - Google Maps + deck.gl map with `GoogleMapsOverlay` (interleaved vector mode)
 - ZIP boundary choropleth colored by ZORI rent, normalized across all loaded ZIPs for relative contrast
@@ -70,7 +78,16 @@ _4.8.2026_
 - Map auto-fits to ZIP boundary polygon on search using `fitBounds`
 - Fixed Google Maps drag/movement snapping back to original position
 
+_4.9.2026_
+- Added Census block group sub-ZIP choropleth layer (population density, ~64 polygons per county)
+- Added OSM building footprints — 3D extruded `PolygonLayer` colored by building type
+- Layer panel now includes Block Groups and 3D Buildings toggles (off by default)
+- Added NYC PLUTO parcel `ColumnLayer` — 3D columns per parcel, height = assessed value/sqft, color = land use (NYC ZIPs only)
+- Block groups layer now auto-disables ZIP choropleth fill to prevent visual overlap
+- Fixed cached market responses missing `geo`/`stateFips`/`countyFips` — buildings and block groups now load correctly from cache
+
 **UI**
+
 _4.8.2026_
 - Basic data visualization page — stat cards, sparklines, transit stop table, Google Trends sparkline
 - Search bar with zip validation
