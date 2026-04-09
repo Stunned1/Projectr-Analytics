@@ -8,6 +8,7 @@
 
 import * as dotenv from 'dotenv'
 import { createClient } from '@supabase/supabase-js'
+import { geocodeZip } from '../lib/geocoder'
 
 dotenv.config({ path: '.env.local' })
 
@@ -17,39 +18,6 @@ const supabase = createClient(
 )
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-
-async function geocodeZip(zip: string): Promise<{ lat: number; lng: number } | null> {
-  // Try zippopotam first
-  try {
-    const res = await fetch(`https://api.zippopotam.us/us/${zip}`)
-    if (res.status === 404) {
-      // Don't retry 404s — fall through to Census fallback
-    } else if (res.ok) {
-      const data = await res.json()
-      const place = data.places?.[0]
-      if (place) {
-        return { lat: parseFloat(place.latitude), lng: parseFloat(place.longitude) }
-      }
-    } else if (res.status === 429) {
-      await sleep(3000)
-    }
-  } catch { /* fall through */ }
-
-  // Fallback: Census geocoder (handles ZIPs zippopotam misses)
-  try {
-    const res = await fetch(
-      `https://geocoding.geo.census.gov/geocoder/locations/address?street=1+Main+St&zip=${zip}&benchmark=Public_AR_Current&format=json`
-    )
-    if (!res.ok) return null
-    const data = await res.json()
-    const match = data?.result?.addressMatches?.[0]
-    if (match?.coordinates) {
-      return { lat: match.coordinates.y, lng: match.coordinates.x }
-    }
-  } catch { /* fall through */ }
-
-  return null
-}
 
 async function main() {
   console.log('=== Populating ZIP centroids ===')
@@ -71,12 +39,12 @@ async function main() {
 
   for (let i = 0; i < rows.length; i++) {
     const { zip } = rows[i]
-    const coords = await geocodeZip(zip)
+    const geo = await geocodeZip(zip)
 
-    if (coords) {
+    if (geo) {
       const { error: updateError } = await supabase
         .from('zip_metro_lookup')
-        .update({ lat: coords.lat, lng: coords.lng })
+        .update({ lat: geo.lat, lng: geo.lng })
         .eq('zip', zip)
 
       if (updateError) {

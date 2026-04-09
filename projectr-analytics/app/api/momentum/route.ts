@@ -17,6 +17,8 @@ interface ZipScore {
   }
 }
 
+const PERMIT_METRICS = ['Permit_Units', 'Permit_Buildings', 'Permit_Count'] as const
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
@@ -34,19 +36,26 @@ export async function POST(request: NextRequest) {
     // Pull relevant metrics for all requested zips
     const { data, error } = await supabase
       .from('projectr_master_data')
-      .select('submarket_id, metric_name, metric_value')
+      .select('submarket_id, metric_name, metric_value, created_at')
       .in('submarket_id', zips)
-      .in('metric_name', ['Unemployment_Rate', 'Median_Gross_Rent', 'Permit_Count'])
+      .in('metric_name', ['Unemployment_Rate', 'Median_Gross_Rent', ...PERMIT_METRICS])
+      .order('created_at', { ascending: true })
 
     if (error) throw new Error(error.message)
 
-    // Aggregate latest value per zip per metric
-    const byZip: Record<string, Record<string, number[]>> = {}
+    // Aggregate latest value per zip per metric using created_at.
+    const byZip: Record<string, Record<string, { value: number; created_at: string }>> = {}
     for (const row of data ?? []) {
       const z = row.submarket_id!
       if (!byZip[z]) byZip[z] = {}
-      if (!byZip[z][row.metric_name]) byZip[z][row.metric_name] = []
-      if (row.metric_value !== null) byZip[z][row.metric_name].push(row.metric_value)
+      if (row.metric_value === null) continue
+      const existing = byZip[z][row.metric_name]
+      if (!existing || row.created_at > existing.created_at) {
+        byZip[z][row.metric_name] = {
+          value: row.metric_value,
+          created_at: row.created_at,
+        }
+      }
     }
 
     // Normalize weights to sum to 1
@@ -61,10 +70,14 @@ export async function POST(request: NextRequest) {
     const rawScores = zips.map((zip) => {
       const metrics = byZip[zip] ?? {}
       // Lower unemployment = better job market → invert
-      const unemployment = metrics['Unemployment_Rate']?.at(-1) ?? null
+      const unemployment = metrics['Unemployment_Rate']?.value ?? null
       const jobScore = unemployment !== null ? Math.max(0, 100 - unemployment * 10) : null
-      const rent = metrics['Median_Gross_Rent']?.at(-1) ?? null
-      const permits = metrics['Permit_Count']?.at(-1) ?? null
+      const rent = metrics['Median_Gross_Rent']?.value ?? null
+      const permits =
+        metrics['Permit_Units']?.value ??
+        metrics['Permit_Buildings']?.value ??
+        metrics['Permit_Count']?.value ??
+        null
 
       return { zip, jobScore, rent, permits }
     })
@@ -72,11 +85,13 @@ export async function POST(request: NextRequest) {
     // Min-max normalize rent and permits across the set
     const rents = rawScores.map((r) => r.rent).filter((v): v is number => v !== null)
     const permits = rawScores.map((r) => r.permits).filter((v): v is number => v !== null)
-    const minRent = Math.min(...rents), maxRent = Math.max(...rents)
-    const minPermit = Math.min(...permits), maxPermit = Math.max(...permits)
+    const minRent = rents.length > 0 ? Math.min(...rents) : NaN
+    const maxRent = rents.length > 0 ? Math.max(...rents) : NaN
+    const minPermit = permits.length > 0 ? Math.min(...permits) : NaN
+    const maxPermit = permits.length > 0 ? Math.max(...permits) : NaN
 
     const normalize = (val: number | null, min: number, max: number) => {
-      if (val === null || max === min) return null
+      if (val === null || !Number.isFinite(min) || !Number.isFinite(max) || max === min) return null
       return ((val - min) / (max - min)) * 100
     }
 

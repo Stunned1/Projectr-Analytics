@@ -5,6 +5,7 @@ import { APIProvider, Map, useMap } from '@vis.gl/react-google-maps'
 import { GoogleMapsOverlay } from '@deck.gl/google-maps'
 import { GeoJsonLayer, ScatterplotLayer } from '@deck.gl/layers'
 import type { Layer, PickingInfo } from '@deck.gl/core'
+import type { GeoJSON } from 'geojson'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -19,6 +20,16 @@ interface TransitStop {
   name: string
 }
 
+interface TransitData {
+  zip: string
+  geojson: {
+    features: Array<{
+      geometry: { coordinates: [number, number] }
+      properties: { stop_name: string }
+    }>
+  }
+}
+
 interface NeighborZip {
   zip: string
   zori_latest: number | null
@@ -28,8 +39,9 @@ interface NeighborZip {
 
 interface ZipBoundary {
   zip: string
-  geojson: object
+  geojson: GeoJSON
   zori: number | null
+  zhvi: number | null
 }
 
 interface LayerState {
@@ -44,9 +56,9 @@ const DATA_LAYER_REGISTRY = [
   { label: 'ZIP Boundary', source: 'Census TIGER', visualized: true, layerType: 'GeoJsonLayer (outline)' },
   { label: 'ZORI Rent Index', source: 'Zillow Research', visualized: true, layerType: 'GeoJsonLayer (choropleth — multi-ZIP)' },
   { label: 'Transit Stops', source: 'GTFS / OSM', visualized: true, layerType: 'ScatterplotLayer (cyan dots)' },
-  { label: 'ZHVI Home Value', source: 'Zillow Research', visualized: true, layerType: 'GeoJsonLayer (choropleth fill)' },
-  { label: 'Vacancy Rate', source: 'Census ACS', visualized: true, layerType: 'GeoJsonLayer (choropleth fill)' },
-  { label: 'PoP Momentum Score', source: 'Computed', visualized: true, layerType: 'GeoJsonLayer (blue→red gradient)' },
+  { label: 'ZHVI Home Value', source: 'Zillow Research', visualized: true, layerType: 'GeoJsonLayer (choropleth — multi-ZIP)' },
+  { label: 'Vacancy Rate', source: 'Census ACS', visualized: false, layerType: null, note: 'Available in stat cards; no map layer yet' },
+  { label: 'PoP Momentum Score', source: 'Computed', visualized: false, layerType: null, note: 'Computed API exists; no map layer yet' },
   { label: 'Unemployment Rate', source: 'FRED', visualized: false, layerType: null, note: 'County aggregate — sidebar chart only' },
   { label: 'Real GDP', source: 'FRED', visualized: false, layerType: null, note: 'County aggregate — sidebar chart only' },
   { label: 'Median Household Income', source: 'Census ACS', visualized: false, layerType: null, note: 'Single value per ZIP — stat card only' },
@@ -97,7 +109,7 @@ function getBounds(geojson: { features: Array<{ geometry: { coordinates: number[
 
 // ── Map fitter — fits to boundary polygon on zip change ───────────────────────
 
-function MapFitter({ boundary, zip }: { boundary: object | null; zip: string | null }) {
+function MapFitter({ boundary, zip }: { boundary: GeoJSON | null; zip: string | null }) {
   const map = useMap()
   const lastZip = useRef<string | null>(null)
 
@@ -124,16 +136,28 @@ function MapFitter({ boundary, zip }: { boundary: object | null; zip: string | n
 function DeckGlOverlay({ layers }: { layers: Layer[] }) {
   const deck = useMemo(() => new GoogleMapsOverlay({ interleaved: true }), [])
   const map = useMap()
+  const attachedMapRef = useRef<google.maps.Map | null>(null)
+  const isAttachedRef = useRef(false)
 
   useEffect(() => {
     if (!map) return
+    if (attachedMapRef.current === map && isAttachedRef.current) return
     deck.setMap(map)
-    return () => deck.setMap(null)
+    attachedMapRef.current = map
+    isAttachedRef.current = true
+    return () => {
+      if (attachedMapRef.current === map && isAttachedRef.current) {
+        deck.setMap(null)
+        attachedMapRef.current = null
+        isAttachedRef.current = false
+      }
+    }
   }, [map, deck])
 
   useEffect(() => {
+    if (!map || !isAttachedRef.current) return
     deck.setProps({ layers })
-  }, [layers, deck])
+  }, [layers, deck, map])
 
   return null
 }
@@ -143,10 +167,11 @@ function DeckGlOverlay({ layers }: { layers: Layer[] }) {
 interface CommandMapProps {
   zip: string | null
   marketData: MarketData | null
+  transitData: TransitData | null
 }
 
-export default function CommandMap({ zip, marketData }: CommandMapProps) {
-  const [primaryBoundary, setPrimaryBoundary] = useState<object | null>(null)
+export default function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
+  const [primaryBoundary, setPrimaryBoundary] = useState<GeoJSON | null>(null)
   const [neighborBoundaries, setNeighborBoundaries] = useState<ZipBoundary[]>([])
   const [transitStops, setTransitStops] = useState<TransitStop[]>([])
   const [layers, setLayers] = useState<LayerState>({
@@ -156,6 +181,7 @@ export default function CommandMap({ zip, marketData }: CommandMapProps) {
   })
   const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null)
   const [activeMetric, setActiveMetric] = useState<'zori' | 'zhvi'>('zori')
+  const mapId = process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID ?? process.env.NEXT_PUBLIC_GOOGLE_MAPS_ID ?? undefined
 
   // Fetch primary boundary + transit + neighbors when zip changes
   useEffect(() => {
@@ -168,24 +194,6 @@ export default function CommandMap({ zip, marketData }: CommandMapProps) {
     fetch('/api/boundaries?zip=' + zip)
       .then((r) => r.json())
       .then((d) => { if (d.features) setPrimaryBoundary(d) })
-      .catch(() => {})
-
-    // Transit stops
-    fetch('/api/transit?zip=' + zip)
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.geojson?.features) {
-          setTransitStops(
-            d.geojson.features.map((f: {
-              geometry: { coordinates: [number, number] }
-              properties: { stop_name: string }
-            }) => ({
-              position: f.geometry.coordinates as [number, number],
-              name: f.properties.stop_name,
-            }))
-          )
-        }
-      })
       .catch(() => {})
 
     // Neighbor ZIPs with Zillow data
@@ -201,7 +209,7 @@ export default function CommandMap({ zip, marketData }: CommandMapProps) {
           sample.map((n) =>
             fetch('/api/boundaries?zip=' + n.zip)
               .then((r) => r.json())
-              .then((geojson) => ({ zip: n.zip, geojson, zori: n.zori_latest }))
+              .then((geojson) => ({ zip: n.zip, geojson, zori: n.zori_latest, zhvi: n.zhvi_latest }))
           )
         )
         const loaded: ZipBoundary[] = results
@@ -212,16 +220,38 @@ export default function CommandMap({ zip, marketData }: CommandMapProps) {
       .catch(() => {})
   }, [zip])
 
-  // Build color scale across all loaded ZIPs
-  const allZoriValues = useMemo(() => {
-    const vals: (number | null)[] = [marketData?.zillow?.zori_latest ?? null]
-    neighborBoundaries.forEach((n) => vals.push(n.zori))
+  useEffect(() => {
+    if (!zip || !transitData || transitData.zip !== zip) {
+      setTransitStops([])
+      return
+    }
+    if (!transitData.geojson?.features) {
+      setTransitStops([])
+      return
+    }
+    setTransitStops(
+      transitData.geojson.features.map((f) => ({
+        position: f.geometry.coordinates as [number, number],
+        name: f.properties.stop_name,
+      }))
+    )
+  }, [zip, transitData])
+
+  // Build color scale across all loaded ZIPs for the selected metric
+  const allMetricValues = useMemo(() => {
+    const primaryValue = activeMetric === 'zhvi'
+      ? marketData?.zillow?.zhvi_latest ?? null
+      : marketData?.zillow?.zori_latest ?? null
+    const vals: (number | null)[] = [primaryValue]
+    neighborBoundaries.forEach((n) => vals.push(activeMetric === 'zhvi' ? n.zhvi : n.zori))
     return vals
-  }, [marketData, neighborBoundaries])
+  }, [activeMetric, marketData, neighborBoundaries])
 
-  const colorScale = useMemo(() => buildColorScale(allZoriValues), [allZoriValues])
+  const colorScale = useMemo(() => buildColorScale(allMetricValues), [allMetricValues])
 
-  const primaryZori = marketData?.zillow?.zori_latest ?? null
+  const primaryMetricValue = activeMetric === 'zhvi'
+    ? marketData?.zillow?.zhvi_latest ?? null
+    : marketData?.zillow?.zori_latest ?? null
 
   const deckLayers = useMemo(() => {
     const result: Layer[] = []
@@ -229,13 +259,14 @@ export default function CommandMap({ zip, marketData }: CommandMapProps) {
     // Neighbor ZIP boundaries (rendered first, behind primary)
     if (layers.zipBoundary && neighborBoundaries.length > 0) {
       neighborBoundaries.forEach((n) => {
+        const metricValue = activeMetric === 'zhvi' ? n.zhvi : n.zori
         result.push(
           new GeoJsonLayer({
             id: 'neighbor-' + n.zip,
             data: n.geojson,
             stroked: true,
             filled: true,
-            getFillColor: layers.rentChoropleth ? colorScale(n.zori) : [60, 60, 80, 60],
+            getFillColor: layers.rentChoropleth ? colorScale(metricValue) : [60, 60, 80, 60],
             getLineColor: [180, 180, 200, 120],
             lineWidthMinPixels: 1,
             pickable: true,
@@ -243,7 +274,7 @@ export default function CommandMap({ zip, marketData }: CommandMapProps) {
               if (info.object) {
                 setTooltip({
                   x: info.x, y: info.y,
-                  text: 'ZIP ' + n.zip + (n.zori ? ' · $' + n.zori.toFixed(0) + '/mo' : ''),
+                  text: 'ZIP ' + n.zip + (metricValue ? ` · $${metricValue.toFixed(0)} ${activeMetric.toUpperCase()}` : ''),
                 })
               } else setTooltip(null)
             },
@@ -260,7 +291,7 @@ export default function CommandMap({ zip, marketData }: CommandMapProps) {
           data: primaryBoundary,
           stroked: true,
           filled: true,
-          getFillColor: layers.rentChoropleth ? colorScale(primaryZori) : [255, 255, 255, 30],
+          getFillColor: layers.rentChoropleth ? colorScale(primaryMetricValue) : [255, 255, 255, 30],
           getLineColor: [255, 255, 255, 255],
           lineWidthMinPixels: 3,
           pickable: true,
@@ -268,7 +299,7 @@ export default function CommandMap({ zip, marketData }: CommandMapProps) {
             if (info.object) {
               setTooltip({
                 x: info.x, y: info.y,
-                text: 'ZIP ' + zip + (primaryZori ? ' · $' + primaryZori.toFixed(0) + '/mo ZORI' : ''),
+                text: 'ZIP ' + zip + (primaryMetricValue ? ` · $${primaryMetricValue.toFixed(0)} ${activeMetric.toUpperCase()}` : ''),
               })
             } else setTooltip(null)
           },
@@ -296,7 +327,7 @@ export default function CommandMap({ zip, marketData }: CommandMapProps) {
     }
 
     return result
-  }, [primaryBoundary, neighborBoundaries, transitStops, layers, colorScale, primaryZori, zip])
+  }, [primaryBoundary, neighborBoundaries, transitStops, layers, colorScale, primaryMetricValue, activeMetric, zip])
 
   const handleToggle = useCallback((key: keyof LayerState) => {
     setLayers((prev) => ({ ...prev, [key]: !prev[key] }))
@@ -306,7 +337,7 @@ export default function CommandMap({ zip, marketData }: CommandMapProps) {
     <div className="relative w-full h-full">
       <APIProvider apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY!}>
         <Map
-          mapId={process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID ?? ''}
+          mapId={mapId}
           defaultCenter={{ lat: 37.2563, lng: -80.4347 }}
           defaultZoom={11}
           colorScheme="DARK"

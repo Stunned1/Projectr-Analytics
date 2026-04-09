@@ -15,6 +15,7 @@ interface DataRow {
 }
 
 interface TransitData {
+  zip: string
   stop_count: number
   geojson: {
     features: Array<{
@@ -153,7 +154,7 @@ export default function Home() {
     <main className="min-h-screen bg-zinc-950 text-white">
       {/* Map — full width, fixed height */}
       <div className="w-full h-[60vh] relative">
-        <CommandMap zip={result?.zip ?? null} marketData={result} />
+        <CommandMap zip={result?.zip ?? null} marketData={result} transitData={transit} />
       </div>
 
       {/* Data panel */}

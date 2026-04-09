@@ -21,46 +21,129 @@ const STATE_FIPS: Record<string, string> = {
   DC:'11',PR:'72',
 }
 
-export async function geocodeZip(zip: string): Promise<GeoResult | null> {
+const SUCCESS_TTL_MS = 24 * 60 * 60 * 1000
+const MISS_TTL_MS = 15 * 60 * 1000
+
+const resolvedCache = new Map<string, { expiresAt: number; value: GeoResult | null }>()
+const inflight = new Map<string, Promise<GeoResult | null>>()
+
+function parseCoord(v: unknown): number | null {
+  const n = typeof v === 'number' ? v : parseFloat(String(v))
+  return Number.isFinite(n) ? n : null
+}
+
+function parseStateFromMatchedAddress(matchedAddress: string): string | null {
+  // Typical format: "1 MAIN ST, BLACKSBURG, VA, 24060"
+  const m = matchedAddress.match(/,\s*([A-Z]{2})\s*,\s*\d{5}(?:-\d{4})?$/)
+  return m?.[1] ?? null
+}
+
+async function resolveCountyFips(lat: number, lng: number): Promise<string> {
   try {
-    // Step 1: lat/lng + state from zippopotam
+    const censusRes = await fetch(
+      `https://geocoding.geo.census.gov/geocoder/geographies/coordinates?x=${lng}&y=${lat}&benchmark=Public_AR_Current&vintage=Current_Current&layers=Counties&format=json`,
+      { next: { revalidate: 86400 }, signal: AbortSignal.timeout(10000) }
+    )
+    if (!censusRes.ok) return '000'
+    const censusData = await censusRes.json()
+    const county = censusData?.result?.geographies?.Counties?.[0]
+    return county?.COUNTY ? String(county.COUNTY) : '000'
+  } catch {
+    return '000'
+  }
+}
+
+async function geocodeViaZippopotam(zip: string): Promise<{ lat: number; lng: number; city: string; state: string } | null> {
+  try {
     const zipRes = await fetch(`https://api.zippopotam.us/us/${zip}`, {
       next: { revalidate: 86400 },
+      signal: AbortSignal.timeout(8000),
     })
     if (!zipRes.ok) return null
     const zipData = await zipRes.json()
     const place = zipData.places?.[0]
     if (!place) return null
 
-    const lat = parseFloat(place.latitude)
-    const lng = parseFloat(place.longitude)
-    const state = place['state abbreviation'] as string
-    const stateFips = STATE_FIPS[state]
+    const lat = parseCoord(place.latitude)
+    const lng = parseCoord(place.longitude)
+    const city = place['place name'] as string | undefined
+    const state = place['state abbreviation'] as string | undefined
+
+    if (lat === null || lng === null || !city || !state) return null
+    return { lat, lng, city, state }
+  } catch {
+    return null
+  }
+}
+
+async function geocodeViaCensusAddress(zip: string): Promise<{ lat: number; lng: number; city: string; state: string } | null> {
+  try {
+    const censusRes = await fetch(
+      `https://geocoding.geo.census.gov/geocoder/locations/address?street=1+Main+St&zip=${zip}&benchmark=Public_AR_Current&format=json`,
+      { next: { revalidate: 86400 }, signal: AbortSignal.timeout(10000) }
+    )
+    if (!censusRes.ok) return null
+    const data = await censusRes.json()
+    const match = data?.result?.addressMatches?.[0]
+    const coords = match?.coordinates
+    if (!coords) return null
+
+    const lat = parseCoord(coords.y)
+    const lng = parseCoord(coords.x)
+    const city = match?.addressComponents?.city as string | undefined
+    const stateFromComponents = match?.addressComponents?.state as string | undefined
+    const state = stateFromComponents ?? parseStateFromMatchedAddress(match?.matchedAddress ?? '')
+
+    if (lat === null || lng === null || !city || !state) return null
+    return { lat, lng, city, state }
+  } catch {
+    return null
+  }
+}
+
+export async function geocodeZip(zip: string): Promise<GeoResult | null> {
+  const normalized = zip.trim()
+  if (!/^\d{5}$/.test(normalized)) return null
+
+  const cached = resolvedCache.get(normalized)
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value
+  }
+
+  const existing = inflight.get(normalized)
+  if (existing) return existing
+
+  const request = (async () => {
+    const base =
+      (await geocodeViaZippopotam(normalized)) ??
+      (await geocodeViaCensusAddress(normalized))
+
+    if (!base) return null
+
+    const stateFips = STATE_FIPS[base.state]
     if (!stateFips) return null
 
-    // Step 2: county FIPS from Census geocoder (zip → county crosswalk)
-    const censusRes = await fetch(
-      `https://geocoding.geo.census.gov/geocoder/geographies/coordinates?x=${lng}&y=${lat}&benchmark=Public_AR_Current&vintage=Current_Current&layers=Counties&format=json`,
-      { next: { revalidate: 86400 } }
-    )
-
-    let countyFips = '000'
-    if (censusRes.ok) {
-      const censusData = await censusRes.json()
-      const county = censusData?.result?.geographies?.Counties?.[0]
-      if (county?.COUNTY) countyFips = county.COUNTY
-    }
-
+    const countyFips = await resolveCountyFips(base.lat, base.lng)
     return {
-      lat,
-      lng,
-      city: place['place name'],
-      state,
+      lat: base.lat,
+      lng: base.lng,
+      city: base.city,
+      state: base.state,
       stateFips,
       countyFips,
       fullFips: `${stateFips}${countyFips}`,
-    }
-  } catch {
-    return null
+    } satisfies GeoResult
+  })()
+
+  inflight.set(normalized, request)
+  try {
+    const result = await request
+    resolvedCache.set(normalized, {
+      value: result,
+      expiresAt: Date.now() + (result ? SUCCESS_TTL_MS : MISS_TTL_MS),
+    })
+    return result
+  } finally {
+    inflight.delete(normalized)
   }
 }
