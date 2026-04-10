@@ -136,6 +136,9 @@ const DATA_LAYER_REGISTRY = [
   { label: 'Permit Pin Locations', source: 'ArcGIS REST', visualized: false, layerType: null, note: 'DEFERRED — jurisdiction-specific feeds required' },
 ]
 
+// Reuse expensive county blockgroup responses across CommandMap remounts.
+const BLOCKGROUP_CACHE = new globalThis.Map<string, BlockGroupCollection>()
+
 // ── Color scale: blue (low rent) → red (high rent) ───────────────────────────
 // Normalized across the set of loaded ZIPs for relative contrast
 
@@ -308,6 +311,7 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
   const latestViewRef = useRef<MapViewState | null>(null)
   const buildingsFetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastBuildingsFetchKeyRef = useRef<string | null>(null)
+  const lastSampleHandledAtRef = useRef(0)
   const mapId = process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID ?? process.env.NEXT_PUBLIC_GOOGLE_MAPS_ID ?? undefined
 
   const setTooltipStable = useCallback((next: { x: number; y: number; text: string } | null) => {
@@ -358,8 +362,22 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
 
     // Block groups — need state + county FIPS
     if (stateFips && countyFips && countyFips !== '000') {
-      dedupedFetchJson<BlockGroupCollection>(`/api/blockgroups?state=${stateFips}&county=${countyFips}`)
-        .then((d) => { if (d.features) setBlockGroupData(d) })
+      const countyKey = `${stateFips}-${countyFips}`
+      const cached = BLOCKGROUP_CACHE.get(countyKey)
+      const blockgroupsPromise = cached
+        ? Promise.resolve(cached)
+        : dedupedFetchJson<BlockGroupCollection>(`/api/blockgroups?state=${stateFips}&county=${countyFips}`, {
+          cacheKey: `blockgroups:${countyKey}`,
+          ttlMs: 30 * 60 * 1000,
+        })
+
+      blockgroupsPromise
+        .then((d) => {
+          if (d.features?.length) {
+            BLOCKGROUP_CACHE.set(countyKey, d)
+            setBlockGroupData(d)
+          }
+        })
         .catch(() => {})
     }
 
@@ -402,6 +420,11 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
   }, [layers.buildings])
 
   const handleCameraSample = useCallback((view: MapViewState) => {
+    // Hard throttle camera-driven logic to max 10Hz.
+    const now = Date.now()
+    if (now - lastSampleHandledAtRef.current < 100) return
+    lastSampleHandledAtRef.current = now
+
     latestViewRef.current = view
     if (!layers.buildings) return
     if (buildingsFetchTimerRef.current) clearTimeout(buildingsFetchTimerRef.current)
