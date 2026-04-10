@@ -44,6 +44,40 @@ interface ZipBoundary {
   zhvi: number | null
 }
 
+interface BlockGroupFeature {
+  type: 'Feature'
+  geometry: object
+  properties: {
+    GEOID: string
+    population: number
+    housing_units: number
+    owner_occupied: number
+  }
+}
+
+interface BlockGroupCollection {
+  type: 'FeatureCollection'
+  features: BlockGroupFeature[]
+}
+
+interface BuildingFeature {
+  type: 'Feature'
+  geometry: { type: 'Polygon'; coordinates: number[][][] }
+  properties: {
+    id: number
+    building: string
+    name: string | null
+    levels: number | null
+    height: number
+  }
+}
+
+interface BuildingCollection {
+  type: 'FeatureCollection'
+  features: BuildingFeature[]
+  meta?: { count: number; bbox: string }
+}
+
 interface LayerState {
   zipBoundary: boolean
   transitStops: boolean
@@ -201,8 +235,8 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
   const [primaryBoundary, setPrimaryBoundary] = useState<GeoJSON | null>(null)
   const [neighborBoundaries, setNeighborBoundaries] = useState<ZipBoundary[]>([])
   const [transitStops, setTransitStops] = useState<TransitStop[]>([])
-  const [blockGroupData, setBlockGroupData] = useState<GeoJSON | null>(null)
-  const [buildingData, setBuildingData] = useState<GeoJSON | null>(null)
+  const [blockGroupData, setBlockGroupData] = useState<BlockGroupCollection | null>(null)
+  const [buildingData, setBuildingData] = useState<BuildingCollection | null>(null)
   const [parcelData, setParcelData] = useState<{ parcels: Array<{ lat: number; lng: number; assessed_per_sqft: number; floors: number; land_use: string | null; land_use_label: string; address: string; assessed_value: number }>; stats: { p25_per_sqft: number; p75_per_sqft: number } } | null>(null)
   const [layers, setLayers] = useState<LayerState>({
     zipBoundary: true,
@@ -399,7 +433,7 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
 
     // Block groups — sub-ZIP population density choropleth
     if (layers.blockGroups && blockGroupData) {
-      const bgFeatures = (blockGroupData as unknown as { features: Array<{ properties: { population: number } }> }).features ?? []
+      const bgFeatures = blockGroupData.features ?? []
       const pops = bgFeatures.map((f) => f.properties.population).filter((p) => p > 0)
       const minPop = pops.length ? Math.min(...pops) : 0
       const maxPop = pops.length ? Math.max(...pops) : 1
@@ -434,7 +468,7 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
 
     // OSM Buildings — 3D extruded footprints
     if (layers.buildings && buildingData) {
-      const features = (buildingData as unknown as { features: Array<{ geometry: { coordinates: number[][][] }; properties: { height: number; building: string; name: string | null } }> }).features ?? []
+      const features = buildingData.features ?? []
 
       result.push(
         new PolygonLayer({
