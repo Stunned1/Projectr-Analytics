@@ -85,6 +85,10 @@ _4.9.2026_
 - Added NYC PLUTO parcel `ColumnLayer` — 3D columns per parcel, height = assessed value/sqft, color = land use (NYC ZIPs only)
 - Block groups layer now auto-disables ZIP choropleth fill to prevent visual overlap
 - Fixed cached market responses missing `geo`/`stateFips`/`countyFips` — buildings and block groups now load correctly from cache
+- Added Census Tract choropleth layer — 23 tracts per county with rent/income/vacancy data, replaces block groups as primary sub-ZIP layer
+- Added OSM Amenity `HeatmapLayer` — weighted by amenity type (transit > commercial > retail), shows walkability density
+- Added FEMA Flood Risk zone layer — high/moderate risk polygons from NFHL
+- New API routes: `/api/tracts`, `/api/amenities`, `/api/floodrisk`
 
 **UI**
 
