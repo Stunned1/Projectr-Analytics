@@ -399,7 +399,7 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
 
     // Block groups — sub-ZIP population density choropleth
     if (layers.blockGroups && blockGroupData) {
-      const bgFeatures = (blockGroupData as { features: Array<{ properties: { population: number } }> }).features ?? []
+      const bgFeatures = (blockGroupData as unknown as { features: Array<{ properties: { population: number } }> }).features ?? []
       const pops = bgFeatures.map((f) => f.properties.population).filter((p) => p > 0)
       const minPop = pops.length ? Math.min(...pops) : 0
       const maxPop = pops.length ? Math.max(...pops) : 1
@@ -434,7 +434,7 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
 
     // OSM Buildings — 3D extruded footprints
     if (layers.buildings && buildingData) {
-      const features = (buildingData as { features: Array<{ geometry: { coordinates: number[][][] }; properties: { height: number; building: string; name: string | null } }> }).features ?? []
+      const features = (buildingData as unknown as { features: Array<{ geometry: { coordinates: number[][][] }; properties: { height: number; building: string; name: string | null } }> }).features ?? []
 
       result.push(
         new PolygonLayer({
