@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const url = `${TIGER_URL}?where=ZCTA5%3D'${zip}'&outFields=ZCTA5,GEOID&f=geojson`
+    const url = `${TIGER_URL}?where=ZCTA5%3D'${zip}'&outFields=ZCTA5,GEOID&geometryPrecision=4&f=geojson`
     const res = await fetch(url, { next: { revalidate: 86400 * 30 } }) // cache 30 days
     if (!res.ok) return NextResponse.json({ error: 'Boundary not found' }, { status: 404 })
 

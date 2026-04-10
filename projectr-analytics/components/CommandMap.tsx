@@ -251,6 +251,34 @@ function TiltController({ tilt, heading }: { tilt: number; heading: number }) {
   return null
 }
 
+// ── Camera sampler (listener-free) ────────────────────────────────────────────
+// Polls map center/zoom periodically to avoid brittle addListener wiring.
+function CameraSampler({ enabled, onSample }: { enabled: boolean; onSample: (view: MapViewState) => void }) {
+  const map = useMap()
+  const lastKeyRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!enabled || !map) return
+
+    const sample = () => {
+      const center = map.getCenter()
+      const zoom = map.getZoom()
+      if (!center || typeof zoom !== 'number') return
+      const view = { lat: center.lat(), lng: center.lng(), zoom }
+      const key = `${view.lat.toFixed(3)}|${view.lng.toFixed(3)}|${Math.round(view.zoom * 10) / 10}`
+      if (key === lastKeyRef.current) return
+      lastKeyRef.current = key
+      onSample(view)
+    }
+
+    sample()
+    const id = setInterval(sample, 400)
+    return () => clearInterval(id)
+  }, [enabled, map, onSample])
+
+  return null
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 interface CommandMapProps {
@@ -277,10 +305,21 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
   const [activeMetric, setActiveMetric] = useState<'zori' | 'zhvi'>('zori')
   const [tilt, setTilt] = useState(0)
   const [heading, setHeading] = useState(0)
-  const cameraRef = useRef<MapViewState | null>(null)
+  const latestViewRef = useRef<MapViewState | null>(null)
   const buildingsFetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastBuildingsFetchKeyRef = useRef<string | null>(null)
   const mapId = process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID ?? process.env.NEXT_PUBLIC_GOOGLE_MAPS_ID ?? undefined
+
+  const setTooltipStable = useCallback((next: { x: number; y: number; text: string } | null) => {
+    setTooltip((prev) => {
+      if (next === null) return prev === null ? prev : null
+      if (!prev) return next
+      const sameText = prev.text === next.text
+      const sameX = Math.abs(prev.x - next.x) < 2
+      const sameY = Math.abs(prev.y - next.y) < 2
+      return sameText && sameX && sameY ? prev : next
+    })
+  }, [])
 
   // Fetch primary boundary + transit + neighbors when zip changes
   useEffect(() => {
@@ -295,8 +334,8 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
         const neighbors: NeighborZip[] = d.zips ?? []
         if (!neighbors.length) return
 
-        // Fetch boundaries for all neighbors in parallel (limit to 15 for perf)
-        const sample = neighbors.slice(0, 15)
+        // Fetch boundaries for all neighbors in parallel (limit for perf/GPU load)
+        const sample = neighbors.slice(0, 10)
         const results = await Promise.allSettled(
           sample.map((n) =>
             dedupedFetchJson<GeoJSON>('/api/boundaries?zip=' + n.zip)
@@ -338,8 +377,10 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
 
   const fetchBuildingsForView = useCallback((view: MapViewState) => {
     if (!layers.buildings) return
-    if (view.zoom < 14) return
-
+    if (view.zoom < 14) {
+      setBuildingData(null)
+      return
+    }
     const roundedLat = Number(view.lat.toFixed(3))
     const roundedLng = Number(view.lng.toFixed(3))
     const zoomBucket = Math.floor(view.zoom)
@@ -350,7 +391,7 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
 
     const buildingsUrl = `/api/buildings?lat=${roundedLat}&lng=${roundedLng}&radius=${radius}&zoom=${zoomBucket}`
     const tryBuildings = (attempt = 0) => {
-      dedupedFetchJson<BuildingCollection>(buildingsUrl)
+      dedupedFetchJson<BuildingCollection>(buildingsUrl, { ttlMs: 60_000 })
         .then((d) => {
           if (d.features) setBuildingData(d)
           else if (attempt < 1) setTimeout(() => tryBuildings(1), 3000)
@@ -360,25 +401,27 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
     tryBuildings()
   }, [layers.buildings])
 
-  // Initial/zip-based building fetch anchor.
-  useEffect(() => {
-    if (!layers.buildings || !marketData?.geo) return
-    const baseView = cameraRef.current ?? { lat: marketData.geo.lat, lng: marketData.geo.lng, zoom: 11 }
-    fetchBuildingsForView(baseView)
-  }, [layers.buildings, marketData, fetchBuildingsForView])
-
-  // Throttle viewport-driven state updates to avoid per-frame React work.
-  const handleCameraChanged = useCallback((ev: { detail?: { center?: { lat: number; lng: number }; zoom?: number } }) => {
-    const center = ev.detail?.center
-    const zoom = ev.detail?.zoom
-    if (!center || typeof zoom !== 'number') return
-    cameraRef.current = { lat: center.lat, lng: center.lng, zoom }
+  const handleCameraSample = useCallback((view: MapViewState) => {
+    latestViewRef.current = view
     if (!layers.buildings) return
     if (buildingsFetchTimerRef.current) clearTimeout(buildingsFetchTimerRef.current)
     buildingsFetchTimerRef.current = setTimeout(() => {
-      if (cameraRef.current) fetchBuildingsForView(cameraRef.current)
-    }, 200)
+      const latest = latestViewRef.current
+      if (!latest) return
+      fetchBuildingsForView(latest)
+    }, 220)
   }, [layers.buildings, fetchBuildingsForView])
+
+  // Seed buildings using zip-center view.
+  useEffect(() => {
+    if (!layers.buildings || !marketData?.geo) return
+    handleCameraSample({ lat: marketData.geo.lat, lng: marketData.geo.lng, zoom: 15 })
+  }, [layers.buildings, marketData, handleCameraSample])
+
+  useEffect(() => {
+    if (layers.buildings) return
+    if (buildingsFetchTimerRef.current) clearTimeout(buildingsFetchTimerRef.current)
+  }, [layers.buildings])
 
   useEffect(() => {
     return () => {
@@ -430,11 +473,11 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
             pickable: true,
             onHover: (info: PickingInfo) => {
               if (info.object) {
-                setTooltip({
+                setTooltipStable({
                   x: info.x, y: info.y,
                   text: 'ZIP ' + n.zip + (metricValue ? ` · $${metricValue.toFixed(0)} ${activeMetric.toUpperCase()}` : ''),
                 })
-              } else setTooltip(null)
+              } else setTooltipStable(null)
             },
           })
         )
@@ -456,11 +499,11 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
           pickable: true,
           onHover: (info: PickingInfo) => {
             if (info.object) {
-              setTooltip({
+              setTooltipStable({
                 x: info.x, y: info.y,
                 text: 'ZIP ' + zip + (primaryMetricValue ? ` · $${primaryMetricValue.toFixed(0)} ${activeMetric.toUpperCase()}` : ''),
               })
-            } else setTooltip(null)
+            } else setTooltipStable(null)
           },
         })
       )
@@ -478,8 +521,8 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
           pickable: true,
           onHover: (info: PickingInfo) => {
             const d = info.object as TransitStop | undefined
-            if (d) setTooltip({ x: info.x, y: info.y, text: '\uD83D\uDE8C ' + d.name })
-            else setTooltip(null)
+            if (d) setTooltipStable({ x: info.x, y: info.y, text: '\uD83D\uDE8C ' + d.name })
+            else setTooltipStable(null)
           },
         })
       )
@@ -510,11 +553,11 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
           onHover: (info: PickingInfo) => {
             const f = info.object as { properties: { population: number; housing_units: number } } | undefined
             if (f) {
-              setTooltip({
+              setTooltipStable({
                 x: info.x, y: info.y,
                 text: `Pop: ${f.properties.population?.toLocaleString()} · Units: ${f.properties.housing_units?.toLocaleString()}`,
               })
-            } else setTooltip(null)
+            } else setTooltipStable(null)
           },
         })
       )
@@ -546,8 +589,8 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
             const f = info.object as { properties: { name: string | null; building: string; height: number } } | undefined
             if (f) {
               const label = f.properties.name ?? f.properties.building
-              setTooltip({ x: info.x, y: info.y, text: `🏢 ${label} · ${f.properties.height}m` })
-            } else setTooltip(null)
+              setTooltipStable({ x: info.x, y: info.y, text: `🏢 ${label} · ${f.properties.height}m` })
+            } else setTooltipStable(null)
           },
         })
       )
@@ -585,18 +628,18 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
           onHover: (info: PickingInfo) => {
             const d = info.object as typeof parcelData.parcels[0] | undefined
             if (d) {
-              setTooltip({
+              setTooltipStable({
                 x: info.x, y: info.y,
                 text: `${d.address} · $${d.assessed_value.toLocaleString()} · ${d.land_use_label}`,
               })
-            } else setTooltip(null)
+            } else setTooltipStable(null)
           },
         })
       )
     }
 
     return result
-  }, [primaryBoundary, neighborBoundaries, transitStops, blockGroupData, buildingData, parcelData, layers, colorScale, primaryMetricValue, activeMetric, zip])
+  }, [primaryBoundary, neighborBoundaries, transitStops, blockGroupData, buildingData, parcelData, layers, colorScale, primaryMetricValue, activeMetric, zip, setTooltipStable])
 
   const handleToggle = useCallback((key: keyof LayerState) => {
     setLayers((prev) => ({ ...prev, [key]: !prev[key] }))
@@ -609,7 +652,6 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
           mapId={mapId}
           defaultCenter={{ lat: 37.2563, lng: -80.4347 }}
           defaultZoom={11}
-          onCameraChanged={handleCameraChanged}
           colorScheme="DARK"
           disableDefaultUI={false}
           gestureHandling="greedy"
@@ -617,6 +659,7 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
         >
           <MapFitter boundary={primaryBoundary} zip={zip} />
           <TiltController tilt={tilt} heading={heading} />
+          <CameraSampler enabled={layers.buildings} onSample={handleCameraSample} />
           <DeckGlOverlay layers={deckLayers} />
         </Map>
       </APIProvider>

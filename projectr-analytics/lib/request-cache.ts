@@ -2,6 +2,7 @@ const inFlight = new Map<string, Promise<unknown>>()
 const responseCache = new Map<string, { expiresAt: number; data: unknown }>()
 
 const DEFAULT_TTL_MS = 5 * 60 * 1000
+const MAX_CACHE_ENTRIES = 40
 
 interface DedupedFetchOptions {
   ttlMs?: number
@@ -31,7 +32,13 @@ export async function dedupedFetchJson<T>(
         throw new Error(`Request failed (${res.status}) for ${url}`)
       }
       const data = (await res.json()) as T
-      responseCache.set(cacheKey, { data, expiresAt: Date.now() + ttlMs })
+      if (ttlMs > 0) {
+        responseCache.set(cacheKey, { data, expiresAt: Date.now() + ttlMs })
+        if (responseCache.size > MAX_CACHE_ENTRIES) {
+          const firstKey = responseCache.keys().next().value
+          if (typeof firstKey === 'string') responseCache.delete(firstKey)
+        }
+      }
       return data
     })
     .finally(() => {
