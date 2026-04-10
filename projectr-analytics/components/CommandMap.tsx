@@ -5,7 +5,7 @@ import { APIProvider, Map, useMap } from '@vis.gl/react-google-maps'
 import { GoogleMapsOverlay } from '@deck.gl/google-maps'
 import { GeoJsonLayer, ScatterplotLayer, PolygonLayer, ColumnLayer } from '@deck.gl/layers'
 import type { Layer, PickingInfo } from '@deck.gl/core'
-import type { Feature, FeatureCollection, GeoJSON, Geometry, Polygon } from 'geojson'
+import type { GeoJSON } from 'geojson'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -44,26 +44,37 @@ interface ZipBoundary {
   zhvi: number | null
 }
 
-type BlockGroupProps = {
-  GEOID?: string
-  population?: number
-  housing_units?: number
-  owner_occupied?: number
+interface BlockGroupFeature {
+  type: 'Feature'
+  geometry: object
+  properties: {
+    GEOID: string
+    population: number
+    housing_units: number
+    owner_occupied: number
+  }
 }
 
-type BlockGroupFeature = Feature<Geometry, BlockGroupProps>
-type BlockGroupCollection = FeatureCollection<Geometry, BlockGroupProps>
-
-type BuildingProps = {
-  id?: number
-  building?: string
-  name?: string | null
-  levels?: number | null
-  height?: number
+interface BlockGroupCollection {
+  type: 'FeatureCollection'
+  features: BlockGroupFeature[]
 }
 
-type BuildingFeature = Feature<Polygon, BuildingProps>
-type BuildingCollection = FeatureCollection<Polygon, BuildingProps> & {
+interface BuildingFeature {
+  type: 'Feature'
+  geometry: { type: 'Polygon'; coordinates: number[][][] }
+  properties: {
+    id: number
+    building: string
+    name: string | null
+    levels: number | null
+    height: number
+  }
+}
+
+interface BuildingCollection {
+  type: 'FeatureCollection'
+  features: BuildingFeature[]
   meta?: { count: number; bbox: string }
 }
 
@@ -423,9 +434,7 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
     // Block groups — sub-ZIP population density choropleth
     if (layers.blockGroups && blockGroupData) {
       const bgFeatures = blockGroupData.features ?? []
-      const pops = bgFeatures
-        .map((f) => f.properties.population ?? 0)
-        .filter((p) => p > 0)
+      const pops = bgFeatures.map((f) => f.properties.population).filter((p) => p > 0)
       const minPop = pops.length ? Math.min(...pops) : 0
       const maxPop = pops.length ? Math.max(...pops) : 1
 
@@ -435,7 +444,7 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
           data: blockGroupData,
           stroked: true,
           filled: true,
-          getFillColor: (f: BlockGroupFeature) => {
+          getFillColor: (f: { properties: { population: number } }) => {
             const pop = f.properties.population ?? 0
             const t = maxPop === minPop ? 0.5 : Math.min(Math.max((pop - minPop) / (maxPop - minPop), 0), 1)
             // Green (low density) → yellow → orange (high density)
@@ -445,11 +454,11 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
           lineWidthMinPixels: 1,
           pickable: true,
           onHover: (info: PickingInfo) => {
-            const f = info.object as BlockGroupFeature | undefined
+            const f = info.object as { properties: { population: number; housing_units: number } } | undefined
             if (f) {
               setTooltip({
                 x: info.x, y: info.y,
-                text: `Pop: ${(f.properties.population ?? 0).toLocaleString()} · Units: ${(f.properties.housing_units ?? 0).toLocaleString()}`,
+                text: `Pop: ${f.properties.population?.toLocaleString()} · Units: ${f.properties.housing_units?.toLocaleString()}`,
               })
             } else setTooltip(null)
           },
