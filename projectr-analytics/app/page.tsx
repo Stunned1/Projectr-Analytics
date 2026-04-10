@@ -102,16 +102,43 @@ function formatMetricValue(name: string, value: number) {
   return fmtNum(value)
 }
 
+function SearchBar({ loading, onAnalyze }: { loading: boolean; onAnalyze: (zip: string) => Promise<void> }) {
+  const [inputZip, setInputZip] = useState('')
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    await onAnalyze(inputZip)
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="flex gap-3 mb-10">
+      <input
+        type="text"
+        value={inputZip}
+        onChange={(e) => setInputZip(e.target.value.replace(/\D/g, '').slice(0, 5))}
+        placeholder="Enter zip code (e.g. 24060)"
+        className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-3 text-white placeholder-zinc-600 focus:outline-none focus:border-zinc-500 text-sm"
+        maxLength={5}
+      />
+      <button
+        type="submit"
+        disabled={loading}
+        className="bg-white text-black px-6 py-3 rounded-lg text-sm font-medium hover:bg-zinc-200 disabled:opacity-50 transition-colors"
+      >
+        {loading ? 'Loading...' : 'Analyze'}
+      </button>
+    </form>
+  )
+}
+
 export default function Home() {
-  const [zip, setZip] = useState('')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<MarketData | null>(null)
   const [transit, setTransit] = useState<TransitData | null>(null)
   const [trends, setTrends] = useState<TrendsData | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  async function fetchMarket(e: React.FormEvent) {
-    e.preventDefault()
+  async function fetchMarket(zip: string) {
     if (!/^\d{5}$/.test(zip)) { setError('Enter a valid 5-digit zip code'); return }
     setLoading(true)
     setError(null)
@@ -154,7 +181,7 @@ export default function Home() {
     <main className="min-h-screen bg-zinc-950 text-white">
       {/* Map — full width, fixed height */}
       <div className="w-full h-[60vh] relative">
-        <CommandMap zip={result?.zip ?? null} marketData={result} transitData={transit} />
+        <CommandMap key={result?.zip ?? 'no-zip'} zip={result?.zip ?? null} marketData={result} transitData={transit} />
       </div>
 
       {/* Data panel */}
@@ -165,23 +192,7 @@ export default function Home() {
           <p className="text-zinc-500 text-sm mt-1">Real estate market intelligence by zip code</p>
         </div>
 
-        <form onSubmit={fetchMarket} className="flex gap-3 mb-10">
-          <input
-            type="text"
-            value={zip}
-            onChange={(e) => setZip(e.target.value.replace(/\D/g, '').slice(0, 5))}
-            placeholder="Enter zip code (e.g. 24060)"
-            className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-3 text-white placeholder-zinc-600 focus:outline-none focus:border-zinc-500 text-sm"
-            maxLength={5}
-          />
-          <button
-            type="submit"
-            disabled={loading}
-            className="bg-white text-black px-6 py-3 rounded-lg text-sm font-medium hover:bg-zinc-200 disabled:opacity-50 transition-colors"
-          >
-            {loading ? 'Loading...' : 'Analyze'}
-          </button>
-        </form>
+        <SearchBar loading={loading} onAnalyze={fetchMarket} />
 
         {error && (
           <div className="bg-red-950 border border-red-800 text-red-300 rounded-lg px-4 py-3 text-sm mb-6">

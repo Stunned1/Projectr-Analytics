@@ -1,0 +1,43 @@
+const inFlight = new Map<string, Promise<unknown>>()
+const responseCache = new Map<string, { expiresAt: number; data: unknown }>()
+
+const DEFAULT_TTL_MS = 5 * 60 * 1000
+
+interface DedupedFetchOptions {
+  ttlMs?: number
+  cacheKey?: string
+}
+
+export async function dedupedFetchJson<T>(
+  url: string,
+  options: DedupedFetchOptions = {}
+): Promise<T> {
+  const cacheKey = options.cacheKey ?? url
+  const ttlMs = options.ttlMs ?? DEFAULT_TTL_MS
+
+  const cached = responseCache.get(cacheKey)
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.data as T
+  }
+
+  const existing = inFlight.get(cacheKey)
+  if (existing) {
+    return existing as Promise<T>
+  }
+
+  const request = fetch(url)
+    .then(async (res) => {
+      if (!res.ok) {
+        throw new Error(`Request failed (${res.status}) for ${url}`)
+      }
+      const data = (await res.json()) as T
+      responseCache.set(cacheKey, { data, expiresAt: Date.now() + ttlMs })
+      return data
+    })
+    .finally(() => {
+      inFlight.delete(cacheKey)
+    })
+
+  inFlight.set(cacheKey, request)
+  return request
+}
