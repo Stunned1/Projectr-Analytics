@@ -4,16 +4,16 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import type { AgentAction, AgentMessage, AgentStep, AnalysisSite, MapContext } from '@/lib/agent-types'
 
 const ACTION_LOG: Record<string, string> = {
-  toggle_layer: '→ Layer updated',
-  toggle_layers: '→ Layers updated',
-  set_metric: '→ Fill metric changed',
-  search: '→ Navigating to market',
-  generate_memo: '→ Opening data panel (memo)',
-  set_tilt: '→ Map tilt updated',
-  run_analysis: '→ Running spatial model…',
-  show_sites: '→ Top sites on map',
-  set_permit_filter: '→ Permit filter applied',
-  fly_to: '→ Map centered on site',
+  toggle_layer: 'Layer updated',
+  toggle_layers: 'Layers updated',
+  set_metric: 'Fill metric changed',
+  search: 'Navigating to market',
+  generate_memo: 'Opening data panel (memo)',
+  set_tilt: 'Map tilt updated',
+  run_analysis: 'Running spatial model…',
+  show_sites: 'Top sites on map',
+  set_permit_filter: 'Permit filter applied',
+  fly_to: 'Map centered on site',
   none: '',
 }
 
@@ -275,7 +275,7 @@ export function useAgentIntelligence(
       if (!text.trim() || loading || isRunningSequence) return
       const userPrompt = text.trim()
       setCaseStudyBundle({ userText: userPrompt, agentLead: '', insight: null })
-      setMessages((prev) => [...prev, { role: 'user', text: userPrompt }])
+      setMessages((prev) => [...prev, { role: 'user', text: userPrompt, ts: Date.now() }])
       setInput('')
       setLoading(true)
 

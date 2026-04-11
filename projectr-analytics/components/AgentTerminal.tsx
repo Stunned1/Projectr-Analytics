@@ -1,13 +1,30 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import type { AgentAction, AgentMessage, AnalysisSite } from '@/lib/agent-types'
+import { Fragment, useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import type { AgentAction, AnalysisSite } from '@/lib/agent-types'
 import type { MapContext } from '@/lib/agent-types'
 import { useAgentIntelligence, formatActionLogLine } from '@/lib/use-agent-intelligence'
 import { cn } from '@/lib/utils'
 
 const STREAM_MS = 72
 const SUGGESTIONS = ['Show flood risk', 'Transit + amenities on', 'Run Manhattan site analysis']
+
+/** Projectr orange / narrative / system / chrome */
+const C_USER_GT = '#D76B3D'
+const C_USER_TEXT = '#ffffff'
+const C_TS = '#4b5563'
+const C_NARRATIVE = '#c9d1d9'
+const C_NARRATIVE_BULLET = '#4b5563'
+const C_SYSTEM = '#10b981'
+const C_SEPARATOR = '#2d3342'
+
+function formatUserCommandTime(ts: number): string {
+  try {
+    return new Date(ts).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  } catch {
+    return ''
+  }
+}
 
 function splitForTerminal(text: string): string[] {
   const trimmed = text.trim()
@@ -17,6 +34,28 @@ function splitForTerminal(text: string): string[] {
   const sentences = trimmed.match(/[^.!?\n]+[.!?]?/g)?.map((s) => s.trim()).filter(Boolean)
   if (sentences && sentences.length > 1) return sentences
   return [trimmed]
+}
+
+function SystemActionLine({ children, pulsing }: { children: React.ReactNode; pulsing?: boolean }) {
+  return (
+    <div
+      className="mb-1 flex items-center gap-2 font-mono text-[11px] leading-snug"
+      style={{ color: C_SYSTEM }}
+    >
+      <span
+        className={cn('inline-block shrink-0 rounded-full', pulsing && 'animate-terminal-dot-pulse')}
+        style={{
+          width: 7,
+          height: 7,
+          background: C_SYSTEM,
+          marginBottom: 1,
+          verticalAlign: 'middle',
+        }}
+        aria-hidden
+      />
+      <span>{children}</span>
+    </div>
+  )
 }
 
 /** Streams the latest agent message body line-by-line; older messages render fully. */
@@ -57,25 +96,23 @@ function StreamedAgentBody({
 
   if (isAnalyzing) {
     return (
-      <div className="flex items-center gap-2 text-primary/90">
-        <span className="inline-flex gap-0.5">
-          {[0, 1, 2].map((j) => (
-            <span
-              key={j}
-              className="h-3 w-0.5 animate-pulse rounded-sm bg-primary"
-              style={{ animationDelay: `${j * 120}ms` }}
-            />
-          ))}
-        </span>
-        <span>{text}</span>
+      <div className="mb-2 pl-[2ch]">
+        <SystemActionLine pulsing>{text}</SystemActionLine>
       </div>
     )
   }
 
+  if (lines.length === 0) return null
+
   return (
-    <div className="space-y-0.5 whitespace-pre-wrap break-words">
+    <div className="mb-3 space-y-0.5 whitespace-pre-wrap break-words pl-[2ch] font-mono text-[11px] leading-relaxed">
       {lines.map((line, li) => (
-        <div key={li} className="text-[11px] leading-snug text-zinc-300">
+        <div key={li} style={{ color: C_NARRATIVE }}>
+          {li === 0 && (
+            <span className="select-none" style={{ color: C_NARRATIVE_BULLET }}>
+              ·{' '}
+            </span>
+          )}
           {line}
         </div>
       ))}
@@ -178,7 +215,7 @@ export default function AgentTerminal({
 
   function renderSiteTable(sites: AnalysisSite[]) {
     return (
-      <div className="mt-1 border-l-2 border-primary/40 pl-2 text-[10px] leading-relaxed text-zinc-400">
+      <div className="mt-2 border-l-2 border-primary/40 pl-2 text-[10px] leading-relaxed text-zinc-400">
         <div className="mb-0.5 font-semibold uppercase tracking-wider text-primary/90">Top sites</div>
         {sites.slice(0, 8).map((site, si) => (
           <button
@@ -196,6 +233,8 @@ export default function AgentTerminal({
       </div>
     )
   }
+
+  const waitingForModel = loading && !messages.some((m) => m.isAnalyzing)
 
   return (
     <div
@@ -274,29 +313,48 @@ export default function AgentTerminal({
             ────────────────────────────────────────────
           </div>
 
-          <div
-            ref={outputRef}
-            className="min-h-0 flex-1 overflow-y-auto px-2 py-2"
-          >
+          <div ref={outputRef} className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
             {messages.map((msg, i) => {
               const isLatestAgent = msg.role === 'agent' && i === messages.length - 1
+
               if (msg.role === 'user') {
                 return (
-                  <div key={i} className="mb-2 text-[11px] text-primary">
-                    <span className="text-zinc-600">&gt; </span>
-                    {msg.text}
-                  </div>
+                  <Fragment key={i}>
+                    {i > 0 && (
+                      <div
+                        className="my-3 border-t"
+                        style={{ borderColor: C_SEPARATOR, opacity: 0.55 }}
+                        aria-hidden
+                      />
+                    )}
+                    <div className="mb-2 flex items-baseline justify-between gap-3 font-mono text-[13px] leading-snug">
+                      <div className="min-w-0 flex-1">
+                        <span style={{ color: C_USER_GT }}>&gt; </span>
+                        <span style={{ color: C_USER_TEXT, fontWeight: 500 }}>{msg.text}</span>
+                      </div>
+                      {msg.ts != null && (
+                        <span className="shrink-0 tabular-nums text-[11px]" style={{ color: C_TS }}>
+                          {formatUserCommandTime(msg.ts)}
+                        </span>
+                      )}
+                    </div>
+                  </Fragment>
                 )
               }
+
               const logLine = formatActionLogLine(msg.action)
+              const showNarrative = Boolean(msg.text?.trim())
+
               return (
-                <div key={i} className="mb-3">
-                  <StreamedAgentBody text={msg.text} isLatest={isLatestAgent} isAnalyzing={msg.isAnalyzing} />
-                  {logLine && !msg.isAnalyzing && (
-                    <div className="mt-1 text-[10px] text-emerald-500/90">{logLine}</div>
+                <div key={i}>
+                  {showNarrative && (
+                    <StreamedAgentBody text={msg.text} isLatest={isLatestAgent} isAnalyzing={msg.isAnalyzing} />
                   )}
+                  {logLine && !msg.isAnalyzing && <SystemActionLine>{logLine}</SystemActionLine>}
                   {msg.insight && (
-                    <div className="mt-1.5 border border-primary/25 bg-primary/5 px-2 py-1.5 text-[10px] leading-snug text-primary/95">
+                    <div
+                      className="mt-2 border border-primary/25 border-l-[3px] border-l-primary/75 bg-primary/5 px-2 py-1.5 font-mono text-[10px] leading-snug text-primary/95"
+                    >
                       {splitForTerminal(msg.insight).map((line, li) => (
                         <div key={li}>{line}</div>
                       ))}
@@ -307,10 +365,9 @@ export default function AgentTerminal({
               )
             })}
 
-            {loading && !messages.some((m) => m.isAnalyzing) && (
-              <div className="flex items-center gap-1 text-[10px] text-zinc-600">
-                <span className="inline-block h-2 w-1 animate-pulse bg-primary" />
-                Awaiting model…
+            {waitingForModel && (
+              <div className="pl-[2ch]">
+                <SystemActionLine pulsing>Awaiting model…</SystemActionLine>
               </div>
             )}
           </div>
@@ -351,14 +408,23 @@ export default function AgentTerminal({
             }}
             className="flex shrink-0 items-center gap-2 border-t border-zinc-800 bg-[#080809] px-2 py-1.5"
           >
-            <span className="select-none text-primary/80">&gt;</span>
+            <span
+              className={cn(
+                'select-none font-mono text-[11px]',
+                loading || isRunningSequence ? 'animate-terminal-prompt-wait' : ''
+              )}
+              style={{ color: C_USER_GT }}
+            >
+              &gt;
+            </span>
             <input
               ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               disabled={loading || isRunningSequence}
               placeholder={isRunningSequence ? 'Sequence running…' : '_'}
-              className="min-w-0 flex-1 bg-transparent text-[11px] text-zinc-200 caret-primary outline-none placeholder:text-zinc-700 disabled:opacity-50"
+              className="min-w-0 flex-1 bg-transparent font-mono text-[11px] text-zinc-200 caret-primary outline-none placeholder:text-zinc-700 disabled:opacity-50"
+              style={{ color: C_USER_TEXT }}
               spellCheck={false}
               autoComplete="off"
             />

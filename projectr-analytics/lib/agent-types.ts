@@ -51,6 +51,8 @@ export interface AgentStep {
 export interface AgentMessage {
   role: 'user' | 'agent'
   text: string
+  /** Set when the user sent the message (for terminal timestamps). */
+  ts?: number
   action?: AgentAction
   insight?: string | null
   isAnalyzing?: boolean
