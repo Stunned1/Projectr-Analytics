@@ -3,6 +3,8 @@
 import { useState, useCallback, useMemo, useEffect } from 'react'
 import dynamic from 'next/dynamic'
 import Image from 'next/image'
+import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 import ExecutiveMemo from '@/components/ExecutiveMemo'
 import AgenticNormalizer from '@/components/AgenticNormalizer'
 import MarketReportExport from '@/components/MarketReportExport'
@@ -11,15 +13,17 @@ import type { CycleAnalysis } from '@/lib/cycle/types'
 import type { MapLayersSnapshot } from '@/lib/report/types'
 import { parseCycleAnalysisField } from '@/lib/report/validate-cycle'
 import { useSitesStore } from '@/lib/sites-store'
+import type { Site } from '@/lib/sites-store'
 import { useClientUploadMarkersStore } from '@/lib/client-upload-markers-store'
 import SitesBootstrap from '@/components/SitesBootstrap'
-import CommandCenterSidebar from '@/components/CommandCenterSidebar'
+import ShortlistPanel from '@/components/ShortlistPanel'
 import { takePendingNav } from '@/lib/pending-navigation'
 import { MetricTooltip } from '@/components/MetricTooltip'
 import { MomentumExplainBlock } from '@/components/MomentumExplainBlock'
 import { CycleExplainCard } from '@/components/CycleExplainCard'
 import type { MetricKey } from '@/lib/metric-definitions'
 import { metricKeyFromDataRow, sparklineMetricKey } from '@/lib/metric-definitions'
+import { cn } from '@/lib/utils'
 
 const CommandMap = dynamic(() => import('@/components/CommandMap'), { ssr: false })
 
@@ -399,12 +403,45 @@ function BubbleDivider() {
   return <div className="w-px h-8 bg-white/8 flex-shrink-0" />
 }
 
-function NavItem({ icon, label, active, onClick }: { icon: React.ReactNode; label: string; active?: boolean; onClick?: () => void }) {
+function SidebarNavLink({ href, icon, label }: { href: string; icon: React.ReactNode; label: string }) {
+  const pathname = usePathname()
+  const active =
+    href === '/'
+      ? pathname === '/' || pathname === ''
+      : pathname === href || pathname.startsWith(`${href}/`)
   return (
-    <button onClick={onClick} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${active ? 'bg-[#D76B3D]/15 text-[#D76B3D] border-l-2 border-[#D76B3D]' : 'text-zinc-400 hover:text-white hover:bg-white/5 border-l-2 border-transparent'}`}>
-      <span className="w-4 h-4 flex-shrink-0">{icon}</span>
+    <Link
+      href={href}
+      className={cn(
+        'flex w-full items-center gap-3 rounded-lg border-l-2 px-3 py-2.5 text-sm transition-colors',
+        active
+          ? 'border-primary bg-primary/15 text-primary'
+          : 'border-transparent text-zinc-400 hover:bg-white/5 hover:text-white'
+      )}
+    >
+      <span className="h-4 w-4 flex-shrink-0">{icon}</span>
       <span className="font-medium tracking-wide">{label}</span>
-    </button>
+    </Link>
+  )
+}
+
+function SidebarCollapsedLink({ href, icon, title }: { href: string; icon: React.ReactNode; title: string }) {
+  const pathname = usePathname()
+  const active =
+    href === '/'
+      ? pathname === '/' || pathname === ''
+      : pathname === href || pathname.startsWith(`${href}/`)
+  return (
+    <Link
+      href={href}
+      title={title}
+      className={cn(
+        'mx-auto flex h-9 w-9 items-center justify-center rounded-lg transition-colors',
+        active ? 'bg-primary/10 text-primary' : 'text-zinc-500 hover:text-white'
+      )}
+    >
+      {icon}
+    </Link>
   )
 }
 
@@ -422,7 +459,13 @@ const DEFAULT_MAP_LAYERS: MapLayersSnapshot = {
   choroplethMetric: 'zori',
 }
 const MapIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21" /><line x1="9" y1="3" x2="9" y2="18" /><line x1="15" y1="6" x2="15" y2="21" /></svg>
-const ReportsIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></svg>
+const UploadIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="17 8 12 3 7 8" />
+    <line x1="12" y1="3" x2="12" y2="15" />
+  </svg>
+)
 const SearchIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-3.5 h-3.5"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
 const ChevronRight = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3 h-3"><polyline points="9 18 15 12 9 6" /></svg>
 const CollapseIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4"><polyline points="15 18 9 12 15 6" /></svg>
@@ -450,7 +493,6 @@ export default function Home() {
   const [mapLayersSnapshot, setMapLayersSnapshot] = useState<MapLayersSnapshot>(DEFAULT_MAP_LAYERS)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [panelTab, setPanelTab] = useState<'data' | 'table'>('data')
-  const [activeNav, setActiveNav] = useState<'map' | 'reports'>('map')
 
   function handleNormalizerIngested(res: { triage: { bucket: string }; marker_points?: Array<{ lat: number; lng: number; value: number | null; label: string }> }) {
     // markers are handled via useClientUploadMarkersStore in AgenticNormalizer
@@ -859,17 +901,29 @@ export default function Home() {
           </button>
         )}
 
-        {/* Nav */}
-        <nav className="flex-1 px-2 py-3 flex flex-col gap-0.5">
+        {/* Nav + shortlist (same routes as /upload sidebar) */}
+        <nav className="flex min-h-0 flex-1 flex-col gap-0.5 px-2 py-3">
           {sidebarCollapsed ? (
-            <>
-              <button onClick={() => setActiveNav('map')} className={`flex items-center justify-center h-9 w-9 mx-auto rounded-lg transition-colors ${activeNav === 'map' ? 'text-[#D76B3D] bg-[#D76B3D]/10' : 'text-zinc-500 hover:text-white'}`} title="Map"><MapIcon /></button>
-              <button onClick={() => setActiveNav('reports')} className={`flex items-center justify-center h-9 w-9 mx-auto rounded-lg transition-colors ${activeNav === 'reports' ? 'text-[#D76B3D] bg-[#D76B3D]/10' : 'text-zinc-500 hover:text-white'}`} title="Case Studies"><ReportsIcon /></button>
-            </>
+            <div className="flex flex-col gap-1">
+              <SidebarCollapsedLink href="/" icon={<MapIcon />} title="Map" />
+              <SidebarCollapsedLink href="/upload" icon={<UploadIcon />} title="Client CSV upload" />
+            </div>
           ) : (
             <>
-              <NavItem icon={<MapIcon />} label="Map" active={activeNav === 'map'} onClick={() => setActiveNav('map')} />
-              <NavItem icon={<ReportsIcon />} label="Case Studies" active={activeNav === 'reports'} onClick={() => setActiveNav('reports')} />
+              <SidebarNavLink href="/" icon={<MapIcon />} label="Map" />
+              <SidebarNavLink href="/upload" icon={<UploadIcon />} label="Client CSV" />
+              <ShortlistPanel
+                onOpenSite={(site: Site) => {
+                  if (site.isAggregate && site.savedSearch?.trim()) {
+                    const q = site.savedSearch.trim()
+                    setSearchInput(q)
+                    void runAggregateSearch(q)
+                    return
+                  }
+                  setSearchInput(site.zip)
+                  void loadZipMarket(site.zip)
+                }}
+              />
             </>
           )}
         </nav>
