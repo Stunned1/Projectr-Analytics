@@ -9,6 +9,7 @@ import type { Layer, PickingInfo } from '@deck.gl/core'
 import type { GeoJSON, Feature, FeatureCollection, Geometry } from 'geojson'
 import { dedupedFetchJson } from '@/lib/request-cache'
 import type { Site } from '@/lib/sites-store'
+import type { AnalysisSite } from '@/components/AgentChat'
 
 function shortlistPinColor(stage: string | undefined): [number, number, number, number] {
   if (stage === 'Expansion') return [34, 197, 94, 255]
@@ -343,6 +344,22 @@ function ZoomTracker({ onZoomChange }: { onZoomChange: (zoom: number) => void })
 
 // ── Tilt controller ───────────────────────────────────────────────────────────
 
+// ── Fly-to controller — pans map to a lat/lng when agentFlyTo changes ──────────
+
+function FlyToController({ target }: { target: { lat: number; lng: number } | null | undefined }) {
+  const map = useMap()
+  const lastTarget = useRef<string>('')
+  useEffect(() => {
+    if (!map || !target) return
+    const key = `${target.lat},${target.lng}`
+    if (key === lastTarget.current) return
+    lastTarget.current = key
+    map.panTo({ lat: target.lat, lng: target.lng })
+    map.setZoom(17)
+  }, [map, target])
+  return null
+}
+
 function TiltController({ tilt, heading }: { tilt: number; heading: number }) {
   const map = useMap()
   useEffect(() => {
@@ -367,9 +384,14 @@ interface CommandMapProps {
   uploadedMarkers?: Array<{ lat: number; lng: number; value: number | null; label: string }> | null
   /** Saved analyst shortlist — always drawn while browsing other ZIPs. */
   shortlistSites?: Site[]
+  /** Analysis result sites from agent spatial model — glowing pins */
+  analysisSites?: AnalysisSite[]
+  /** Agent-controlled permit type filter */
+  agentPermitFilter?: string[] | null
   agentLayerOverrides?: Record<string, boolean>
   agentMetric?: 'zori' | 'zhvi' | null
   agentTilt?: number | null
+  agentFlyTo?: { lat: number; lng: number } | null
   /** Fired when toggles or agent overrides change — used for PDF export layer legend. */
   onLayersChange?: (snapshot: LayerState & { choroplethMetric: 'zori' | 'zhvi' }) => void
 }
@@ -382,9 +404,12 @@ function CommandMap({
   boroughBoundary,
   uploadedMarkers,
   shortlistSites = [],
+  analysisSites = [],
+  agentPermitFilter,
   agentLayerOverrides,
   agentMetric,
   agentTilt,
+  agentFlyTo,
   onLayersChange,
 }: CommandMapProps) {
   const perfDebug = process.env.NEXT_PUBLIC_PERF_DEBUG === '1'
@@ -1109,9 +1134,9 @@ function CommandMap({
     // NYC Permits — zoom-adaptive: heatmap below zoom 15, 3D ColumnLayer at zoom ≥ 15
     // All filtering is client-side — no API calls on zoom/pan
     if (effectiveLayers.nycPermits) {
-      const activeTypes = permitTypeFilter.size === 0
-        ? null // all types
-        : permitTypeFilter
+      // Merge agent permit filter with user toggle filter
+      const agentFilterSet = agentPermitFilter ? new Set(agentPermitFilter) : null
+      const activeTypes = agentFilterSet ?? (permitTypeFilter.size === 0 ? null : permitTypeFilter)
 
       if (mapZoom < 15) {
         // Heatmap — filter by type client-side
@@ -1243,6 +1268,41 @@ function CommandMap({
       )
     }
 
+    // Analysis result sites — glowing neon ColumnLayer pins from agent spatial model
+    if (analysisSites.length > 0) {
+      result.push(
+        new ColumnLayer({
+          id: 'analysis-sites',
+          data: analysisSites,
+          diskResolution: 6,
+          radius: 12,
+          extruded: true,
+          getPosition: (d: AnalysisSite) => [d.lng, d.lat],
+          getElevation: (d: AnalysisSite) => {
+            const t = d.score / 100
+            return 80 + t * 320
+          },
+          getFillColor: (d: AnalysisSite) => {
+            // Neon orange gradient — brighter = higher score
+            const t = d.score / 100
+            return [215, Math.round(107 + t * 80), 61, 255] as [number, number, number, number]
+          },
+          getLineColor: [255, 220, 180, 255],
+          lineWidthMinPixels: 1,
+          stroked: true,
+          pickable: true,
+          onHover: (info: PickingInfo) => {
+            const d = info.object as AnalysisSite | undefined
+            if (d) setTooltipStable({
+              x: info.x, y: info.y,
+              text: `★ ${d.address} · Score ${d.score.toFixed(0)} · ${(d.air_rights_sqft/1000).toFixed(0)}k sqft air rights`,
+            })
+            else setTooltipStable(null)
+          },
+        })
+      )
+    }
+
     // Uploaded client data markers (from Agentic Normalizer) — 3D columns
     if (effectiveLayers.clientData && uploadedMarkers?.length) {
       const values = uploadedMarkers.map((d) => d.value ?? 0).filter((v) => v > 0)
@@ -1276,7 +1336,7 @@ function CommandMap({
     }
 
     return result
-  }, [primaryBoundary, neighborBoundaries, cityBoundaries, boroughBoundary, transitStops, transitRoutes, blockGroupData, parcelData, parcelColorMode, tractData, amenityPoints, poiPoints, floodData, nycPermitData, permitHeatPoints, permitTypeFilter, mapZoom, momentumScores, effectiveLayers, colorScale, primaryMetricValue, effectiveMetric, zip, setTooltipStable, uploadedMarkers, shortlistSites])
+  }, [primaryBoundary, neighborBoundaries, cityBoundaries, boroughBoundary, transitStops, transitRoutes, blockGroupData, parcelData, parcelColorMode, tractData, amenityPoints, poiPoints, floodData, nycPermitData, permitHeatPoints, permitTypeFilter, agentPermitFilter, mapZoom, momentumScores, effectiveLayers, colorScale, primaryMetricValue, effectiveMetric, zip, setTooltipStable, uploadedMarkers, shortlistSites, analysisSites])
 
   const handleToggle = useCallback((key: keyof LayerState) => {
     setLayers((prev) => ({ ...prev, [key]: !prev[key] }))
@@ -1297,6 +1357,7 @@ function CommandMap({
           <MapFitter boundary={primaryBoundary ?? (cityBoundaries[0]?.geojson ?? null)} zip={zip ?? cityZips?.[0]?.zip ?? null} />
           <TiltController tilt={tilt} heading={heading} />
           <ZoomTracker onZoomChange={handleZoomChange} />
+          <FlyToController target={agentFlyTo} />
           <DeckGlOverlay layers={deckLayers} />
         </Map>
       </APIProvider>

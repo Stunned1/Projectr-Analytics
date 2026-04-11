@@ -3,13 +3,42 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 
 export interface AgentAction {
-  type: 'toggle_layer' | 'toggle_layers' | 'set_metric' | 'search' | 'generate_memo' | 'set_tilt' | 'none'
+  type: 'toggle_layer' | 'toggle_layers' | 'set_metric' | 'search' | 'generate_memo' | 'set_tilt' | 'run_analysis' | 'show_sites' | 'set_permit_filter' | 'fly_to' | 'none'
   layer?: string
   value?: boolean
   layers?: Record<string, boolean>
   metric?: 'zori' | 'zhvi'
   query?: string
   tilt?: number
+  borough?: string
+  top_n?: number
+  sites?: AnalysisSite[]
+  types?: string[]
+  lat?: number
+  lng?: number
+  site?: AnalysisSite
+}
+
+export interface AnalysisSite {
+  address: string
+  lat: number
+  lng: number
+  zone: string
+  built_far: number
+  max_far: number
+  air_rights_sqft: number
+  far_utilization: number
+  lot_area: number
+  assessed_value: number
+  score: number
+  zori_growth: number | null
+  momentum: number | null
+}
+
+interface AgentStep {
+  delay: number
+  message: string
+  action: AgentAction
 }
 
 interface Message {
@@ -17,7 +46,8 @@ interface Message {
   text: string
   action?: AgentAction
   insight?: string | null
-  timestamp: Date
+  isAnalyzing?: boolean
+  analysisSites?: AnalysisSite[]
 }
 
 interface MapContext {
@@ -52,6 +82,9 @@ const ACTION_LABELS: Record<string, string> = {
   search: '↳ Navigating to market',
   generate_memo: '↳ Opening memo',
   set_tilt: '↳ Map tilted',
+  run_analysis: '↳ Running spatial model...',
+  show_sites: '↳ Top sites revealed',
+  set_permit_filter: '↳ Permit filter applied',
   none: '',
 }
 
@@ -65,14 +98,15 @@ export default function AgentChat({ mapContext, onAction, isOpen, onToggle, hasS
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'agent',
-      text: 'Spatial analyst ready. Ask me to navigate markets, toggle layers, or analyze conditions.',
-      timestamp: new Date(),
+      text: 'Spatial analyst ready. Paste a case study or ask me to navigate markets, toggle layers, or run a site analysis.',
     },
   ])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [isRunningSequence, setIsRunningSequence] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const sequenceRef = useRef<ReturnType<typeof setTimeout>[]>([])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -82,9 +116,98 @@ export default function AgentChat({ mapContext, onAction, isOpen, onToggle, hasS
     if (isOpen) setTimeout(() => inputRef.current?.focus(), 150)
   }, [isOpen])
 
+  // Clear pending timeouts on unmount
+  useEffect(() => {
+    return () => { sequenceRef.current.forEach(clearTimeout) }
+  }, [])
+
+  const runAnalysis = useCallback(async (action: AgentAction) => {
+    const borough = action.borough ?? 'manhattan'
+    const topN = action.top_n ?? 5
+
+    // Add analyzing message
+    setMessages((prev) => [...prev, {
+      role: 'agent',
+      text: `Running spatial model across ${borough} parcels...`,
+      isAnalyzing: true,
+    }])
+
+    try {
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ borough, top_n: topN }),
+      })
+      const data = await res.json()
+
+      if (data.error || !data.sites?.length) {
+        setMessages((prev) => [...prev.slice(0, -1), {
+          role: 'agent',
+          text: `Analysis complete — no qualifying sites found. ${data.error ?? ''}`,
+        }])
+        return
+      }
+
+      const sites: AnalysisSite[] = data.sites
+
+      // Remove analyzing message, add results
+      setMessages((prev) => [...prev.slice(0, -1), {
+        role: 'agent',
+        text: `Analysis complete. Here are the top ${sites.length} high-upside parcels that maximize unbuilt FAR, sit inside momentum zones, and offer the highest projected rental yield.`,
+        analysisSites: sites,
+      }])
+
+      // Trigger show_sites action — clears clutter layers, drops result pins
+      onAction({
+        type: 'toggle_layers',
+        layers: { parcels: false, permits: false },
+      })
+      setTimeout(() => {
+        onAction({ type: 'show_sites', sites })
+      }, 600)
+    } catch {
+      setMessages((prev) => [...prev.slice(0, -1), {
+        role: 'agent',
+        text: 'Analysis failed. Please try again.',
+      }])
+    }
+  }, [onAction])
+
+  const executeStep = useCallback((step: AgentStep) => {
+    setMessages((prev) => {
+      // Update last agent message or add new one
+      const last = prev[prev.length - 1]
+      if (last?.role === 'agent' && !last.analysisSites) {
+        return [...prev.slice(0, -1), { role: 'agent', text: step.message, action: step.action }]
+      }
+      return [...prev, { role: 'agent', text: step.message, action: step.action }]
+    })
+
+    if (step.action.type === 'run_analysis') {
+      void runAnalysis(step.action)
+    } else if (step.action.type !== 'none') {
+      onAction(step.action)
+    }
+  }, [onAction, runAnalysis])
+
+  const runSequence = useCallback((steps: AgentStep[]) => {
+    setIsRunningSequence(true)
+    sequenceRef.current.forEach(clearTimeout)
+    sequenceRef.current = []
+
+    steps.forEach((step) => {
+      const t = setTimeout(() => executeStep(step), step.delay)
+      sequenceRef.current.push(t)
+    })
+
+    const maxDelay = Math.max(...steps.map((s) => s.delay)) + 1000
+    const done = setTimeout(() => setIsRunningSequence(false), maxDelay)
+    sequenceRef.current.push(done)
+  }, [executeStep])
+
   const sendMessage = useCallback(async (text: string) => {
-    if (!text.trim() || loading) return
-    setMessages((prev) => [...prev, { role: 'user', text: text.trim(), timestamp: new Date() }])
+    if (!text.trim() || loading || isRunningSequence) return
+    setMessages((prev) => [...prev, { role: 'user', text: text.trim() }])
     setInput('')
     setLoading(true)
 
@@ -97,25 +220,36 @@ export default function AgentChat({ mapContext, onAction, isOpen, onToggle, hasS
       const data = await res.json()
 
       if (data.error) {
-        setMessages((prev) => [...prev, { role: 'agent', text: 'Something went wrong. Try again.', timestamp: new Date() }])
+        setMessages((prev) => [...prev, { role: 'agent', text: 'Something went wrong. Try again.' }])
         return
       }
 
+      // Multi-step sequence
+      if (data.steps?.length) {
+        setMessages((prev) => [...prev, { role: 'agent', text: data.message, insight: data.insight }])
+        runSequence(data.steps)
+        return
+      }
+
+      // Single action
       setMessages((prev) => [...prev, {
         role: 'agent',
         text: data.message,
         action: data.action?.type !== 'none' ? data.action : undefined,
         insight: data.insight,
-        timestamp: new Date(),
       }])
 
-      if (data.action && data.action.type !== 'none') onAction(data.action)
+      if (data.action?.type === 'run_analysis') {
+        void runAnalysis(data.action)
+      } else if (data.action && data.action.type !== 'none') {
+        onAction(data.action)
+      }
     } catch {
-      setMessages((prev) => [...prev, { role: 'agent', text: 'Connection error.', timestamp: new Date() }])
+      setMessages((prev) => [...prev, { role: 'agent', text: 'Connection error.' }])
     } finally {
       setLoading(false)
     }
-  }, [loading, mapContext, onAction])
+  }, [loading, isRunningSequence, mapContext, onAction, runSequence, runAnalysis])
 
   const bottomOffset = hasStatsBar ? 'bottom-[76px]' : 'bottom-4'
 
@@ -123,12 +257,12 @@ export default function AgentChat({ mapContext, onAction, isOpen, onToggle, hasS
     return (
       <button
         onClick={onToggle}
-        className={`absolute ${bottomOffset} right-4 z-40 flex h-10 w-10 items-center justify-center rounded-full bg-gradient-primary shadow-lg shadow-black/40 transition-all hover:scale-105`}
+        className={`absolute ${bottomOffset} right-4 z-40 w-10 h-10 rounded-full flex items-center justify-center shadow-lg transition-all hover:scale-105`}
+        style={{ background: 'linear-gradient(135deg, #D76B3D, #b85a30)' }}
         title="Open AI Agent"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={1.5} className="w-4 h-4">
-          <path d="M12 2a10 10 0 0 1 10 10c0 5.52-4.48 10-10 10S2 17.52 2 12 6.48 2 12 2z" />
-          <path d="M8 12h8M12 8v8" strokeLinecap="round" />
+          <circle cx="12" cy="12" r="3" /><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83" />
         </svg>
       </button>
     )
@@ -136,38 +270,109 @@ export default function AgentChat({ mapContext, onAction, isOpen, onToggle, hasS
 
   return (
     <div
-      className={`absolute ${bottomOffset} right-4 z-40 flex w-[340px] flex-col overflow-hidden rounded-2xl border border-border/80 bg-popover/85 shadow-2xl shadow-black/50 backdrop-blur-xl`}
+      className={`absolute ${bottomOffset} right-4 z-40 w-[360px] flex flex-col rounded-2xl overflow-hidden shadow-2xl`}
+      style={{
+        background: 'rgba(6, 6, 6, 0.75)',
+        backdropFilter: 'blur(20px)',
+        WebkitBackdropFilter: 'blur(20px)',
+        border: '1px solid rgba(255,255,255,0.07)',
+      }}
     >
-      {/* Close button — no header, just a floating × in the corner */}
+      {/* Close button */}
       <button
         onClick={onToggle}
-        className="absolute top-2.5 right-3 z-10 flex h-6 w-6 items-center justify-center rounded-md text-lg leading-none text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+        className="absolute top-2.5 right-3 z-10 text-zinc-600 hover:text-zinc-300 transition-colors text-lg leading-none w-6 h-6 flex items-center justify-center rounded-md hover:bg-white/5"
       >×</button>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 pt-8 pb-3 space-y-3 max-h-64">
+      <div className="flex-1 overflow-y-auto px-4 pt-8 pb-3 space-y-3 max-h-[420px]">
         {messages.map((msg, i) => (
           <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
             {msg.role === 'user' ? (
-              <div className="max-w-[88%] rounded-xl border border-primary/30 bg-primary/18 px-3.5 py-2.5 text-[13px] leading-relaxed text-foreground">
+              <div
+                className="max-w-[88%] rounded-xl px-3.5 py-2.5 text-[13px] leading-relaxed text-white"
+                style={{ background: 'rgba(215, 107, 61, 0.18)', border: '1px solid rgba(215, 107, 61, 0.28)' }}
+              >
                 {msg.text}
               </div>
+            ) : msg.isAnalyzing ? (
+              <div className="flex items-center gap-2 px-0.5 py-1">
+                {/* Scanning animation */}
+                <div className="flex gap-0.5">
+                  {[0, 1, 2, 3, 4].map((j) => (
+                    <div
+                      key={j}
+                      className="w-0.5 rounded-full bg-[#D76B3D]"
+                      style={{
+                        height: 16,
+                        animation: 'scanBar 1s ease-in-out infinite',
+                        animationDelay: `${j * 0.1}s`,
+                        opacity: 0.7,
+                      }}
+                    />
+                  ))}
+                </div>
+                <p className="text-[13px] text-zinc-400">{msg.text}</p>
+              </div>
             ) : (
-              <p className="max-w-[95%] px-0.5 text-[13px] leading-relaxed text-muted-foreground">
-                {msg.text}
-              </p>
+              <p className="max-w-[95%] text-[13px] leading-relaxed text-zinc-300 px-0.5">{msg.text}</p>
             )}
-            {msg.action && (
-              <p className="mt-0.5 px-0.5 text-[10px] text-primary/65">{ACTION_LABELS[msg.action.type]}</p>
+
+            {msg.action && ACTION_LABELS[msg.action.type] && (
+              <p className="text-[10px] text-[#D76B3D]/60 mt-0.5 px-0.5">{ACTION_LABELS[msg.action.type]}</p>
             )}
+
             {msg.insight && (
-              <div className="mt-1 max-w-[88%] rounded-lg border border-primary/20 bg-primary/8 px-3 py-1.5 text-[11px] text-primary">
+              <div className="mt-1 max-w-[88%] px-3 py-1.5 rounded-lg text-[11px] text-[#D76B3D]"
+                style={{ background: 'rgba(215,107,61,0.07)', border: '1px solid rgba(215,107,61,0.12)' }}>
                 {msg.insight}
+              </div>
+            )}
+
+            {/* Analysis results card */}
+            {msg.analysisSites && msg.analysisSites.length > 0 && (
+              <div className="mt-2 w-full space-y-1.5">
+                {msg.analysisSites.map((site, si) => (
+                  <button
+                    key={si}
+                    onClick={() => onAction({ type: 'fly_to', lat: site.lat, lng: site.lng, site })}
+                    className="w-full text-left rounded-xl px-3 py-2.5 transition-all hover:scale-[1.01] active:scale-[0.99]"
+                    style={{ background: 'rgba(215,107,61,0.08)', border: '1px solid rgba(215,107,61,0.2)' }}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white text-[12px] font-semibold leading-tight truncate">
+                          <span className="text-[#D76B3D] mr-1">#{si + 1}</span>{site.address}
+                        </p>
+                        <p className="text-zinc-500 text-[10px] mt-0.5">{site.zone} · tap to fly there</p>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="text-[#D76B3D] text-[11px] font-bold">{site.score.toFixed(0)}</p>
+                        <p className="text-zinc-600 text-[9px]">score</p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-1 mt-2">
+                      <div>
+                        <p className="text-zinc-600 text-[9px] uppercase tracking-wide">Air Rights</p>
+                        <p className="text-white text-[10px] font-medium">{(site.air_rights_sqft / 1000).toFixed(0)}k sqft</p>
+                      </div>
+                      <div>
+                        <p className="text-zinc-600 text-[9px] uppercase tracking-wide">FAR Used</p>
+                        <p className="text-white text-[10px] font-medium">{(site.far_utilization * 100).toFixed(0)}%</p>
+                      </div>
+                      <div>
+                        <p className="text-zinc-600 text-[9px] uppercase tracking-wide">Nearby Dev</p>
+                        <p className="text-white text-[10px] font-medium">{site.momentum ?? 0} permits</p>
+                      </div>
+                    </div>
+                  </button>
+                ))}
               </div>
             )}
           </div>
         ))}
-        {loading && (
+
+        {(loading || isRunningSequence) && !messages.some((m) => m.isAnalyzing) && (
           <div className="flex items-center gap-1 px-0.5 py-1">
             {[0, 150, 300].map((d) => (
               <div key={d} className="w-1 h-1 rounded-full bg-zinc-600 animate-bounce" style={{ animationDelay: `${d}ms` }} />
@@ -184,7 +389,8 @@ export default function AgentChat({ mapContext, onAction, isOpen, onToggle, hasS
             <button
               key={s}
               onClick={() => sendMessage(s)}
-              className="rounded-full border border-border/80 bg-muted/30 px-3 py-1 text-[11px] text-muted-foreground transition-all hover:border-border hover:text-foreground"
+              className="text-[11px] text-zinc-400 px-3 py-1 rounded-full transition-all hover:text-white"
+              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}
             >
               {s}
             </button>
@@ -196,20 +402,22 @@ export default function AgentChat({ mapContext, onAction, isOpen, onToggle, hasS
       <div className="px-3 pb-3 pt-1">
         <form
           onSubmit={(e) => { e.preventDefault(); sendMessage(input) }}
-          className="flex items-center gap-2 rounded-xl border border-border/80 bg-muted/25 px-3 py-2"
+          className="flex gap-2 items-center rounded-xl px-3 py-2"
+          style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}
         >
           <input
             ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask about this market..."
-            disabled={loading}
-            className="flex-1 bg-transparent text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
+            placeholder={isRunningSequence ? 'Analysis in progress...' : 'Ask or paste a case study...'}
+            disabled={loading || isRunningSequence}
+            className="flex-1 bg-transparent text-[13px] text-white placeholder-zinc-600 focus:outline-none disabled:opacity-50"
           />
           <button
             type="submit"
-            disabled={loading || !input.trim()}
-            className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg transition-all disabled:opacity-30 ${input.trim() ? 'bg-gradient-primary' : 'bg-muted/40'}`}
+            disabled={loading || isRunningSequence || !input.trim()}
+            className="w-7 h-7 rounded-lg flex items-center justify-center transition-all disabled:opacity-30 flex-shrink-0"
+            style={{ background: input.trim() && !isRunningSequence ? 'linear-gradient(135deg, #D76B3D, #b85a30)' : 'rgba(255,255,255,0.05)' }}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2} className="w-3.5 h-3.5">
               <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
@@ -217,6 +425,13 @@ export default function AgentChat({ mapContext, onAction, isOpen, onToggle, hasS
           </button>
         </form>
       </div>
+
+      <style>{`
+        @keyframes scanBar {
+          0%, 100% { transform: scaleY(0.3); }
+          50% { transform: scaleY(1); }
+        }
+      `}</style>
     </div>
   )
 }

@@ -485,6 +485,10 @@ export default function Home() {
   const [agentLayerOverrides, setAgentLayerOverrides] = useState<Record<string, boolean>>({})
   const [agentMetric, setAgentMetric] = useState<'zori' | 'zhvi' | null>(null)
   const [agentTilt, setAgentTilt] = useState<number | null>(null)
+  const [analysisSites, setAnalysisSites] = useState<import('@/components/AgentChat').AnalysisSite[]>([])
+  const [agentPermitFilter, setAgentPermitFilter] = useState<string[] | null>(null)
+  const [selectedSite, setSelectedSite] = useState<import('@/components/AgentChat').AnalysisSite | null>(null)
+  const [agentFlyTo, setAgentFlyTo] = useState<{ lat: number; lng: number } | null>(null)
   const [transit, setTransit] = useState<TransitData | null>(null)
   const [trends, setTrends] = useState<TrendsData | null>(null)
   const [cycleData, setCycleData] = useState<CycleAnalysis | null>(null)
@@ -541,6 +545,18 @@ export default function Home() {
         break
       case 'set_tilt':
         if (action.tilt != null) setAgentTilt(action.tilt)
+        break
+      case 'show_sites':
+        if (action.sites) setAnalysisSites(action.sites)
+        break
+      case 'set_permit_filter':
+        if (action.types) setAgentPermitFilter(action.types)
+        break
+      case 'fly_to':
+        if (action.lat != null && action.lng != null) {
+          setAgentFlyTo({ lat: action.lat, lng: action.lng })
+          if (action.site) setSelectedSite(action.site)
+        }
         break
     }
   }
@@ -965,9 +981,12 @@ export default function Home() {
           boroughBoundary={boroughBoundary}
           uploadedMarkers={uploadedMarkers}
           shortlistSites={sitesForMap}
+          analysisSites={analysisSites}
+          agentPermitFilter={agentPermitFilter}
           agentLayerOverrides={agentLayerOverrides}
           agentMetric={agentMetric}
           agentTilt={agentTilt}
+          agentFlyTo={agentFlyTo}
           onLayersChange={handleMapLayersChange}
         />
 
@@ -1081,6 +1100,74 @@ export default function Home() {
           onToggle={() => setAgentOpen(!agentOpen)}
           hasStatsBar={!!(result || aggregateData)}
         />
+
+        {/* Site Detail Popup — shown when a site card is clicked in agent chat */}
+        {selectedSite && (
+          <div
+            className="absolute bottom-5 left-5 z-50 w-72 rounded-2xl overflow-hidden shadow-2xl"
+            style={{ background: 'rgba(8,8,8,0.92)', backdropFilter: 'blur(20px)', border: '1px solid rgba(215,107,61,0.3)' }}
+          >
+            <div className="px-4 pt-4 pb-3 border-b border-white/6">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-[10px] text-[#D76B3D] uppercase tracking-widest font-semibold mb-0.5">Top Site</p>
+                  <p className="text-white font-bold text-sm leading-tight">{selectedSite.address}</p>
+                  <p className="text-zinc-500 text-[10px] mt-0.5">{selectedSite.zone}</p>
+                </div>
+                <div className="text-right flex-shrink-0">
+                  <p className="text-[#D76B3D] text-xl font-bold leading-none">{selectedSite.score.toFixed(0)}</p>
+                  <p className="text-zinc-600 text-[9px]">score</p>
+                </div>
+              </div>
+            </div>
+            <div className="px-4 py-3 space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-white/4 rounded-lg px-2.5 py-2">
+                  <p className="text-zinc-600 text-[9px] uppercase tracking-wide">Air Rights</p>
+                  <p className="text-white text-sm font-semibold">{(selectedSite.air_rights_sqft / 1000).toFixed(0)}k sqft</p>
+                  <p className="text-zinc-500 text-[9px]">unused dev potential</p>
+                </div>
+                <div className="bg-white/4 rounded-lg px-2.5 py-2">
+                  <p className="text-zinc-600 text-[9px] uppercase tracking-wide">FAR Utilization</p>
+                  <p className="text-white text-sm font-semibold">{(selectedSite.far_utilization * 100).toFixed(0)}%</p>
+                  <p className="text-zinc-500 text-[9px]">of {selectedSite.max_far.toFixed(1)} max FAR built</p>
+                </div>
+                <div className="bg-white/4 rounded-lg px-2.5 py-2">
+                  <p className="text-zinc-600 text-[9px] uppercase tracking-wide">Nearby Permits</p>
+                  <p className="text-white text-sm font-semibold">{selectedSite.momentum ?? 0}</p>
+                  <p className="text-zinc-500 text-[9px]">NB + A1 within 500m</p>
+                </div>
+                <div className="bg-white/4 rounded-lg px-2.5 py-2">
+                  <p className="text-zinc-600 text-[9px] uppercase tracking-wide">ZORI Growth</p>
+                  <p className="text-white text-sm font-semibold">{selectedSite.zori_growth != null ? `+${selectedSite.zori_growth.toFixed(1)}%` : '—'}</p>
+                  <p className="text-zinc-500 text-[9px]">12-month YoY</p>
+                </div>
+              </div>
+              <div className="bg-[#D76B3D]/6 border border-[#D76B3D]/15 rounded-lg px-3 py-2.5">
+                <p className="text-[10px] text-[#D76B3D] font-semibold mb-1">Why this site?</p>
+                <p className="text-zinc-300 text-[11px] leading-relaxed">
+                  {selectedSite.far_utilization < 0.2
+                    ? `Severely underbuilt — only ${(selectedSite.far_utilization * 100).toFixed(0)}% of allowable FAR developed. `
+                    : `Underutilized at ${(selectedSite.far_utilization * 100).toFixed(0)}% of max FAR. `}
+                  {(selectedSite.momentum ?? 0) >= 10
+                    ? `Strong development momentum with ${selectedSite.momentum} nearby permits signaling active neighborhood investment. `
+                    : `Emerging area with ${selectedSite.momentum ?? 0} nearby permits. `}
+                  {(selectedSite.air_rights_sqft / 1000) > 1000
+                    ? `${(selectedSite.air_rights_sqft / 1000).toFixed(0)}k sqft of air rights represents significant high-density upside in a ${selectedSite.zone} zone.`
+                    : `${(selectedSite.air_rights_sqft / 1000).toFixed(0)}k sqft of buildable air rights in ${selectedSite.zone} zoning.`}
+                </p>
+              </div>
+            </div>
+            <div className="px-4 pb-3">
+              <button
+                onClick={() => setSelectedSite(null)}
+                className="w-full text-[10px] text-zinc-600 hover:text-zinc-300 transition-colors py-1"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Right Data Panel ── */}
