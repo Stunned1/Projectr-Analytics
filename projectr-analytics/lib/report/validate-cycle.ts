@@ -1,4 +1,5 @@
 import type { CycleAnalysis } from '@/lib/cycle/types'
+import { sanitizeCycleAnalysisForDisplay } from '@/lib/sanitize-gemini-string'
 
 function isSignalDetail(x: unknown): boolean {
   if (!x || typeof x !== 'object') return false
@@ -25,5 +26,5 @@ export function parseCycleAnalysisField(raw: unknown): CycleAnalysis | null {
   if (!sig || typeof sig !== 'object') return null
   const s = sig as Record<string, unknown>
   if (!isSignalDetail(s.rent) || !isSignalDetail(s.vacancy) || !isSignalDetail(s.permits) || !isSignalDetail(s.employment)) return null
-  return c as unknown as CycleAnalysis
+  return sanitizeCycleAnalysisForDisplay(c as unknown as CycleAnalysis)
 }

@@ -1,6 +1,7 @@
 import React from 'react'
 import { View, Text, StyleSheet, Svg, Line, Rect, Circle, Text as SvgText } from '@react-pdf/renderer'
 import type { CycleAnalysis, CycleSignalDetail, CyclePosition, CycleStage } from '@/lib/cycle/types'
+import { sanitizeCycleSignalText } from '@/lib/sanitize-gemini-string'
 
 const WHEEL = 200
 const C = WHEEL / 2
@@ -108,16 +109,17 @@ export function CycleWheelPdf({ cycle }: { cycle: CycleAnalysis }) {
   )
 }
 
+/** ASCII marks — Helvetica often omits Unicode arrows (same convention as legacy PDF signal tiles). */
 function scoreArrow(detail: CycleSignalDetail, kind: 'rent' | 'vacancy' | 'permits' | 'employment'): string {
   const s = detail.score
   if (kind === 'vacancy') {
-    if (s === 1) return '\u2193'
-    if (s === -1) return '\u2191'
-    return '\u2192'
+    if (s === 1) return '-'
+    if (s === -1) return '+'
+    return '~'
   }
-  if (s === 1) return '\u2191'
-  if (s === -1) return '\u2193'
-  return '\u2192'
+  if (s === 1) return '+'
+  if (s === -1) return '-'
+  return '~'
 }
 
 function tileColors(score: -1 | 0 | 1): { bg: string; border: string; title: string } {
@@ -136,13 +138,16 @@ function CycleTile({
   detail: CycleSignalDetail
 }) {
   const c = tileColors(detail.score)
+  const direction = sanitizeCycleSignalText(detail.direction)
+  const value = sanitizeCycleSignalText(detail.value)
+  const source = sanitizeCycleSignalText(detail.source)
   return (
     <View style={[styles.tile, { backgroundColor: c.bg, borderColor: c.border }]}>
       <Text style={[styles.tileTitle, { color: c.title }]}>{label}</Text>
       <Text style={[styles.tileArrow, { color: c.title }]}>{scoreArrow(detail, kind)}</Text>
-      <Text style={styles.tileDirection}>{detail.direction}</Text>
-      <Text style={styles.tileValue}>{detail.value}</Text>
-      <Text style={styles.tileSource}>{detail.source}</Text>
+      <Text style={styles.tileDirection}>{direction}</Text>
+      <Text style={styles.tileValue}>{value}</Text>
+      <Text style={styles.tileSource}>{source}</Text>
     </View>
   )
 }

@@ -1,4 +1,5 @@
 import type { CycleAnalysis, CycleSignalDetail } from '@/lib/cycle/types'
+import { sanitizeCycleSignalText } from '@/lib/sanitize-gemini-string'
 import type { SignalIndicator } from './types'
 
 function rentArrow(score: number): SignalIndicator['arrow'] {
@@ -23,7 +24,7 @@ function employmentArrow(score: number): SignalIndicator['arrow'] {
 }
 
 function lineFromDetail(d: CycleSignalDetail): string {
-  return `${d.direction} — ${d.value}`
+  return `${sanitizeCycleSignalText(d.direction)} — ${sanitizeCycleSignalText(d.value)}`
 }
 
 export function cycleAnalysisToSignalIndicators(cycle: CycleAnalysis): SignalIndicator[] {

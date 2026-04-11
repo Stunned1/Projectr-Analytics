@@ -1,3 +1,4 @@
+import { sanitizeCycleAnalysisForDisplay } from '@/lib/sanitize-gemini-string'
 import { classifyCycle } from './classifier'
 import { computeCycleSignals } from './compute-signals'
 import { fallbackCycleNarrative, generateCycleNarrative } from './gemini-cycle-narrative'
@@ -19,5 +20,5 @@ export async function analyzeCycleForZip(
   const narrative = options?.skipGemini
     ? fallbackCycleNarrative(classified)
     : await generateCycleNarrative(classified, marketLabel)
-  return { ...classified, narrative }
+  return sanitizeCycleAnalysisForDisplay({ ...classified, narrative })
 }

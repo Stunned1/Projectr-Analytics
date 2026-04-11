@@ -1,14 +1,14 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
-import { stripGeminiStringWrappers } from '@/lib/sanitize-gemini-string'
+import { sanitizeCycleSignalText, stripGeminiStringWrappers } from '@/lib/sanitize-gemini-string'
 import type { CycleAnalysis } from './types'
 
 export function fallbackCycleNarrative(partial: Omit<CycleAnalysis, 'narrative'>): string {
   const { cycleStage, cyclePosition, signals, dataQuality, transitional } = partial
   const bits = [
-    `Rent: ${signals.rent.direction} (${signals.rent.value}).`,
-    `Vacancy: ${signals.vacancy.direction} (${signals.vacancy.value}).`,
-    `Permits: ${signals.permits.direction} (${signals.permits.value}).`,
-    `Employment: ${signals.employment.direction} (${signals.employment.value}).`,
+    `Rent: ${sanitizeCycleSignalText(signals.rent.direction)} (${sanitizeCycleSignalText(signals.rent.value)}).`,
+    `Vacancy: ${sanitizeCycleSignalText(signals.vacancy.direction)} (${sanitizeCycleSignalText(signals.vacancy.value)}).`,
+    `Permits: ${sanitizeCycleSignalText(signals.permits.direction)} (${sanitizeCycleSignalText(signals.permits.value)}).`,
+    `Employment: ${sanitizeCycleSignalText(signals.employment.direction)} (${sanitizeCycleSignalText(signals.employment.value)}).`,
   ]
   const tail = transitional
     ? ' Signals are mixed; treat this as a transitional submarket until the set aligns.'
