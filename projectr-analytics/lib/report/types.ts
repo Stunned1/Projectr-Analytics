@@ -68,6 +68,12 @@ export interface MetroBenchmark {
   avg_zori: number | null
   avg_zhvi: number | null
   zip_count: number
+  /** Simple mean of ACS vacancy % across metro peer ZIPs that have cached rows */
+  avg_vacancy_rate: number | null
+  /** Latest FRED unemployment % per peer ZIP, then simple mean */
+  avg_unemployment_rate: number | null
+  /** Simple mean of ACS movers (different state) per peer ZIP */
+  avg_migration_movers: number | null
 }
 
 export interface SignalIndicator {

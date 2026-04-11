@@ -132,6 +132,9 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
 
   const metroZori = metro?.avg_zori ?? null
   const metroZhvi = metro?.avg_zhvi ?? null
+  const metroVac = metro?.avg_vacancy_rate ?? null
+  const metroUnemp = metro?.avg_unemployment_rate ?? null
+  const metroMig = metro?.avg_migration_movers ?? null
 
   const tableRows: { label: string; sub: string; bench: string }[] = [
     {
@@ -142,7 +145,7 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
     {
       label: 'Vacancy rate',
       sub: payload.census.vacancy_rate != null ? `${payload.census.vacancy_rate.toFixed(1)}%` : '—',
-      bench: '—',
+      bench: metroVac != null ? `${metroVac.toFixed(1)}% avg` : '—',
     },
     {
       label: 'Permits (county BPS, 2021–23 units)',
@@ -162,7 +165,10 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
           : payload.employment.unemployment_rate != null
             ? `${payload.employment.unemployment_rate.toFixed(1)}% unemployment`
             : '—',
-      bench: '—',
+      bench:
+        metroUnemp != null
+          ? `${metroUnemp.toFixed(1)}% unempl. (avg)`
+          : '—',
     },
     {
       label: 'Migration / mobility (ACS)',
@@ -170,7 +176,10 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
         payload.census.migration_movers != null
           ? `${Math.round(payload.census.migration_movers).toLocaleString()} movers (diff. state)`
           : '—',
-      bench: '—',
+      bench:
+        metroMig != null
+          ? `${metroMig.toLocaleString()} movers (avg / ZIP)`
+          : '—',
     },
   ]
 
@@ -239,8 +248,9 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
         ))}
         {metro && (
           <Text style={[styles.foot, { marginTop: 6 }]}>
-            Metro benchmark averages ZORI/ZHVI across {metro.zip_count} Zillow-tracked ZIPs in the same metro (where
-            available).
+            Metro peer column: ZORI/ZHVI are simple means across {metro.zip_count} Zillow-tracked ZIPs in the same metro.
+            Vacancy, unemployment, and migration benchmarks are simple means across peer ZIPs that have those rows in
+            cache (ACS / FRED) — many peers may be missing data until cold-loaded.
           </Text>
         )}
 

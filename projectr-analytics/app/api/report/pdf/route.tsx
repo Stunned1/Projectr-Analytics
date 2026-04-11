@@ -32,7 +32,14 @@ async function fetchMetroBenchmark(zip: string | null, origin: string): Promise<
     if (!res.ok) return null
     const d = await res.json()
     if (!d.found) return null
-    return { avg_zori: d.avg_zori, avg_zhvi: d.avg_zhvi, zip_count: d.zip_count ?? 0 }
+    return {
+      avg_zori: d.avg_zori ?? null,
+      avg_zhvi: d.avg_zhvi ?? null,
+      zip_count: d.zip_count ?? 0,
+      avg_vacancy_rate: d.avg_vacancy_rate ?? null,
+      avg_unemployment_rate: d.avg_unemployment_rate ?? null,
+      avg_migration_movers: d.avg_migration_movers ?? null,
+    }
   } catch {
     return null
   }

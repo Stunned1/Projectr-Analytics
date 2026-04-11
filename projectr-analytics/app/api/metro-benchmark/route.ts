@@ -5,6 +5,14 @@ export const dynamic = 'force-dynamic'
 
 const ZIP_REGEX = /^\d{5}$/
 
+const MAX_PEER_ZIPS = 650
+
+function mean(nums: number[]): number | null {
+  const v = nums.filter((n) => Number.isFinite(n))
+  if (!v.length) return null
+  return v.reduce((a, b) => a + b, 0) / v.length
+}
+
 /** Metro peer averages for ZORI/ZHVI (Zillow-tracked ZIPs sharing metro_name_short). */
 export async function GET(request: NextRequest) {
   const zip = request.nextUrl.searchParams.get('zip')
@@ -21,14 +29,31 @@ export async function GET(request: NextRequest) {
 
     const metro = row?.metro_name_short
     if (!metro) {
-      return NextResponse.json({ found: false, avg_zori: null, avg_zhvi: null, zip_count: 0 })
+      return NextResponse.json({
+        found: false,
+        avg_zori: null,
+        avg_zhvi: null,
+        zip_count: 0,
+        avg_vacancy_rate: null,
+        avg_unemployment_rate: null,
+        avg_migration_movers: null,
+      })
     }
 
     const { data: peers } = await supabase.from('zip_metro_lookup').select('zip').eq('metro_name_short', metro)
 
     const zips = (peers ?? []).map((p) => p.zip).filter(Boolean)
     if (!zips.length) {
-      return NextResponse.json({ found: true, metro_name_short: metro, avg_zori: null, avg_zhvi: null, zip_count: 0 })
+      return NextResponse.json({
+        found: true,
+        metro_name_short: metro,
+        avg_zori: null,
+        avg_zhvi: null,
+        zip_count: 0,
+        avg_vacancy_rate: null,
+        avg_unemployment_rate: null,
+        avg_migration_movers: null,
+      })
     }
 
     const { data: snaps } = await supabase
@@ -42,12 +67,55 @@ export async function GET(request: NextRequest) {
     const avg_zori = zoris.length ? Math.round(zoris.reduce((a, b) => a + b, 0) / zoris.length) : null
     const avg_zhvi = zhvis.length ? Math.round(zhvis.reduce((a, b) => a + b, 0) / zhvis.length) : null
 
+    const peerZips = zips.slice(0, MAX_PEER_ZIPS)
+    const { data: masterRows } = await supabase
+      .from('projectr_master_data')
+      .select('submarket_id, metric_name, metric_value, time_period, data_source')
+      .in('submarket_id', peerZips)
+      .in('metric_name', ['Vacancy_Rate', 'Moved_From_Different_State', 'Unemployment_Rate'])
+
+    const vacByZip = new Map<string, number>()
+    const migByZip = new Map<string, number>()
+    const unempByZip = new Map<string, { t: string; v: number }>()
+
+    for (const r of masterRows ?? []) {
+      const sid = r.submarket_id
+      if (r.metric_name === 'Vacancy_Rate' && r.data_source === 'Census ACS') {
+        vacByZip.set(sid, r.metric_value)
+      }
+      if (r.metric_name === 'Moved_From_Different_State' && r.data_source === 'Census ACS') {
+        migByZip.set(sid, r.metric_value)
+      }
+      if (r.metric_name === 'Unemployment_Rate' && r.data_source === 'FRED' && r.time_period) {
+        const cur = unempByZip.get(sid)
+        const t = r.time_period
+        if (!cur || t.localeCompare(cur.t) > 0) {
+          unempByZip.set(sid, { t, v: r.metric_value })
+        }
+      }
+    }
+
+    const avg_vacancy_raw = mean([...vacByZip.values()])
+    const avg_vacancy_rate =
+      avg_vacancy_raw != null ? parseFloat(avg_vacancy_raw.toFixed(2)) : null
+    const avg_migration_raw = mean([...migByZip.values()])
+    const avg_migration_movers =
+      avg_migration_raw != null ? Math.round(avg_migration_raw) : null
+    const avg_unemp_raw = mean([...unempByZip.values()].map((x) => x.v))
+    const avg_unemployment_rate =
+      avg_unemp_raw != null ? parseFloat(avg_unemp_raw.toFixed(2)) : null
+
     return NextResponse.json({
       found: true,
       metro_name_short: metro,
       avg_zori,
       avg_zhvi,
       zip_count: zips.length,
+      avg_vacancy_rate,
+      avg_unemployment_rate,
+      avg_migration_movers,
+      acs_peer_zip_sample: vacByZip.size,
+      fred_peer_zip_sample: unempByZip.size,
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unexpected error'
