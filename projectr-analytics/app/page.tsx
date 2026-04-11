@@ -560,8 +560,6 @@ export default function Home() {
   const [boroughBoundary, setBoroughBoundary] = useState<object | null>(null)
   const [aggregateData, setAggregateData] = useState<AggregateData | null>(null)
   const uploadedMarkers = useClientUploadMarkersStore((s) => s.markers)
-  const [agentExpandSignal, setAgentExpandSignal] = useState(0)
-  const [agentUnread, setAgentUnread] = useState(false)
   const [agentTerminalSize, setAgentTerminalSize] = useState<AgentTerminalSize>('collapsed')
   const [agentLayerOverrides, setAgentLayerOverrides] = useState<Record<string, boolean>>({})
   const [agentMetric, setAgentMetric] = useState<'zori' | 'zhvi' | null>(null)
@@ -1100,69 +1098,76 @@ export default function Home() {
                     void loadZipMarket(site.zip)
                   }}
                 />
-                {(result || cityZips) && (
-                  <div className="mt-2 border-t border-white/8 pt-2">
-                    <button
-                      type="button"
-                      className="w-full rounded-lg border border-white/8 bg-white/5 p-2.5 text-left transition-colors hover:border-primary/40"
-                      onClick={() => setPanelOpen(!panelOpen)}
-                    >
-                      <div className="mb-0.5 flex items-center justify-between">
-                        <p className="text-[9px] uppercase tracking-widest text-zinc-500">Active market</p>
-                        <ChevronRight />
-                      </div>
-                      {result ? (
-                        <>
-                          <p className="text-sm font-semibold text-white">{result.zillow?.city ?? result.zip}</p>
-                          <p className="text-[10px] text-zinc-500">{result.zip} · {result.geo?.state}</p>
-                          {cycleData && (
-                            <p className="mt-1 text-[9px] font-medium text-primary">
-                              {cycleData.cycleStage} · {cycleData.cyclePosition}
-                            </p>
-                          )}
-                        </>
-                      ) : cityZips ? (
-                        <>
-                          <p className="text-sm font-semibold text-white">{cityZips[0]?.city}</p>
-                          <p className="text-[10px] text-zinc-500">
-                            {cityZips.length} ZIPs · {cityZips[0]?.state}
-                          </p>
-                          {cycleData && (
-                            <p className="mt-1 text-[9px] font-medium text-primary">
-                              {cycleData.cycleStage} · {cycleData.cyclePosition}
-                            </p>
-                          )}
-                        </>
-                      ) : null}
-                    </button>
-                  </div>
-                )}
               </>
             )}
           </nav>
 
-          <div
-            className={`flex-shrink-0 border-t border-white/8 px-2 py-2 ${sidebarCollapsed ? 'flex justify-center' : 'px-3'}`}
-          >
-            <button
-              type="button"
-              onClick={() => {
-                setAgentExpandSignal((n) => n + 1)
-                setAgentUnread(false)
-              }}
-              className="relative flex h-8 w-8 items-center justify-center rounded-full text-[10px] font-bold text-white shadow-md transition-transform hover:scale-105"
-              style={{ background: '#D76B3D' }}
-              title="Open intelligence terminal"
-            >
-              AI
-              {agentUnread && (
-                <span
-                  className="absolute top-0 right-0 h-2 w-2 rounded-full border-2 border-[#0a0a0a]"
-                  style={{ background: '#ef4444' }}
-                />
+          {(result || cityZips) && (
+            <div
+              className={cn(
+                'flex-shrink-0 border-t border-white/8 py-2',
+                sidebarCollapsed ? 'flex justify-center px-1' : 'px-2'
               )}
-            </button>
-          </div>
+            >
+              {sidebarCollapsed ? (
+                <button
+                  type="button"
+                  onClick={() => setPanelOpen(!panelOpen)}
+                  className={cn(
+                    'flex h-9 w-9 items-center justify-center rounded-lg border transition-colors',
+                    panelOpen
+                      ? 'border-primary/50 bg-primary/15 text-primary'
+                      : 'border-white/10 bg-white/5 text-zinc-400 hover:border-primary/40 hover:text-white'
+                  )}
+                  title={
+                    result
+                      ? `${result.zillow?.city ?? result.zip} — toggle data panel`
+                      : cityZips
+                        ? `${cityZips[0]?.city ?? 'Area'} — toggle data panel`
+                        : 'Active market'
+                  }
+                >
+                  <MapIcon />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="w-full rounded-lg border border-white/8 bg-white/5 p-2.5 text-left transition-colors hover:border-primary/40"
+                  onClick={() => setPanelOpen(!panelOpen)}
+                >
+                  <div className="mb-0.5 flex items-center justify-between">
+                    <p className="text-[9px] uppercase tracking-widest text-zinc-500">Active market</p>
+                    <ChevronRight />
+                  </div>
+                  {result ? (
+                    <>
+                      <p className="text-sm font-semibold text-white">{result.zillow?.city ?? result.zip}</p>
+                      <p className="text-[10px] text-zinc-500">
+                        {result.zip} · {result.geo?.state}
+                      </p>
+                      {cycleData && (
+                        <p className="mt-1 text-[9px] font-medium text-primary">
+                          {cycleData.cycleStage} · {cycleData.cyclePosition}
+                        </p>
+                      )}
+                    </>
+                  ) : cityZips ? (
+                    <>
+                      <p className="text-sm font-semibold text-white">{cityZips[0]?.city}</p>
+                      <p className="text-[10px] text-zinc-500">
+                        {cityZips.length} ZIPs · {cityZips[0]?.state}
+                      </p>
+                      {cycleData && (
+                        <p className="mt-1 text-[9px] font-medium text-primary">
+                          {cycleData.cycleStage} · {cycleData.cyclePosition}
+                        </p>
+                      )}
+                    </>
+                  ) : null}
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </aside>
 
@@ -1197,8 +1202,6 @@ export default function Home() {
           mapContext={mapContext}
           onAction={handleAgentAction}
           contextSubtitle={intelligenceContextSubtitle}
-          expandSignal={agentExpandSignal}
-          onUnreadChange={setAgentUnread}
           onSizeChange={setAgentTerminalSize}
         />
 

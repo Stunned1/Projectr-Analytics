@@ -90,8 +90,6 @@ interface AgentTerminalProps {
   onAction: (action: AgentAction) => void
   /** Shown in header, e.g. "Manhattan · 43 ZIPs" */
   contextSubtitle: string
-  /** Parent increments to open/focus compact from sidebar AI button */
-  expandSignal?: number
   onUnreadChange?: (unread: boolean) => void
   /** For layout (e.g. floating stats bubble clearance). */
   onSizeChange?: (size: AgentTerminalSize) => void
@@ -103,7 +101,6 @@ export default function AgentTerminal({
   mapContext,
   onAction,
   contextSubtitle,
-  expandSignal = 0,
   onUnreadChange,
   onSizeChange,
   bottomOffsetClass = 'bottom-0',
@@ -112,7 +109,6 @@ export default function AgentTerminal({
   const rootRef = useRef<HTMLDivElement>(null)
   const outputRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-  const lastExpandSignal = useRef(expandSignal)
   const [unread, setUnread] = useState(false)
 
   const shouldNotifyWhileClosed = useCallback(() => size === 'collapsed', [size])
@@ -139,16 +135,6 @@ export default function AgentTerminal({
     const latest = [...messages].reverse().find((m) => m.analysisSites?.length)
     return Boolean(latest?.analysisSites?.length) && !isRunningSequence && !loading
   }, [messages, isRunningSequence, loading])
-
-  useEffect(() => {
-    if (expandSignal !== lastExpandSignal.current) {
-      lastExpandSignal.current = expandSignal
-      setSize('compact')
-      setUnread(false)
-      onUnreadChange?.(false)
-      setTimeout(() => inputRef.current?.focus(), 100)
-    }
-  }, [expandSignal, onUnreadChange])
 
   useEffect(() => {
     if (size !== 'collapsed') {
@@ -288,7 +274,10 @@ export default function AgentTerminal({
             ────────────────────────────────────────────
           </div>
 
-          <div ref={outputRef} className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+          <div
+            ref={outputRef}
+            className="min-h-0 flex-1 overflow-y-auto px-2 py-2"
+          >
             {messages.map((msg, i) => {
               const isLatestAgent = msg.role === 'agent' && i === messages.length - 1
               if (msg.role === 'user') {
