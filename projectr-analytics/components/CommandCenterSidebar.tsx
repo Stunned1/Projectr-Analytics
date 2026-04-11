@@ -15,10 +15,8 @@ const SIDEBAR_COLLAPSED_PX = 48
 
 const navBtnClass = (active: boolean) =>
   cn(
-    'flex w-full items-center gap-3 rounded-lg border-l-2 px-3 py-2.5 text-sm transition-colors',
-    active
-      ? 'border-primary bg-primary/15 text-primary'
-      : 'border-transparent text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground'
+    'flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors',
+    active ? 'text-primary' : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground'
   )
 
 function NavLink({ href, icon, label }: { href: string; icon: React.ReactNode; label: string }) {
@@ -47,9 +45,7 @@ function NavLinkCollapsed({ href, icon, title }: { href: string; icon: React.Rea
       title={title}
       className={cn(
         'mx-auto flex h-9 w-9 items-center justify-center rounded-lg transition-colors',
-        active
-          ? 'bg-primary/10 text-primary'
-          : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground'
+        active ? 'text-primary' : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground'
       )}
     >
       {icon}

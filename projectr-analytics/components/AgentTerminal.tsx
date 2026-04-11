@@ -8,7 +8,6 @@ import { cn } from '@/lib/utils'
 
 const STREAM_MS = 72
 const SUGGESTIONS = ['Show flood risk', 'Transit + amenities on', 'Run Manhattan site analysis']
-const TERMINAL_EXPANDED_ONCE_KEY = 'projectr-agent-terminal-expanded-v1'
 
 /** Projectr orange / narrative / system / chrome */
 const C_USER_GT = '#D76B3D'
@@ -109,11 +108,9 @@ function StreamedAgentBody({
     <div className="mb-3 space-y-0.5 whitespace-pre-wrap break-words pl-[2ch] font-mono text-[11px] leading-relaxed">
       {lines.map((line, li) => (
         <div key={li} style={{ color: C_NARRATIVE }}>
-          {li === 0 && (
-            <span className="select-none" style={{ color: C_NARRATIVE_BULLET }}>
-              ·{' '}
-            </span>
-          )}
+          <span className="select-none" style={{ color: C_NARRATIVE_BULLET }}>
+            ·{' '}
+          </span>
           {line}
         </div>
       ))}
@@ -144,15 +141,6 @@ export default function AgentTerminal({
   bottomOffsetClass = 'bottom-0',
 }: AgentTerminalProps) {
   const [size, setSize] = useState<AgentTerminalSize>('collapsed')
-  /** Once true, collapsed bar shows engine status instead of first-run discovery copy. */
-  const [terminalEverExpanded, setTerminalEverExpanded] = useState(() => {
-    if (typeof window === 'undefined') return false
-    try {
-      return sessionStorage.getItem(TERMINAL_EXPANDED_ONCE_KEY) === '1'
-    } catch {
-      return false
-    }
-  })
   const rootRef = useRef<HTMLDivElement>(null)
   const outputRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -185,12 +173,6 @@ export default function AgentTerminal({
 
   useEffect(() => {
     if (size !== 'collapsed') {
-      setTerminalEverExpanded(true)
-      try {
-        sessionStorage.setItem(TERMINAL_EXPANDED_ONCE_KEY, '1')
-      } catch {
-        /* private mode / quota */
-      }
       setUnread(false)
       onUnreadChange?.(false)
     }
@@ -216,9 +198,6 @@ export default function AgentTerminal({
   }, [size])
 
   const hasUserMessage = useMemo(() => messages.some((m) => m.role === 'user'), [messages])
-
-  const showCollapsedDiscoveryHint =
-    size === 'collapsed' && !terminalEverExpanded && !hasUserMessage
 
   const lastStatusLine = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -280,16 +259,10 @@ export default function AgentTerminal({
             <path d="M6 8h.01M10 8h.01M6 12h8" />
           </svg>
           {size === 'collapsed' ? (
-            showCollapsedDiscoveryHint ? (
-              <span className="truncate text-[10px] text-zinc-500">
-                <span className="text-zinc-400">Click to open terminal</span>
-              </span>
-            ) : (
-              <span className="truncate text-[10px] text-zinc-500">
-                <span className="text-zinc-600">✓ </span>
-                <span className="text-zinc-400">{lastStatusLine}</span>
-              </span>
-            )
+            <span className="min-w-0 flex-1 truncate text-[10px]">
+              <span className="text-zinc-500">Click to Expand: </span>
+              <span className="text-zinc-400">{lastStatusLine}</span>
+            </span>
           ) : (
             <span className="truncate text-[9px] font-medium tracking-wide text-zinc-500">
               PROJECTR INTELLIGENCE ENGINE <span className="text-zinc-600">v1.0</span>
