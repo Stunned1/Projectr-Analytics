@@ -14,6 +14,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
+import { Pencil } from 'lucide-react'
 
 function cycleBadgeClass(stage: string | undefined): string {
   if (stage === 'Expansion') return 'bg-emerald-500/25 text-emerald-300 border-emerald-500/40'
@@ -54,6 +55,53 @@ function SiteLabelInput({
   )
 }
 
+function SiteNotesPencil({ siteId, notes }: { siteId: string; notes: string | null }) {
+  const updateNotes = useSitesStore((s) => s.updateNotes)
+  const [open, setOpen] = useState(false)
+  const [value, setValue] = useState(notes ?? '')
+  useEffect(() => {
+    setValue(notes ?? '')
+  }, [notes, siteId])
+
+  if (!open) {
+    return (
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-xs"
+        className="mt-0.5 h-6 w-6 shrink-0 text-zinc-500 hover:text-primary"
+        title={notes?.trim() ? `Note: ${notes}` : 'Add analyst note'}
+        onClick={() => setOpen(true)}
+      >
+        <Pencil className="h-3 w-3" strokeWidth={2} />
+      </Button>
+    )
+  }
+
+  return (
+    <Input
+      type="text"
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={() => {
+        const next = value.trim()
+        const prev = (notes ?? '').trim()
+        if (next !== prev) void updateNotes(siteId, next)
+        setOpen(false)
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') {
+          setValue(notes ?? '')
+          setOpen(false)
+        }
+      }}
+      placeholder="Analyst note…"
+      className="mt-0.5 h-7 max-w-[140px] rounded border border-sidebar-border bg-sidebar-accent/50 px-1.5 text-[9px] text-sidebar-foreground placeholder:text-muted-foreground focus-visible:border-primary/60"
+      autoFocus
+    />
+  )
+}
+
 export default function ShortlistPanel({ onOpenSite }: { onOpenSite: (site: Site) => void }) {
   const sites = useSitesStore((s) => s.sites)
   const loading = useSitesStore((s) => s.loading)
@@ -63,7 +111,6 @@ export default function ShortlistPanel({ onOpenSite }: { onOpenSite: (site: Site
   const selectedForComparison = useSitesStore((s) => s.selectedForComparison)
   const toggleComparison = useSitesStore((s) => s.toggleComparison)
   const removeSite = useSitesStore((s) => s.removeSite)
-  const updateNotes = useSitesStore((s) => s.updateNotes)
   const clearComparisonSelection = useSitesStore((s) => s.clearComparisonSelection)
 
   const compareCount = selectedForComparison.length
@@ -130,6 +177,7 @@ export default function ShortlistPanel({ onOpenSite }: { onOpenSite: (site: Site
                       </span>
                     </Button>
                   </div>
+                  <SiteNotesPencil siteId={s.id} notes={s.notes ?? null} />
                   <Button
                     type="button"
                     variant="ghost"
@@ -157,17 +205,6 @@ export default function ShortlistPanel({ onOpenSite }: { onOpenSite: (site: Site
                     <span className="text-[8px] text-zinc-400">Mom. {Math.round(s.momentumScore)}</span>
                   )}
                 </div>
-                <Input
-                  type="text"
-                  defaultValue={s.notes ?? ''}
-                  onBlur={(e) => {
-                    const next = e.target.value.trim()
-                    const prev = (s.notes ?? '').trim()
-                    if (next !== prev) void updateNotes(s.id, next)
-                  }}
-                  placeholder="Analyst note…"
-                  className="ml-5 h-auto max-w-[calc(100%-1.25rem)] rounded border border-sidebar-border bg-sidebar-accent/50 px-1.5 py-1 text-[9px] text-sidebar-foreground/90 placeholder:text-muted-foreground focus-visible:border-primary/60"
-                />
               </div>
             ))}
 

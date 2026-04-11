@@ -84,7 +84,7 @@ export default function CommandCenterSidebar({
   onShortlistOpenSite,
 }: CommandCenterSidebarProps) {
   return (
-    <aside className="z-20 flex w-[200px] flex-shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
+    <aside className="z-20 flex w-[240px] flex-shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
       <div className="border-b border-sidebar-border px-4 py-4">
         <Image
           src="/Projectr_Logo.png"

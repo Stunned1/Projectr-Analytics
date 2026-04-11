@@ -8,7 +8,7 @@ import { usePathname } from 'next/navigation'
 import ExecutiveMemo from '@/components/ExecutiveMemo'
 import AgenticNormalizer from '@/components/AgenticNormalizer'
 import MarketReportExport from '@/components/MarketReportExport'
-import AgentChat, { type AgentAction } from '@/components/AgentChat'
+import AgentChat, { type AgentAction, type AnalysisSite } from '@/components/AgentChat'
 import type { CycleAnalysis } from '@/lib/cycle/types'
 import type { MapLayersSnapshot } from '@/lib/report/types'
 import { parseCycleAnalysisField } from '@/lib/report/validate-cycle'
@@ -471,6 +471,78 @@ const ChevronRight = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentC
 const CollapseIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4"><polyline points="15 18 9 12 15 6" /></svg>
 const ExpandIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4"><polyline points="9 18 15 12 9 6" /></svg>
 
+const SIDEBAR_EXPANDED_PX = 240
+
+/** Agent-selected parcel / site — lives in the right panel, not over the map. */
+function SiteDetailRightPanel({ site, onBack }: { site: AnalysisSite; onBack: () => void }) {
+  return (
+    <div className="flex min-h-0 min-w-[360px] flex-1 flex-col overflow-hidden p-4">
+      <div className="mb-4 flex items-start gap-2 border-b border-border/60 pb-3">
+        <button
+          type="button"
+          onClick={onBack}
+          className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border/80 text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
+          aria-label="Back to market"
+          title="Back to market"
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+        </button>
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-primary">Site detail</p>
+          <p className="text-base font-bold leading-tight text-foreground">{site.address}</p>
+          <p className="text-[10px] text-muted-foreground">{site.zone}</p>
+        </div>
+        <div className="text-right">
+          <p className="text-2xl font-bold leading-none text-primary">{site.score.toFixed(0)}</p>
+          <p className="text-[9px] text-muted-foreground">score</p>
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
+        <div className="grid grid-cols-2 gap-2">
+          <div className="rounded-lg border border-border/60 bg-muted/20 px-2.5 py-2">
+            <p className="text-[9px] uppercase tracking-wide text-muted-foreground">Air rights</p>
+            <p className="text-sm font-semibold text-foreground">{(site.air_rights_sqft / 1000).toFixed(0)}k sqft</p>
+            <p className="text-[9px] text-muted-foreground">unused dev potential</p>
+          </div>
+          <div className="rounded-lg border border-border/60 bg-muted/20 px-2.5 py-2">
+            <p className="text-[9px] uppercase tracking-wide text-muted-foreground">FAR used</p>
+            <p className="text-sm font-semibold text-foreground">{(site.far_utilization * 100).toFixed(0)}%</p>
+            <p className="text-[9px] text-muted-foreground">of {site.max_far.toFixed(1)} max FAR</p>
+          </div>
+          <div className="rounded-lg border border-border/60 bg-muted/20 px-2.5 py-2">
+            <p className="text-[9px] uppercase tracking-wide text-muted-foreground">Nearby permits</p>
+            <p className="text-sm font-semibold text-foreground">{site.momentum ?? 0}</p>
+            <p className="text-[9px] text-muted-foreground">NB + A1 · 500m</p>
+          </div>
+          <div className="rounded-lg border border-border/60 bg-muted/20 px-2.5 py-2">
+            <p className="text-[9px] uppercase tracking-wide text-muted-foreground">ZORI growth</p>
+            <p className="text-sm font-semibold text-foreground">
+              {site.zori_growth != null ? `+${site.zori_growth.toFixed(1)}%` : '—'}
+            </p>
+            <p className="text-[9px] text-muted-foreground">12m YoY</p>
+          </div>
+        </div>
+        <div className="rounded-lg border border-primary/25 bg-primary/10 px-3 py-2.5">
+          <p className="mb-1 text-[10px] font-semibold text-primary">Why this site?</p>
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            {site.far_utilization < 0.2
+              ? `Severely underbuilt — only ${(site.far_utilization * 100).toFixed(0)}% of allowable FAR developed. `
+              : `Underutilized at ${(site.far_utilization * 100).toFixed(0)}% of max FAR. `}
+            {(site.momentum ?? 0) >= 10
+              ? `Strong development momentum with ${site.momentum} nearby permits signaling active neighborhood investment. `
+              : `Emerging area with ${site.momentum ?? 0} nearby permits. `}
+            {(site.air_rights_sqft / 1000) > 1000
+              ? `${(site.air_rights_sqft / 1000).toFixed(0)}k sqft of air rights represents significant high-density upside in a ${site.zone} zone.`
+              : `${(site.air_rights_sqft / 1000).toFixed(0)}k sqft of buildable air rights in ${site.zone} zoning.`}
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function Home() {
@@ -490,7 +562,7 @@ export default function Home() {
   const [map3DEnabled, setMap3DEnabled] = useState(false)
   const [analysisSites, setAnalysisSites] = useState<import('@/components/AgentChat').AnalysisSite[]>([])
   const [agentPermitFilter, setAgentPermitFilter] = useState<string[] | null>(null)
-  const [selectedSite, setSelectedSite] = useState<import('@/components/AgentChat').AnalysisSite | null>(null)
+  const [selectedSite, setSelectedSite] = useState<AnalysisSite | null>(null)
   const [agentFlyTo, setAgentFlyTo] = useState<{ lat: number; lng: number } | null>(null)
   const [transit, setTransit] = useState<TransitData | null>(null)
   const [trends, setTrends] = useState<TrendsData | null>(null)
@@ -499,7 +571,7 @@ export default function Home() {
   const [panelOpen, setPanelOpen] = useState(false)
   const [mapLayersSnapshot, setMapLayersSnapshot] = useState<MapLayersSnapshot>(DEFAULT_MAP_LAYERS)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const [panelTab, setPanelTab] = useState<'data' | 'table'>('data')
+  const [marketPanelTab, setMarketPanelTab] = useState<'analysis' | 'data'>('analysis')
 
   function handleNormalizerIngested(res: { triage: { bucket: string }; marker_points?: Array<{ lat: number; lng: number; value: number | null; label: string }> }) {
     // markers are handled via useClientUploadMarkersStore in AgenticNormalizer
@@ -544,6 +616,7 @@ export default function Home() {
         }
         break
       case 'generate_memo':
+        setMarketPanelTab('analysis')
         setPanelOpen(true)
         break
       case 'set_tilt':
@@ -561,7 +634,10 @@ export default function Home() {
       case 'fly_to':
         if (action.lat != null && action.lng != null) {
           setAgentFlyTo({ lat: action.lat, lng: action.lng })
-          if (action.site) setSelectedSite(action.site)
+          if (action.site) {
+            setSelectedSite(action.site)
+            setPanelOpen(true)
+          }
         }
         break
     }
@@ -653,6 +729,7 @@ export default function Home() {
 
   const loadZipMarket = useCallback(
     async (zipInput: string) => {
+      setSelectedSite(null)
       setLoading(true)
       setError(null)
       setCityZips(null)
@@ -719,6 +796,7 @@ export default function Home() {
   async function runAggregateSearch(input: string) {
     const trimmed = input.trim()
     if (!trimmed) return
+    setSelectedSite(null)
     setLoading(true)
     setError(null)
     setCityZips(null)
@@ -883,7 +961,7 @@ export default function Home() {
       {/* ── Left Sidebar — collapsible ── */}
       <aside
         className="flex-shrink-0 flex flex-col bg-[#0a0a0a] border-r border-white/8 z-20 transition-all duration-200"
-        style={{ width: sidebarCollapsed ? 48 : 200 }}
+        style={{ width: sidebarCollapsed ? 48 : SIDEBAR_EXPANDED_PX }}
       >
         {/* Logo + collapse toggle */}
         <div className="flex items-center justify-between px-3 py-4 border-b border-white/8 min-h-[56px]">
@@ -949,82 +1027,98 @@ export default function Home() {
           </button>
         )}
 
-        {/* Nav + shortlist (same routes as /upload sidebar) */}
-        <nav className="flex min-h-0 flex-1 flex-col gap-0.5 px-2 py-3">
-          {sidebarCollapsed ? (
-            <div className="flex flex-col gap-1">
-              <SidebarCollapsedLink href="/" icon={<MapIcon />} title="Map" />
-              <SidebarCollapsedLink href="/upload" icon={<UploadIcon />} title="Client CSV upload" />
-            </div>
-          ) : (
-            <>
-              <SidebarNavLink href="/" icon={<MapIcon />} label="Map" />
-              <SidebarNavLink href="/upload" icon={<UploadIcon />} label="Client CSV" />
-              <ShortlistPanel
-                onOpenSite={(site: Site) => {
-                  if (site.isAggregate && site.savedSearch?.trim()) {
-                    const q = site.savedSearch.trim()
-                    setSearchInput(q)
-                    void runAggregateSearch(q)
-                    return
-                  }
-                  setSearchInput(site.zip)
-                  void loadZipMarket(site.zip)
-                }}
-              />
-            </>
-          )}
-        </nav>
-
-        {/* AI agent — opens docked chat beside sidebar */}
-        <div
-          className={`flex-shrink-0 border-t border-white/8 px-2 py-2 ${sidebarCollapsed ? 'flex justify-center' : 'px-3'}`}
-        >
-          <button
-            type="button"
-            onClick={() => {
-              setAgentOpen(true)
-              setAgentUnread(false)
-            }}
-            className="relative flex h-8 w-8 items-center justify-center rounded-full text-[10px] font-bold text-white shadow-md transition-transform hover:scale-105"
-            style={{ background: '#D76B3D' }}
-            title="Open AI agent"
-          >
-            AI
-            {agentUnread && (
-              <span
-                className="absolute top-0 right-0 h-2 w-2 rounded-full border-2 border-[#0a0a0a]"
-                style={{ background: '#ef4444' }}
-              />
-            )}
-          </button>
-        </div>
-
-        {/* Active market badge — hidden when collapsed */}
-        {!sidebarCollapsed && (result || cityZips) && (
-          <div className="px-3 py-3 border-t border-white/8">
-            <div
-              className="bg-white/5 border border-white/8 rounded-lg p-3 cursor-pointer hover:border-[#D76B3D]/30 transition-colors"
-              onClick={() => setPanelOpen(!panelOpen)}
-            >
-              <div className="flex items-center justify-between mb-1">
-                <p className="text-[9px] text-zinc-500 uppercase tracking-widest">Active Market</p>
-                <ChevronRight />
-              </div>
-              {result ? (
-                <>
-                  <p className="text-white text-sm font-semibold">{result.zillow?.city ?? result.zip}</p>
-                  <p className="text-zinc-500 text-[10px]">{result.zip} · {result.geo?.state}</p>
-                </>
-              ) : cityZips ? (
-                <>
-                  <p className="text-white text-sm font-semibold">{cityZips[0]?.city}</p>
-                  <p className="text-zinc-500 text-[10px]">{cityZips.length} ZIPs · {cityZips[0]?.state}</p>
-                </>
-              ) : null}
-            </div>
+        {!sidebarCollapsed && (
+          <div className="border-b border-white/8 px-2 py-2">
+            <SidebarNavLink href="/" icon={<MapIcon />} label="Map" />
+            <SidebarNavLink href="/upload" icon={<UploadIcon />} label="Client CSV" />
           </div>
         )}
+
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <nav className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+            {sidebarCollapsed ? (
+              <div className="flex flex-col gap-1">
+                <SidebarCollapsedLink href="/" icon={<MapIcon />} title="Map" />
+                <SidebarCollapsedLink href="/upload" icon={<UploadIcon />} title="Client CSV upload" />
+              </div>
+            ) : (
+              <>
+                <ShortlistPanel
+                  onOpenSite={(site: Site) => {
+                    if (site.isAggregate && site.savedSearch?.trim()) {
+                      const q = site.savedSearch.trim()
+                      setSearchInput(q)
+                      void runAggregateSearch(q)
+                      return
+                    }
+                    setSearchInput(site.zip)
+                    void loadZipMarket(site.zip)
+                  }}
+                />
+                {(result || cityZips) && (
+                  <div className="mt-2 border-t border-white/8 pt-2">
+                    <button
+                      type="button"
+                      className="w-full rounded-lg border border-white/8 bg-white/5 p-2.5 text-left transition-colors hover:border-primary/40"
+                      onClick={() => setPanelOpen(!panelOpen)}
+                    >
+                      <div className="mb-0.5 flex items-center justify-between">
+                        <p className="text-[9px] uppercase tracking-widest text-zinc-500">Active market</p>
+                        <ChevronRight />
+                      </div>
+                      {result ? (
+                        <>
+                          <p className="text-sm font-semibold text-white">{result.zillow?.city ?? result.zip}</p>
+                          <p className="text-[10px] text-zinc-500">{result.zip} · {result.geo?.state}</p>
+                          {cycleData && (
+                            <p className="mt-1 text-[9px] font-medium text-primary">
+                              {cycleData.cycleStage} · {cycleData.cyclePosition}
+                            </p>
+                          )}
+                        </>
+                      ) : cityZips ? (
+                        <>
+                          <p className="text-sm font-semibold text-white">{cityZips[0]?.city}</p>
+                          <p className="text-[10px] text-zinc-500">
+                            {cityZips.length} ZIPs · {cityZips[0]?.state}
+                          </p>
+                          {cycleData && (
+                            <p className="mt-1 text-[9px] font-medium text-primary">
+                              {cycleData.cycleStage} · {cycleData.cyclePosition}
+                            </p>
+                          )}
+                        </>
+                      ) : null}
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </nav>
+
+          <div
+            className={`flex-shrink-0 border-t border-white/8 px-2 py-2 ${sidebarCollapsed ? 'flex justify-center' : 'px-3'}`}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                setAgentOpen(true)
+                setAgentUnread(false)
+              }}
+              className="relative flex h-8 w-8 items-center justify-center rounded-full text-[10px] font-bold text-white shadow-md transition-transform hover:scale-105"
+              style={{ background: '#D76B3D' }}
+              title="Open AI agent"
+            >
+              AI
+              {agentUnread && (
+                <span
+                  className="absolute top-0 right-0 h-2 w-2 rounded-full border-2 border-[#0a0a0a]"
+                  style={{ background: '#ef4444' }}
+                />
+              )}
+            </button>
+          </div>
+        </div>
       </aside>
 
       {/* ── Map ── — inset-0 fill gives CommandMap a definite box (flex % height + Google Map can otherwise leave overlays misaligned) */}
@@ -1162,7 +1256,7 @@ export default function Home() {
             className="pointer-events-none fixed z-50 flex max-h-[min(520px,72vh)] w-[min(360px,calc(100vw-1rem))] justify-start"
             style={{
               bottom: hasStatsBar ? '7.25rem' : '2.5rem',
-              left: sidebarCollapsed ? '3.5rem' : '13rem',
+              left: sidebarCollapsed ? '3.5rem' : `${SIDEBAR_EXPANDED_PX / 16}rem`,
             }}
           >
             <div className="pointer-events-auto max-h-full w-full">
@@ -1183,104 +1277,63 @@ export default function Home() {
           </div>
         )}
 
-        {/* Site Detail Popup — shown when a site card is clicked in agent chat */}
-        {selectedSite && (
-          <div
-            className="absolute bottom-5 left-5 z-50 w-72 rounded-2xl overflow-hidden shadow-2xl"
-            style={{ background: 'rgba(8,8,8,0.92)', backdropFilter: 'blur(20px)', border: '1px solid rgba(215,107,61,0.3)' }}
-          >
-            <div className="px-4 pt-4 pb-3 border-b border-white/6">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="text-[10px] text-[#D76B3D] uppercase tracking-widest font-semibold mb-0.5">Top Site</p>
-                  <p className="text-white font-bold text-sm leading-tight">{selectedSite.address}</p>
-                  <p className="text-zinc-500 text-[10px] mt-0.5">{selectedSite.zone}</p>
-                </div>
-                <div className="text-right flex-shrink-0">
-                  <p className="text-[#D76B3D] text-xl font-bold leading-none">{selectedSite.score.toFixed(0)}</p>
-                  <p className="text-zinc-600 text-[9px]">score</p>
-                </div>
-              </div>
-            </div>
-            <div className="px-4 py-3 space-y-2">
-              <div className="grid grid-cols-2 gap-2">
-                <div className="bg-white/4 rounded-lg px-2.5 py-2">
-                  <p className="text-zinc-600 text-[9px] uppercase tracking-wide">Air Rights</p>
-                  <p className="text-white text-sm font-semibold">{(selectedSite.air_rights_sqft / 1000).toFixed(0)}k sqft</p>
-                  <p className="text-zinc-500 text-[9px]">unused dev potential</p>
-                </div>
-                <div className="bg-white/4 rounded-lg px-2.5 py-2">
-                  <p className="text-zinc-600 text-[9px] uppercase tracking-wide">FAR Utilization</p>
-                  <p className="text-white text-sm font-semibold">{(selectedSite.far_utilization * 100).toFixed(0)}%</p>
-                  <p className="text-zinc-500 text-[9px]">of {selectedSite.max_far.toFixed(1)} max FAR built</p>
-                </div>
-                <div className="bg-white/4 rounded-lg px-2.5 py-2">
-                  <p className="text-zinc-600 text-[9px] uppercase tracking-wide">Nearby Permits</p>
-                  <p className="text-white text-sm font-semibold">{selectedSite.momentum ?? 0}</p>
-                  <p className="text-zinc-500 text-[9px]">NB + A1 within 500m</p>
-                </div>
-                <div className="bg-white/4 rounded-lg px-2.5 py-2">
-                  <p className="text-zinc-600 text-[9px] uppercase tracking-wide">ZORI Growth</p>
-                  <p className="text-white text-sm font-semibold">{selectedSite.zori_growth != null ? `+${selectedSite.zori_growth.toFixed(1)}%` : '—'}</p>
-                  <p className="text-zinc-500 text-[9px]">12-month YoY</p>
-                </div>
-              </div>
-              <div className="bg-[#D76B3D]/6 border border-[#D76B3D]/15 rounded-lg px-3 py-2.5">
-                <p className="text-[10px] text-[#D76B3D] font-semibold mb-1">Why this site?</p>
-                <p className="text-zinc-300 text-[11px] leading-relaxed">
-                  {selectedSite.far_utilization < 0.2
-                    ? `Severely underbuilt — only ${(selectedSite.far_utilization * 100).toFixed(0)}% of allowable FAR developed. `
-                    : `Underutilized at ${(selectedSite.far_utilization * 100).toFixed(0)}% of max FAR. `}
-                  {(selectedSite.momentum ?? 0) >= 10
-                    ? `Strong development momentum with ${selectedSite.momentum} nearby permits signaling active neighborhood investment. `
-                    : `Emerging area with ${selectedSite.momentum ?? 0} nearby permits. `}
-                  {(selectedSite.air_rights_sqft / 1000) > 1000
-                    ? `${(selectedSite.air_rights_sqft / 1000).toFixed(0)}k sqft of air rights represents significant high-density upside in a ${selectedSite.zone} zone.`
-                    : `${(selectedSite.air_rights_sqft / 1000).toFixed(0)}k sqft of buildable air rights in ${selectedSite.zone} zoning.`}
-                </p>
-              </div>
-            </div>
-            <div className="px-4 pb-3">
-              <button
-                onClick={() => setSelectedSite(null)}
-                className="w-full text-[10px] text-zinc-600 hover:text-zinc-300 transition-colors py-1"
-              >
-                Dismiss
-              </button>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* ── Right Data Panel ── */}
       <aside
-        className={`z-20 flex-shrink-0 overflow-y-auto border-l border-border/80 bg-card transition-all duration-300 ${
-          panelOpen && (result || aggregateData) ? 'w-[300px]' : 'w-0 overflow-hidden'
+        className={`z-20 flex min-h-0 flex-shrink-0 flex-col overflow-hidden border-l border-border/80 bg-card transition-all duration-300 ${
+          panelOpen && (result || aggregateData || selectedSite) ? 'w-[360px]' : 'w-0 overflow-hidden border-l-0'
         }`}
       >
-        {aggregateData && panelOpen && !result && (
-          <div className="p-4 min-w-[300px]">
-            <div className="flex items-start justify-between mb-5 gap-2">
-              <div className="min-w-0">
-                <h2 className="text-white font-bold text-base leading-tight">{aggregateData.label}</h2>
-                <p className="text-zinc-500 text-xs mt-0.5">{aggregateData.zip_count} ZIP codes · aggregated</p>
+        {panelOpen && selectedSite && (
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <SiteDetailRightPanel site={selectedSite} onBack={() => setSelectedSite(null)} />
+          </div>
+        )}
+
+        {!selectedSite && aggregateData && panelOpen && !result && (
+          <div className="flex min-h-0 min-w-[360px] flex-1 flex-col overflow-hidden">
+            <div className="shrink-0 border-b border-border/50 p-4 pb-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <h2 className="text-base font-bold leading-tight text-foreground">{aggregateData.label}</h2>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{aggregateData.zip_count} ZIP codes · aggregated</p>
+                </div>
+                <div className="flex flex-shrink-0 items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleMap3DToggle}
+                    className="rounded-full border px-3 py-1 text-[10px] font-semibold text-white transition-colors"
+                    style={{
+                      background: map3DActive ? '#D76B3D' : 'rgba(45,51,66,0.95)',
+                      borderColor: map3DActive ? '#D76B3D' : 'rgba(75,85,99,0.9)',
+                    }}
+                  >
+                    3D
+                  </button>
+                  <button type="button" onClick={() => setPanelOpen(false)} className="text-xl leading-none text-muted-foreground hover:text-foreground">×</button>
+                </div>
               </div>
-              <div className="flex flex-shrink-0 items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={handleMap3DToggle}
-                  className="rounded-full border px-3 py-1 text-[10px] font-semibold text-white transition-colors"
-                  style={{
-                    background: map3DActive ? '#D76B3D' : 'rgba(45,51,66,0.95)',
-                    borderColor: map3DActive ? '#D76B3D' : 'rgba(75,85,99,0.9)',
-                  }}
-                >
-                  3D
-                </button>
-                <button type="button" onClick={() => setPanelOpen(false)} className="text-zinc-600 hover:text-white text-xl leading-none">×</button>
+              <div className="mt-3 flex gap-0 overflow-hidden rounded-lg border border-white/10">
+                {(['analysis', 'data'] as const).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setMarketPanelTab(t)}
+                    className={cn(
+                      'flex-1 py-1.5 text-[10px] font-semibold capitalize transition-colors',
+                      marketPanelTab === t ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'
+                    )}
+                  >
+                    {t === 'analysis' ? 'Analysis' : 'Data'}
+                  </button>
+                ))}
               </div>
             </div>
 
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+            {marketPanelTab === 'analysis' && (
+              <>
             <MomentumExplainBlock
               anchorZip={cityZips?.find((z) => /^\d{5}$/.test(z.zip))?.zip ?? null}
               aggregateZips={cityZips?.map((z) => z.zip).filter((z) => /^\d{5}$/.test(z)) ?? null}
@@ -1293,6 +1346,43 @@ export default function Home() {
               />
             )}
 
+            <PanelSection title="Market brief (PDF)">
+              <MarketReportExport
+                mapLayersSnapshot={mapLayersSnapshot}
+                uploadedMarkers={uploadedMarkers}
+                comparisonPins={pdfComparisonPins}
+                result={null}
+                aggregateData={aggregateData}
+                cityZips={cityZips}
+                trends={trendsShapeForReport(trends)}
+                cycleAnalysis={cycleData}
+              />
+            </PanelSection>
+            <PanelSection title="Executive Memo">
+              <ExecutiveMemo
+                marketLabel={aggregateData.label}
+                cycle={cycleData}
+                data={{
+                  avg_zori: aggregateData.zillow.avg_zori,
+                  avg_zhvi: aggregateData.zillow.avg_zhvi,
+                  zori_growth: aggregateData.zillow.zori_growth_12m,
+                  zhvi_growth: aggregateData.zillow.zhvi_growth_12m,
+                  vacancy_rate: aggregateData.housing.vacancy_rate,
+                  median_income: aggregateData.housing.median_income,
+                  doz_pending: aggregateData.metro_velocity?.doz_pending_latest,
+                  price_cut_pct: aggregateData.metro_velocity?.price_cut_pct_latest,
+                  inventory: aggregateData.metro_velocity?.inventory_latest,
+                  permit_units: aggregateData.permits.total_units,
+                  population: aggregateData.total_population,
+                  search_interest: trends?.error ? null : trends?.latest_score,
+                }}
+              />
+            </PanelSection>
+              </>
+            )}
+
+            {marketPanelTab === 'data' && (
+              <>
             <PanelSection title="Market Pricing (Zillow)">
               <MetricRow metricKey="zori" label="Avg Median Rent (ZORI)" value={fmtMoney(aggregateData.zillow.avg_zori)} sub={aggregateData.zillow.zori_growth_12m != null ? `${fmtGrowth(aggregateData.zillow.zori_growth_12m)} YoY avg` : undefined} />
               <MetricRow metricKey="zhvi" label="Avg Home Value (ZHVI)" value={fmtMoney(aggregateData.zillow.avg_zhvi)} sub={aggregateData.zillow.zhvi_growth_12m != null ? `${fmtGrowth(aggregateData.zillow.zhvi_growth_12m)} YoY avg` : undefined} />
@@ -1386,12 +1476,7 @@ export default function Home() {
                 })}
               </PanelSection>
             )}
-          </div>
-        )}
 
-        {/* Aggregate panel memo + export */}
-        {aggregateData && panelOpen && !result && (
-          <div className="px-4 pb-4 min-w-[300px]">
             {cityZips && cityZips.length > 0 && (
               <AggregateShortlistToggle
                 aggregateData={aggregateData}
@@ -1400,100 +1485,98 @@ export default function Home() {
                 savedSearch={searchInput}
               />
             )}
+              </>
+            )}
+            </div>
+          </div>
+        )}
+
+        {!selectedSite && result && panelOpen && (
+          <div className="flex min-h-0 min-w-[360px] flex-1 flex-col overflow-hidden">
+            <div className="shrink-0 border-b border-border/50 p-4 pb-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <h2 className="text-base font-bold leading-tight text-foreground">{result.zillow?.city ?? result.zip}</h2>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{result.zillow?.metro_name ?? ''} · {result.zip}</p>
+                </div>
+                <div className="flex flex-shrink-0 items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleMap3DToggle}
+                    className="rounded-full border px-3 py-1 text-[10px] font-semibold text-white transition-colors"
+                    style={{
+                      background: map3DActive ? '#D76B3D' : 'rgba(45,51,66,0.95)',
+                      borderColor: map3DActive ? '#D76B3D' : 'rgba(75,85,99,0.9)',
+                    }}
+                  >
+                    3D
+                  </button>
+                  <button type="button" onClick={() => setPanelOpen(false)} className="text-xl leading-none text-muted-foreground hover:text-foreground">×</button>
+                </div>
+              </div>
+              <div className="mt-3 flex gap-0 overflow-hidden rounded-lg border border-white/10">
+                {(['analysis', 'data'] as const).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setMarketPanelTab(t)}
+                    className={cn(
+                      'flex-1 py-1.5 text-[10px] font-semibold capitalize transition-colors',
+                      marketPanelTab === t ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'
+                    )}
+                  >
+                    {t === 'analysis' ? 'Analysis' : 'Data'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+            {marketPanelTab === 'analysis' && (
+              <>
+            <MomentumExplainBlock anchorZip={/^\d{5}$/.test(result.zip) ? result.zip : null} aggregateZips={null} />
+            {cycleData && (
+              <CycleExplainCard marketLabel={result.zillow?.city ?? result.zip} cycle={cycleData} />
+            )}
+
             <PanelSection title="Market brief (PDF)">
               <MarketReportExport
                 mapLayersSnapshot={mapLayersSnapshot}
                 uploadedMarkers={uploadedMarkers}
                 comparisonPins={pdfComparisonPins}
-                result={null}
-                aggregateData={aggregateData}
-                cityZips={cityZips}
+                result={result}
+                aggregateData={null}
+                cityZips={null}
                 trends={trendsShapeForReport(trends)}
                 cycleAnalysis={cycleData}
               />
             </PanelSection>
             <PanelSection title="Executive Memo">
               <ExecutiveMemo
-                marketLabel={aggregateData.label}
+                marketLabel={result.zillow?.city ?? result.zip}
                 cycle={cycleData}
                 data={{
-                  avg_zori: aggregateData.zillow.avg_zori,
-                  avg_zhvi: aggregateData.zillow.avg_zhvi,
-                  zori_growth: aggregateData.zillow.zori_growth_12m,
-                  zhvi_growth: aggregateData.zillow.zhvi_growth_12m,
-                  vacancy_rate: aggregateData.housing.vacancy_rate,
-                  median_income: aggregateData.housing.median_income,
-                  doz_pending: aggregateData.metro_velocity?.doz_pending_latest,
-                  price_cut_pct: aggregateData.metro_velocity?.price_cut_pct_latest,
-                  inventory: aggregateData.metro_velocity?.inventory_latest,
-                  permit_units: aggregateData.permits.total_units,
-                  population: aggregateData.total_population,
+                  avg_zori: result.zillow?.zori_latest,
+                  avg_zhvi: result.zillow?.zhvi_latest,
+                  zori_growth: result.zillow?.zori_growth_12m,
+                  zhvi_growth: result.zillow?.zhvi_growth_12m,
+                  vacancy_rate: result.data.find((r) => r.metric_name === 'Vacancy_Rate')?.metric_value,
+                  median_income: result.data.find((r) => r.metric_name === 'Median_Household_Income')?.metric_value,
+                  doz_pending: result.metro_velocity?.doz_pending_latest,
+                  price_cut_pct: result.metro_velocity?.price_cut_pct_latest,
+                  inventory: result.metro_velocity?.inventory_latest,
+                  permit_units: result.data.find((r) => r.metric_name === 'Permit_Units')?.metric_value,
+                  population: result.data.find((r) => r.metric_name === 'Total_Population')?.metric_value,
+                  transit_stops: transit?.stop_count,
                   search_interest: trends?.error ? null : trends?.latest_score,
                 }}
               />
             </PanelSection>
-          </div>
-        )}
-
-        {result && panelOpen && (
-          <div className="p-4 min-w-[300px]">
-            {/* Header */}
-            <div className="flex items-start justify-between mb-3 gap-2">
-              <div className="min-w-0">
-                <h2 className="text-white font-bold text-base leading-tight">{result.zillow?.city ?? result.zip}</h2>
-                <p className="text-zinc-500 text-xs mt-0.5">{result.zillow?.metro_name ?? ''} · {result.zip}</p>
-              </div>
-              <div className="flex flex-shrink-0 items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={handleMap3DToggle}
-                  className="rounded-full border px-3 py-1 text-[10px] font-semibold text-white transition-colors"
-                  style={{
-                    background: map3DActive ? '#D76B3D' : 'rgba(45,51,66,0.95)',
-                    borderColor: map3DActive ? '#D76B3D' : 'rgba(75,85,99,0.9)',
-                  }}
-                >
-                  3D
-                </button>
-                <button type="button" onClick={() => setPanelOpen(false)} className="text-zinc-600 hover:text-white text-xl leading-none">×</button>
-              </div>
-            </div>
-            {/* Tab bar */}
-            <div className="flex rounded-lg overflow-hidden border border-white/8 mb-4">
-              {(['data', 'table'] as const).map((t) => (
-                <button key={t} onClick={() => setPanelTab(t)}
-                  className={`flex-1 py-1.5 text-[10px] font-medium transition-all capitalize ${panelTab === t ? 'bg-[#D76B3D]/20 text-[#D76B3D]' : 'text-zinc-500 hover:text-zinc-300'}`}>
-                  {t === 'data' ? 'Overview' : 'All Data'}
-                </button>
-              ))}
-            </div>
-
-            {panelTab === 'table' && (
-              <div className="space-y-0">
-                <p className="text-[9px] uppercase tracking-widest text-zinc-500 mb-2 pb-1.5 border-b border-white/5">All Metrics</p>
-                {result.zillow && <>
-                  <MetricRow label="Median Rent (ZORI)" value={fmtMoney(result.zillow.zori_latest)} sub={zoriGrowth ?? undefined} />
-                  <MetricRow label="Home Value (ZHVI)" value={fmtMoney(result.zillow.zhvi_latest)} sub={fmtGrowth(result.zillow.zhvi_growth_12m) ?? undefined} />
-                  <MetricRow label="1yr Forecast" value={result.zillow.zhvf_growth_1yr != null && Math.abs(result.zillow.zhvf_growth_1yr) < 50 ? fmtNum(result.zillow.zhvf_growth_1yr, '%') : '—'} />
-                </>}
-                {result.metro_velocity && <>
-                  <MetricRow label="Days to Pending" value={fmtNum(result.metro_velocity.doz_pending_latest, ' days')} />
-                  <MetricRow label="Price Cuts" value={fmtNum(result.metro_velocity.price_cut_pct_latest, '%')} sub="of listings" />
-                  <MetricRow label="Active Inventory" value={fmtNum(result.metro_velocity.inventory_latest)} sub={result.metro_velocity.region_name} />
-                </>}
-                {tabularRows.map((r) => (
-                  <MetricRow key={r.metric_name} label={r.metric_name} value={formatMetricValue(r.metric_name, r.metric_value)} sub={r.data_source} />
-                ))}
-                {transit && <MetricRow label="Transit Stops" value={transit.stop_count.toLocaleString()} sub="nearby stops" />}
-                {trends?.latest_score != null && <MetricRow label="Search Interest" value={`${trends.latest_score} / 100`} sub={trends.is_fallback ? 'state-level' : 'local'} />}
-              </div>
-            )}
-            {panelTab === 'data' && <>            <MomentumExplainBlock anchorZip={/^\d{5}$/.test(result.zip) ? result.zip : null} aggregateZips={null} />
-            {cycleData && (
-              <CycleExplainCard marketLabel={result.zillow?.city ?? result.zip} cycle={cycleData} />
+              </>
             )}
 
-
+            {marketPanelTab === 'data' && (
+              <>
             {/* Zillow pricing */}
             {result.zillow && (
               <PanelSection title="Market Pricing">
@@ -1602,46 +1685,61 @@ export default function Home() {
               <ShortlistToggleButton market={result} cycle={cycleData} />
             )}
 
-            {/* PDF + Executive Memo */}
-            <PanelSection title="Market brief (PDF)">
-              <MarketReportExport
-                mapLayersSnapshot={mapLayersSnapshot}
-                uploadedMarkers={uploadedMarkers}
-                comparisonPins={pdfComparisonPins}
-                result={result}
-                aggregateData={null}
-                cityZips={null}
-                trends={trendsShapeForReport(trends)}
-                cycleAnalysis={cycleData}
-              />
-            </PanelSection>
-            <PanelSection title="Executive Memo">
-              <ExecutiveMemo
-                marketLabel={result.zillow?.city ?? result.zip}
-                cycle={cycleData}
-                data={{
-                  avg_zori: result.zillow?.zori_latest,
-                  avg_zhvi: result.zillow?.zhvi_latest,
-                  zori_growth: result.zillow?.zori_growth_12m,
-                  zhvi_growth: result.zillow?.zhvi_growth_12m,
-                  vacancy_rate: result.data.find((r) => r.metric_name === 'Vacancy_Rate')?.metric_value,
-                  median_income: result.data.find((r) => r.metric_name === 'Median_Household_Income')?.metric_value,
-                  doz_pending: result.metro_velocity?.doz_pending_latest,
-                  price_cut_pct: result.metro_velocity?.price_cut_pct_latest,
-                  inventory: result.metro_velocity?.inventory_latest,
-                  permit_units: result.data.find((r) => r.metric_name === 'Permit_Units')?.metric_value,
-                  population: result.data.find((r) => r.metric_name === 'Total_Population')?.metric_value,
-                  transit_stops: transit?.stop_count,
-                  search_interest: trends?.error ? null : trends?.latest_score,
-                }}
-              />
-            </PanelSection>
+            <details className="mb-4 rounded-lg border border-border/60 bg-muted/10 px-3 py-2">
+              <summary className="cursor-pointer text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                All metrics (flat table)
+              </summary>
+              <div className="mt-3 space-y-0 border-t border-border/40 pt-2">
+                {result.zillow && (
+                  <>
+                    <MetricRow label="Median Rent (ZORI)" value={fmtMoney(result.zillow.zori_latest)} sub={zoriGrowth ?? undefined} />
+                    <MetricRow label="Home Value (ZHVI)" value={fmtMoney(result.zillow.zhvi_latest)} sub={fmtGrowth(result.zillow.zhvi_growth_12m) ?? undefined} />
+                    <MetricRow
+                      label="1yr Forecast"
+                      value={
+                        result.zillow.zhvf_growth_1yr != null && Math.abs(result.zillow.zhvf_growth_1yr) < 50
+                          ? fmtNum(result.zillow.zhvf_growth_1yr, '%')
+                          : '—'
+                      }
+                    />
+                  </>
+                )}
+                {result.metro_velocity && (
+                  <>
+                    <MetricRow label="Days to Pending" value={fmtNum(result.metro_velocity.doz_pending_latest, ' days')} />
+                    <MetricRow label="Price Cuts" value={fmtNum(result.metro_velocity.price_cut_pct_latest, '%')} sub="of listings" />
+                    <MetricRow
+                      label="Active Inventory"
+                      value={fmtNum(result.metro_velocity.inventory_latest)}
+                      sub={result.metro_velocity.region_name}
+                    />
+                  </>
+                )}
+                {tabularRows.map((r) => (
+                  <MetricRow
+                    key={r.metric_name}
+                    label={r.metric_name}
+                    value={formatMetricValue(r.metric_name, r.metric_value)}
+                    sub={r.data_source}
+                  />
+                ))}
+                {transit && <MetricRow label="Transit Stops" value={transit.stop_count.toLocaleString()} sub="nearby stops" />}
+                {trends?.latest_score != null && (
+                  <MetricRow
+                    label="Search Interest"
+                    value={`${trends.latest_score} / 100`}
+                    sub={trends.is_fallback ? 'state-level' : 'local'}
+                  />
+                )}
+              </div>
+            </details>
 
-            {/* Agentic Normalizer */}
             <PanelSection title="Agentic Normalizer">
               <AgenticNormalizer currentZip={result.zip} onIngested={handleNormalizerIngested} />
             </PanelSection>
-            </>}
+              </>
+            )}
+            </div>
           </div>
         )}
       </aside>
