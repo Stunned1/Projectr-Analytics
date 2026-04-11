@@ -9,6 +9,7 @@
  */
 import { type NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import { normalizeUsStateToAbbr } from '@/lib/us-state-abbr'
 
 export const dynamic = 'force-dynamic'
 
@@ -27,9 +28,24 @@ interface ZipResult {
 
 export async function GET(request: NextRequest) {
   const city = request.nextUrl.searchParams.get('city')?.trim()
-  const state = request.nextUrl.searchParams.get('state')?.trim()
+  const stateRaw = request.nextUrl.searchParams.get('state')?.trim()
 
   if (!city) return NextResponse.json({ error: 'Missing city' }, { status: 400 })
+
+  let stateAbbr: string | undefined
+  if (stateRaw) {
+    const abbr = normalizeUsStateToAbbr(stateRaw)
+    if (!abbr) {
+      return NextResponse.json(
+        {
+          error: `Unrecognized state "${stateRaw}". Use the full state name (e.g. New Jersey) or USPS code (NJ).`,
+          zips: [],
+        },
+        { status: 400 }
+      )
+    }
+    stateAbbr = abbr
+  }
 
   try {
     // Step 1: Search our zip_metro_lookup by city name
@@ -40,7 +56,7 @@ export async function GET(request: NextRequest) {
       .not('lat', 'is', null)
       .limit(50)
 
-    if (state) query = query.ilike('state', state)
+    if (stateAbbr) query = query.eq('state', stateAbbr)
 
     const { data: lookupZips } = await query
 
@@ -48,7 +64,7 @@ export async function GET(request: NextRequest) {
 
     // Step 2: Fallback to zippopotam if no results
     if (zips.length === 0) {
-      const stateParam = state?.toLowerCase() ?? ''
+      const stateParam = stateAbbr?.toLowerCase() ?? ''
       const cityParam = city.toLowerCase().replace(/\s+/g, '-')
       const url = stateParam
         ? `https://api.zippopotam.us/us/${stateParam}/${cityParam}`
@@ -106,7 +122,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       city,
-      state: state ?? zips[0]?.state ?? null,
+      state: stateAbbr ?? zips[0]?.state ?? null,
       metro_name: zips[0]?.metro_name ?? null,
       zip_count: results.length,
       aggregates: { avg_zori: avgZori, avg_zhvi: avgZhvi },

@@ -7,6 +7,7 @@ import type {
   MetroBenchmark,
   SignalIndicator,
 } from './types'
+import type { MarketDossierGemini } from './gemini-market-dossier'
 import { BarChartPdf, SparklinePdf } from './pdf-charts'
 import { CycleSignalTilesPdf, CycleWheelPdf } from './pdf-cycle-visual'
 import { PdfTrendArrow, trendKindToVariant, signalIndicatorToVariant } from './pdf-trend-arrow'
@@ -117,6 +118,74 @@ const styles = StyleSheet.create({
   methColMetric: { width: '18%', fontSize: 6.5, fontFamily: 'Helvetica', fontWeight: 'bold', color: '#444' },
   methColDef: { width: '57%', fontSize: 6.5, color: '#555', lineHeight: 1.35, paddingRight: 6 },
   methColSrc: { width: '25%', fontSize: 6.5, color: muted, lineHeight: 1.35 },
+  dossierKicker: {
+    fontSize: 8,
+    color: accent,
+    fontFamily: 'Helvetica',
+    fontWeight: 'bold',
+    letterSpacing: 1.2,
+    marginBottom: 6,
+  },
+  dossierIntro: {
+    fontSize: 8,
+    lineHeight: 1.45,
+    color: '#444',
+    marginBottom: 10,
+    padding: 10,
+    backgroundColor: '#f8f6f4',
+    borderLeftWidth: 3,
+    borderLeftColor: accent,
+    width: PDF_CONTENT_WIDTH_PT,
+  },
+  dossierCard: {
+    width: '48%',
+    borderWidth: 1,
+    borderColor: '#e8e0d8',
+    borderRadius: 5,
+    padding: 9,
+    marginBottom: 8,
+    marginRight: '2%',
+    backgroundColor: '#fdfcfa',
+    minHeight: 72,
+  },
+  dossierCardFull: {
+    width: PDF_CONTENT_WIDTH_PT,
+    borderWidth: 1,
+    borderColor: '#e8e0d8',
+    borderRadius: 5,
+    padding: 10,
+    marginBottom: 10,
+    backgroundColor: '#fdfcfa',
+  },
+  dossierCardTitle: {
+    fontSize: 9,
+    fontFamily: 'Helvetica',
+    fontWeight: 'bold',
+    color: accent,
+    marginBottom: 5,
+  },
+  dossierCardBody: { fontSize: 8, lineHeight: 1.45, color: '#333', width: '100%' },
+  dossierListTitle: {
+    fontSize: 9,
+    fontFamily: 'Helvetica',
+    fontWeight: 'bold',
+    color: ink,
+    marginBottom: 5,
+    marginTop: 4,
+  },
+  dossierBullet: { fontSize: 8, color: '#333', marginBottom: 4, paddingLeft: 8, lineHeight: 1.4, width: '100%' },
+  dossierLimitations: {
+    marginTop: 10,
+    padding: 9,
+    backgroundColor: '#fafafa',
+    borderWidth: 1,
+    borderColor: '#e5e5e5',
+    borderRadius: 4,
+    fontSize: 7.5,
+    color: '#555',
+    lineHeight: 1.45,
+    width: PDF_CONTENT_WIDTH_PT,
+  },
 })
 
 function fmtMoney(n: number | null | undefined) {
@@ -161,6 +230,7 @@ export interface SiteCompareRow {
 export interface MarketReportPdfInput {
   payload: ClientReportPayload
   brief: GeminiBriefResult
+  dossier: MarketDossierGemini
   signals: SignalIndicator[]
   cycleAnalysis: CycleAnalysis | null
   zoriSeries: { date: string; value: number }[]
@@ -176,6 +246,7 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
   const {
     payload,
     brief,
+    dossier,
     signals,
     cycleAnalysis,
     zoriSeries,
@@ -378,7 +449,117 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
         </View>
       </Page>
 
-      {/* Page 2 — Data */}
+      {/* Dossier p1 — Gemini whole-market narrative */}
+      <Page size="A4" style={styles.page}>
+        <View style={styles.headerBand}>
+          {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>PROJECTR</Text>}
+          <View>
+            <Text style={styles.meta}>Market intelligence dossier</Text>
+            <Text style={styles.meta}>{payload.marketLabel}</Text>
+          </View>
+        </View>
+        <Text style={styles.dossierKicker}>AI-GENERATED · FULL MARKET CONTEXT</Text>
+        <Text style={styles.dossierIntro} wrap hyphenationCallback={(word) => [word]}>
+          {dossier.geographyContext}
+        </Text>
+        <Text style={styles.sectionTitle}>Executive summary (dossier)</Text>
+        {narrativeTextBlocks(dossier.executiveSummary).map((block, i) => (
+          <Text
+            key={`d-exec-${i}`}
+            style={[styles.narrative, { marginBottom: 6 }]}
+            wrap
+            hyphenationCallback={(word) => [word]}
+          >
+            {block}
+          </Text>
+        ))}
+        <Text style={styles.sectionTitle}>Thematic deep dive</Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', width: PDF_CONTENT_WIDTH_PT }}>
+          <View style={styles.dossierCard}>
+            <Text style={styles.dossierCardTitle}>{dossier.demandAndDemographics.title}</Text>
+            <Text style={styles.dossierCardBody} wrap hyphenationCallback={(word) => [word]}>
+              {dossier.demandAndDemographics.body}
+            </Text>
+          </View>
+          <View style={styles.dossierCard}>
+            <Text style={styles.dossierCardTitle}>{dossier.supplyAndConstruction.title}</Text>
+            <Text style={styles.dossierCardBody} wrap hyphenationCallback={(word) => [word]}>
+              {dossier.supplyAndConstruction.body}
+            </Text>
+          </View>
+          <View style={styles.dossierCard}>
+            <Text style={styles.dossierCardTitle}>{dossier.pricingAndCapitalMarkets.title}</Text>
+            <Text style={styles.dossierCardBody} wrap hyphenationCallback={(word) => [word]}>
+              {dossier.pricingAndCapitalMarkets.body}
+            </Text>
+          </View>
+          <View style={styles.dossierCard}>
+            <Text style={styles.dossierCardTitle}>{dossier.laborAndMacro.title}</Text>
+            <Text style={styles.dossierCardBody} wrap hyphenationCallback={(word) => [word]}>
+              {dossier.laborAndMacro.body}
+            </Text>
+          </View>
+        </View>
+      </Page>
+
+      {/* Dossier p2 — peer read, risks, opportunities, scenarios */}
+      <Page size="A4" style={styles.page}>
+        <View style={styles.headerBand}>
+          {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>PROJECTR</Text>}
+          <Text style={styles.meta}>Dossier (continued) · {payload.marketLabel}</Text>
+        </View>
+        <Text style={styles.sectionTitle}>Peer & benchmark read</Text>
+        {narrativeTextBlocks(dossier.peerAndBenchmarkRead).map((block, i) => (
+          <Text
+            key={`d-peer-${i}`}
+            style={[styles.narrative, { marginBottom: 6 }]}
+            wrap
+            hyphenationCallback={(word) => [word]}
+          >
+            {block}
+          </Text>
+        ))}
+        <View style={{ flexDirection: 'row', width: PDF_CONTENT_WIDTH_PT, marginTop: 6 }}>
+          <View style={{ width: '49%', paddingRight: 6 }}>
+            <Text style={styles.dossierListTitle}>Key risks</Text>
+            {dossier.risks.map((r, i) => (
+              <Text key={`r-${i}`} style={styles.dossierBullet} wrap hyphenationCallback={(word) => [word]}>
+                • {r}
+              </Text>
+            ))}
+          </View>
+          <View style={{ width: '49%', paddingLeft: 6 }}>
+            <Text style={styles.dossierListTitle}>Opportunities</Text>
+            {dossier.opportunities.map((r, i) => (
+              <Text key={`o-${i}`} style={styles.dossierBullet} wrap hyphenationCallback={(word) => [word]}>
+                • {r}
+              </Text>
+            ))}
+          </View>
+        </View>
+        <Text style={styles.dossierListTitle}>Underwriting scenarios</Text>
+        {dossier.scenarios.map((s, i) => (
+          <Text key={`s-${i}`} style={styles.dossierBullet} wrap hyphenationCallback={(word) => [word]}>
+            {i + 1}. {s}
+          </Text>
+        ))}
+        <Text style={styles.dossierListTitle}>Monitoring checklist</Text>
+        {dossier.monitoringChecklist.map((s, i) => (
+          <Text key={`m-${i}`} style={styles.dossierBullet} wrap hyphenationCallback={(word) => [word]}>
+            □ {s}
+          </Text>
+        ))}
+        <Text style={[styles.sectionTitle, { marginTop: 12 }]}>Data limitations</Text>
+        <Text style={styles.dossierLimitations} wrap hyphenationCallback={(word) => [word]}>
+          {dossier.limitations}
+        </Text>
+        <Text style={[styles.foot, { marginTop: 10 }]} wrap>
+          Dossier narrative is model-generated from the same cached metrics as the charts in this PDF; validate material
+          decisions against primary sources (Zillow Research, Census, FRED).
+        </Text>
+      </Page>
+
+      {/* Data page — charts & benchmark table */}
       <Page size="A4" style={styles.page}>
         <View style={styles.headerBand}>
           {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>PROJECTR</Text>}

@@ -107,7 +107,7 @@ export default function CommandCenterSidebar({
               type="text"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="ZIP, City, ST, or Borough..."
+              placeholder="ZIP, City & State, or Borough..."
               className={cn(
                 'h-8 rounded-md border-input bg-input/40 pl-7 pr-3 text-xs text-sidebar-foreground placeholder:text-muted-foreground',
                 'focus-visible:border-primary focus-visible:ring-primary/25'

@@ -830,11 +830,15 @@ function CommandMap({
     return transitData.routes ?? transitData.geojson?.routes ?? []
   }, [transitData])
 
-  // Merge agent layer overrides into local layer state
-  const effectiveLayers = useMemo(() => ({
-    ...layers,
-    ...agentLayerOverrides,
-  }), [layers, agentLayerOverrides])
+  // Merge agent layer overrides into local layer state (`permits` is agent JSON alias for nycPermits)
+  const effectiveLayers = useMemo((): LayerState => {
+    const merged = { ...layers, ...agentLayerOverrides } as LayerState & { permits?: boolean }
+    if (agentLayerOverrides && Object.prototype.hasOwnProperty.call(agentLayerOverrides, 'permits')) {
+      merged.nycPermits = Boolean(agentLayerOverrides.permits)
+    }
+    delete merged.permits
+    return merged as LayerState
+  }, [layers, agentLayerOverrides])
 
   // Agent can override the active metric
   const effectiveMetric = agentMetric ?? activeMetric

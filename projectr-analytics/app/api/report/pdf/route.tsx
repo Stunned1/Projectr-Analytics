@@ -1,7 +1,5 @@
 import React from 'react'
 import { type NextRequest, NextResponse } from 'next/server'
-import { readFileSync, existsSync } from 'fs'
-import { join } from 'path'
 import { renderToBuffer } from '@react-pdf/renderer'
 import { supabase } from '@/lib/supabase'
 import type { ClientReportPayload, MetroBenchmark, SignalIndicator } from '@/lib/report/types'
@@ -10,10 +8,12 @@ import { cycleAnalysisToSignalIndicators } from '@/lib/report/cycle-signals'
 import { buildSignalIndicators, confidenceFromSignals } from '@/lib/report/signals'
 import { resolveZoriSeriesForReport } from '@/lib/report/fetch-zori-series'
 import { generateBriefWithGemini } from '@/lib/report/gemini-brief'
+import { generateMarketDossierWithGemini } from '@/lib/report/gemini-market-dossier'
 import { parseCycleAnalysisField } from '@/lib/report/validate-cycle'
 import { encodeZipBoundaryPolyline } from '@/lib/report/boundary-encode'
 import { fetchStaticMapPng } from '@/lib/report/static-map'
 import { MarketReportDocument, type SiteCompareRow } from '@/lib/report/pdf-document'
+import { loadProjectrLogoDataUri } from '@/lib/report/load-projectr-logo'
 import type { CycleAnalysis } from '@/lib/cycle/types'
 import { resolveZctaFromCoordinates } from '@/lib/upload/resolve-zcta'
 
@@ -134,16 +134,6 @@ async function buildSiteRows(
   return rows
 }
 
-function loadLogoDataUri(): string | null {
-  try {
-    const p = join(process.cwd(), 'public', 'Projectr_Logo.png')
-    if (!existsSync(p)) return null
-    return `data:image/png;base64,${readFileSync(p).toString('base64')}`
-  } catch {
-    return null
-  }
-}
-
 function validatePayload(body: unknown): ClientReportPayload | null {
   if (!body || typeof body !== 'object') return null
   const b = body as Record<string, unknown>
@@ -199,6 +189,16 @@ export async function POST(request: NextRequest) {
       buildSiteRows(payload, origin),
     ])
 
+    const dossier = await generateMarketDossierWithGemini({
+      payload,
+      brief,
+      signals,
+      cycleAnalysis: cycle,
+      metro,
+      zoriSeries,
+      trendsSeries,
+    })
+
     let encodedPath: string | null = null
     if (payload.primaryZip && /^\d{5}$/.test(payload.primaryZip)) {
       encodedPath = await encodeZipBoundaryPolyline(payload.primaryZip)
@@ -216,12 +216,13 @@ export async function POST(request: NextRequest) {
           })
         : null
 
-    const logoDataUri = loadLogoDataUri()
+    const logoDataUri = loadProjectrLogoDataUri()
 
     const doc = (
       <MarketReportDocument
         payload={payload}
         brief={brief}
+        dossier={dossier}
         signals={signals}
         cycleAnalysis={cycle}
         zoriSeries={zoriSeries}

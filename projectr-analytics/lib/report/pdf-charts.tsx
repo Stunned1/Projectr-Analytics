@@ -67,11 +67,14 @@ export function BarChartPdf({
   width,
   height,
   color = '#D76B3D',
+  caption,
 }: {
   bars: { label: string; value: number }[]
   width: number
   height: number
   color?: string
+  /** Overrides default “Units (max …)” label above the chart. */
+  caption?: string
 }) {
   if (!bars.length) {
     return (
@@ -89,10 +92,12 @@ export function BarChartPdf({
   const chartH = height - padTop - padBottom
   const gap = 6
   const bw = Math.max(8, (width - padL - 6 - gap * (bars.length - 1)) / bars.length)
+  const cap =
+    caption ?? `Units (max ${Math.round(max).toLocaleString('en-US')})`
   return (
     <Svg width={width} height={height}>
       <SvgText x={4} y={padTop - 8} style={{ fontSize: 6, fill: '#555' }}>
-        Units (max {Math.round(max).toLocaleString('en-US')})
+        {cap}
       </SvgText>
       {bars.map((b, i) => {
         const bh = (b.value / max) * chartH
@@ -110,6 +115,74 @@ export function BarChartPdf({
             </SvgText>
             <SvgText x={barX + bw / 2} y={height - 4} style={{ fontSize: 6, fill: '#888', textAnchor: 'middle' }}>
               {b.label}
+            </SvgText>
+          </Fragment>
+        )
+      })}
+    </Svg>
+  )
+}
+
+/** Left-aligned labels; horizontal bars — good for comparing sites on one metric. */
+export function HorizontalBarChartPdf({
+  rows,
+  width,
+  height,
+  color = '#D76B3D',
+  caption,
+  formatValue,
+}: {
+  rows: { label: string; value: number }[]
+  width: number
+  height: number
+  color?: string
+  caption?: string
+  /** Override bar-end labels (e.g. values already in millions). */
+  formatValue?: (v: number) => string
+}) {
+  if (!rows.length) {
+    return (
+      <Svg width={width} height={height}>
+        <SvgText x={4} y={height / 2} style={{ fontSize: 7, fill: '#888' }}>
+          No rows
+        </SvgText>
+      </Svg>
+    )
+  }
+  const max = Math.max(...rows.map((r) => r.value), 1)
+  const padT = caption ? 22 : 10
+  const padB = 8
+  const labelW = Math.min(86, width * 0.26)
+  const barX0 = labelW + 6
+  const barW = width - barX0 - 6
+  const innerH = height - padT - padB
+  const rowH = innerH / rows.length
+  const barH = Math.max(5, rowH - 5)
+
+  const fmt =
+    formatValue ??
+    ((v: number) =>
+      v >= 1e6 ? `${(v / 1e6).toFixed(2)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(1)}k` : v.toFixed(v >= 10 ? 0 : 1))
+
+  return (
+    <Svg width={width} height={height}>
+      {caption ? (
+        <SvgText x={4} y={12} style={{ fontSize: 6, fill: '#555' }}>
+          {caption}
+        </SvgText>
+      ) : null}
+      {rows.map((r, i) => {
+        const y = padT + i * rowH + (rowH - barH) / 2
+        const fillW = (r.value / max) * barW
+        return (
+          <Fragment key={`${r.label}-${i}`}>
+            <SvgText x={2} y={y + barH - 1} style={{ fontSize: 6, fill: '#333' }}>
+              {r.label.length > 22 ? `${r.label.slice(0, 20)}…` : r.label}
+            </SvgText>
+            <Rect x={barX0} y={y} width={barW} height={barH} fill="#ececec" />
+            <Rect x={barX0} y={y} width={Math.max(fillW, r.value > 0 ? 1 : 0)} height={barH} fill={color} />
+            <SvgText x={barX0 + fillW + 3} y={y + barH - 1} style={{ fontSize: 6, fill: '#444' }}>
+              {fmt(r.value)}
             </SvgText>
           </Fragment>
         )

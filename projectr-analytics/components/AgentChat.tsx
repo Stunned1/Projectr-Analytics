@@ -53,6 +53,8 @@ interface Message {
 interface MapContext {
   label?: string | null
   zip?: string | null
+  hasRankedSites?: boolean
+  rankedSiteCount?: number
   layers?: Record<string, boolean>
   activeMetric?: string
   zori?: number | null
@@ -100,6 +102,49 @@ const SUGGESTIONS = [
   'Highlight transit connectivity',
 ]
 
+interface CaseStudyBundle {
+  userText: string
+  agentLead: string
+  insight: string | null
+}
+
+const CHAT_STORAGE_KEY = 'projectr-agent-chat-v1'
+
+type PersistedAgentChat = {
+  v: 1
+  messages: Message[]
+  caseStudyBundle: CaseStudyBundle | null
+}
+
+function readPersistedChat(): PersistedAgentChat | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = sessionStorage.getItem(CHAT_STORAGE_KEY)
+    if (!raw) return null
+    const p = JSON.parse(raw) as PersistedAgentChat
+    if (p.v !== 1 || !Array.isArray(p.messages)) return null
+    return p
+  } catch {
+    return null
+  }
+}
+
+function writePersistedChat(messages: Message[], bundle: CaseStudyBundle | null) {
+  try {
+    sessionStorage.setItem(
+      CHAT_STORAGE_KEY,
+      JSON.stringify({ v: 1, messages, caseStudyBundle: bundle } satisfies PersistedAgentChat)
+    )
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+const DEFAULT_GREETING: Message = {
+  role: 'agent',
+  text: 'Spatial analyst ready. Paste a case study or ask me to navigate markets, toggle layers, or run a site analysis.',
+}
+
 export default function AgentChat({
   mapContext,
   onAction,
@@ -110,18 +155,18 @@ export default function AgentChat({
   onClose,
   onNotifyWhileClosed,
 }: AgentChatProps) {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: 'agent',
-      text: 'Spatial analyst ready. Paste a case study or ask me to navigate markets, toggle layers, or run a site analysis.',
-    },
-  ])
+  const [messages, setMessages] = useState<Message[]>([DEFAULT_GREETING])
+  const [caseStudyBundle, setCaseStudyBundle] = useState<CaseStudyBundle | null>(null)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [isRunningSequence, setIsRunningSequence] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const sequenceRef = useRef<ReturnType<typeof setTimeout>[]>([])
+  const [storageHydrated, setStorageHydrated] = useState(false)
+
+  const [briefLoading, setBriefLoading] = useState(false)
+  const [briefError, setBriefError] = useState<string | null>(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -130,6 +175,20 @@ export default function AgentChat({
   useEffect(() => {
     if (isOpen) setTimeout(() => inputRef.current?.focus(), 150)
   }, [isOpen])
+
+  useEffect(() => {
+    const p = readPersistedChat()
+    if (p?.messages?.length) {
+      setMessages(p.messages)
+      setCaseStudyBundle(p.caseStudyBundle ?? null)
+    }
+    setStorageHydrated(true)
+  }, [])
+
+  useEffect(() => {
+    if (!storageHydrated) return
+    writePersistedChat(messages, caseStudyBundle)
+  }, [messages, caseStudyBundle, storageHydrated])
 
   // Clear pending timeouts on unmount
   useEffect(() => {
@@ -173,11 +232,12 @@ export default function AgentChat({
         analysisSites: sites,
       }])
 
-      // Trigger show_sites action — clears clutter layers, drops result pins
+      // Clear analytical clutter before pins (parcels, permits, census overlays); drop agent permit filter so UI matches “reveal” state
       onAction({
         type: 'toggle_layers',
-        layers: { parcels: false, permits: false },
+        layers: { parcels: false, permits: false, tracts: false, blockGroups: false },
       })
+      onAction({ type: 'set_permit_filter', types: [] })
       setTimeout(() => {
         onAction({ type: 'show_sites', sites })
       }, 600)
@@ -208,6 +268,50 @@ export default function AgentChat({
     }
   }, [onAction, runAnalysis])
 
+  const generateCaseBrief = useCallback(async () => {
+    const sitesMsg = [...messages].reverse().find((m) => m.analysisSites?.length)
+    const bundle = caseStudyBundle
+    if (!sitesMsg?.analysisSites?.length) return
+    setBriefLoading(true)
+    setBriefError(null)
+    try {
+      const res = await fetch('/api/agent/case-brief/pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          caseStudy: bundle?.userText ?? '',
+          agentSummary: bundle?.agentLead ?? '',
+          insight: bundle?.insight ?? '',
+          sites: sitesMsg.analysisSites,
+          mapContext,
+        }),
+      })
+      if (!res.ok) {
+        const errBody = (await res.json().catch(() => null)) as { error?: string } | null
+        setBriefError(errBody?.error ?? `Brief PDF failed (${res.status})`)
+        return
+      }
+      const blob = await res.blob()
+      const cd = res.headers.get('Content-Disposition')
+      let filename = 'Projectr-Case-Brief.pdf'
+      const m = cd?.match(/filename="([^"]+)"/)
+      if (m?.[1]) filename = m[1]
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      a.rel = 'noopener'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch {
+      setBriefError('Connection error')
+    } finally {
+      setBriefLoading(false)
+    }
+  }, [messages, mapContext, caseStudyBundle])
+
   const runSequence = useCallback((steps: AgentStep[]) => {
     setIsRunningSequence(true)
     sequenceRef.current.forEach(clearTimeout)
@@ -225,7 +329,9 @@ export default function AgentChat({
 
   const sendMessage = useCallback(async (text: string) => {
     if (!text.trim() || loading || isRunningSequence) return
-    setMessages((prev) => [...prev, { role: 'user', text: text.trim() }])
+    const userPrompt = text.trim()
+    setCaseStudyBundle({ userText: userPrompt, agentLead: '', insight: null })
+    setMessages((prev) => [...prev, { role: 'user', text: userPrompt }])
     setInput('')
     setLoading(true)
 
@@ -233,7 +339,7 @@ export default function AgentChat({
       const res = await fetch('/api/agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text.trim(), context: mapContext }),
+        body: JSON.stringify({ message: userPrompt, context: mapContext }),
       })
       const data = await res.json()
 
@@ -245,6 +351,11 @@ export default function AgentChat({
 
       // Multi-step sequence
       if (data.steps?.length) {
+        setCaseStudyBundle({
+          userText: userPrompt,
+          agentLead: typeof data.message === 'string' ? data.message : '',
+          insight: typeof data.insight === 'string' ? data.insight : null,
+        })
         setMessages((prev) => [...prev, { role: 'agent', text: data.message, insight: data.insight }])
         if (!isOpen) onNotifyWhileClosed?.()
         runSequence(data.steps)
@@ -252,6 +363,11 @@ export default function AgentChat({
       }
 
       // Single action
+      setCaseStudyBundle({
+        userText: userPrompt,
+        agentLead: typeof data.message === 'string' ? data.message : '',
+        insight: typeof data.insight === 'string' ? data.insight : null,
+      })
       setMessages((prev) => [...prev, {
         role: 'agent',
         text: data.message,
@@ -274,6 +390,10 @@ export default function AgentChat({
   }, [loading, isRunningSequence, mapContext, onAction, runSequence, runAnalysis, isOpen, onNotifyWhileClosed])
 
   const bottomOffset = hasStatsBar ? 'bottom-[7.25rem]' : 'bottom-10'
+
+  const latestAnalysisMessage = [...messages].reverse().find((m) => m.analysisSites?.length)
+  const showBriefCta =
+    Boolean(latestAnalysisMessage?.analysisSites?.length) && !isRunningSequence && !loading
 
   if (!isOpen) {
     if (variant === 'docked') return null
@@ -426,6 +546,25 @@ export default function AgentChat({
               {s}
             </button>
           ))}
+        </div>
+      )}
+
+      {showBriefCta && (
+        <div className="px-4 pb-2 pt-1 border-t border-white/[0.06] shrink-0">
+          <button
+            type="button"
+            onClick={() => void generateCaseBrief()}
+            disabled={briefLoading}
+            className="w-full rounded-xl px-3 py-2.5 text-[12px] font-semibold tracking-wide text-white transition-all disabled:opacity-45 hover:brightness-110"
+            style={{
+              background: 'linear-gradient(135deg, rgba(215,107,61,0.35), rgba(215,107,61,0.12))',
+              border: '1px solid rgba(215,107,61,0.45)',
+              boxShadow: '0 0 24px rgba(215,107,61,0.12)',
+            }}
+          >
+            {briefLoading ? 'Building PDF…' : 'Download case brief (PDF)'}
+          </button>
+          {briefError && <p className="text-red-400/90 text-[11px] mt-1.5 px-0.5">{briefError}</p>}
         </div>
       )}
 
