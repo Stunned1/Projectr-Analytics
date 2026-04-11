@@ -88,9 +88,8 @@ _4.9.2026_
 
 _4.11.2026_
 - NYC PLUTO parcels now support borough mode — auto-detects borough from city ZIP range and fetches all parcels via `/api/parcels?borough=`
-- NYC permits `ScatterplotLayer` added — colored by job type (NB=orange, A1=yellow, A2=blue, DM=red), clickable with detail panel showing address, cost, stories, units, filing date
-- Permits layer fetched automatically on ZIP and borough search; toggle added to layer panel
-- Layer panel redesigned as pill buttons with colored dot indicators — removed all emojis and default HTML styling
+- NYC permits zoom-adaptive visualization — `HeatmapLayer` (zoom < 13, NB+A1 weighted), `ScatterplotLayer` (zoom 13-15, top 2000 by cost), bbox-filtered scatter (zoom ≥ 16, 500 cap); type filter pill (All/New Bldg/Major Reno/Demo) appears in layer panel when permits are active; clickable detail panel shows address, cost, stories, units, filing date
+- Permits layer fetched automatically on ZIP and borough search; refetches on zoom/pan with 400ms debounce- Layer panel redesigned as pill buttons with colored dot indicators — removed all emojis and default HTML styling
 - Added map tilt and heading sliders to layer panel
 - Disabled Google Maps default UI controls (map/satellite toggle, zoom buttons, fullscreen, street view)
 - Removed Data Layer Status dev sidebar

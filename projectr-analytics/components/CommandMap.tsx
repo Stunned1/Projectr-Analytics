@@ -134,6 +134,18 @@ interface ParcelPayload {
   assessed_value: number
 }
 
+interface PermitHeatPoint {
+  position: [number, number]
+  weight: number
+}
+
+interface PermitResponse {
+  mode?: string
+  permits?: PermitPayload[]
+  points?: PermitHeatPoint[]
+  count?: number
+}
+
 interface ParcelResponse {
   parcels?: ParcelPayload[]
   stats?: { p25_per_sqft: number; p75_per_sqft: number }
@@ -271,6 +283,34 @@ function DeckGlOverlay({ layers }: { layers: Layer[] }) {
   return null
 }
 
+// ── Zoom + bounds tracker ─────────────────────────────────────────────────────
+
+function ZoomTracker({ onZoomChange }: { onZoomChange: (zoom: number, bounds: { minLat: number; maxLat: number; minLng: number; maxLng: number } | null) => void }) {
+  const map = useMap()
+  useEffect(() => {
+    if (!map) return
+    const update = () => {
+      const zoom = map.getZoom() ?? 11
+      const b = map.getBounds()
+      const bounds = b ? {
+        minLat: b.getSouthWest().lat(),
+        maxLat: b.getNorthEast().lat(),
+        minLng: b.getSouthWest().lng(),
+        maxLng: b.getNorthEast().lng(),
+      } : null
+      onZoomChange(zoom, bounds)
+    }
+    const zoomListener = map.addListener('zoom_changed', update)
+    const idleListener = map.addListener('idle', update)
+    update()
+    return () => {
+      google.maps.event.removeListener(zoomListener)
+      google.maps.event.removeListener(idleListener)
+    }
+  }, [map, onZoomChange])
+  return null
+}
+
 // ── Tilt controller ───────────────────────────────────────────────────────────
 
 function TiltController({ tilt, heading }: { tilt: number; heading: number }) {
@@ -312,6 +352,13 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
   const [amenityPoints, setAmenityPoints] = useState<AmenityPoint[]>([])
   const [floodData, setFloodData] = useState<FloodCollection | null>(null)
   const [nycPermitData, setNycPermitData] = useState<PermitPayload[]>([])
+  const [permitHeatPoints, setPermitHeatPoints] = useState<PermitHeatPoint[]>([])
+  const [permitMode, setPermitMode] = useState<'heatmap' | 'scatter'>('heatmap')
+  const [permitTypeFilter, setPermitTypeFilter] = useState<'all' | 'NB' | 'A1' | 'DM'>('all')
+  const [mapZoom, setMapZoom] = useState(11)
+  const [mapBounds, setMapBounds] = useState<{ minLat: number; maxLat: number; minLng: number; maxLng: number } | null>(null)
+  const permitFetchRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastPermitFetchKey = useRef<string>('')
   const [selectedPermit, setSelectedPermit] = useState<PermitPayload | null>(null)
   const [layers, setLayers] = useState<LayerState>({
     zipBoundary: true,
@@ -347,6 +394,53 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
     commandMapRenderCounter += 1
     console.log('[perf] CommandMap render #', commandMapRenderCounter)
   })
+
+  // Zoom-based permit refetch — debounced, only when permits layer is on
+  const handleZoomChange = useCallback((zoom: number, bounds: typeof mapBounds) => {
+    setMapZoom(zoom)
+    setMapBounds(bounds)
+  }, [])
+
+  useEffect(() => {
+    if (!layers.nycPermits && !agentLayerOverrides?.nycPermits) return
+    // Determine borough or zip context
+    const boroughCtx = (() => {
+      if (!cityZips?.length) return null
+      if (cityZips.every((z) => z.zip >= '10001' && z.zip <= '10282')) return 'MANHATTAN'
+      if (cityZips.every((z) => z.zip >= '10451' && z.zip <= '10475')) return 'BRONX'
+      if (cityZips.every((z) => z.zip >= '11200' && z.zip <= '11256')) return 'BROOKLYN'
+      if (cityZips.every((z) => z.zip >= '11100' && z.zip <= '11436')) return 'QUEENS'
+      if (cityZips.every((z) => z.zip >= '10300' && z.zip <= '10315')) return 'STATEN ISLAND'
+      return null
+    })()
+    const zipCtx = zip ?? null
+    if (!boroughCtx && !zipCtx && !mapBounds) return
+
+    const types = permitTypeFilter === 'all' ? 'NB,A1,DM' : permitTypeFilter
+    const fetchKey = `${mapZoom}|${boroughCtx}|${zipCtx}|${types}|${mapZoom >= 16 ? JSON.stringify(mapBounds) : ''}`
+    if (fetchKey === lastPermitFetchKey.current) return
+    lastPermitFetchKey.current = fetchKey
+
+    if (permitFetchRef.current) clearTimeout(permitFetchRef.current)
+    permitFetchRef.current = setTimeout(async () => {
+      try {
+        let url = `/api/permits?zoom=${mapZoom}&types=${types}`
+        if (boroughCtx) url += `&borough=${boroughCtx}`
+        else if (zipCtx) url += `&zip=${zipCtx}`
+        if (mapZoom >= 16 && mapBounds) {
+          url += `&minLat=${mapBounds.minLat}&maxLat=${mapBounds.maxLat}&minLng=${mapBounds.minLng}&maxLng=${mapBounds.maxLng}`
+        }
+        const d = await fetch(url).then((r) => r.json()) as PermitResponse
+        if (d.mode === 'heatmap' && d.points) {
+          setPermitHeatPoints(d.points)
+          setPermitMode('heatmap')
+        } else if (d.permits) {
+          setNycPermitData(d.permits)
+          setPermitMode('scatter')
+        }
+      } catch { /* non-critical */ }
+    }, 400)
+  }, [mapZoom, mapBounds, layers, agentLayerOverrides, zip, cityZips, permitTypeFilter])
 
   // Fetch city ZIP boundaries when city search is performed
   useEffect(() => {
@@ -389,8 +483,11 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
 
       // Fetch permits for this borough
       const boroughParam = detectedBorough.charAt(0).toUpperCase() + detectedBorough.slice(1).toLowerCase()
-      dedupedFetchJson<{ permits?: PermitPayload[] }>(`/api/permits?borough=${boroughParam.toUpperCase()}&types=NB,A1,DM&limit=2000`)
-        .then((d) => { if (d.permits) setNycPermitData(d.permits) })
+      dedupedFetchJson<PermitResponse>(`/api/permits?borough=${boroughParam.toUpperCase()}&zoom=11`)
+        .then((d) => {
+          if (d.mode === 'heatmap' && d.points) { setPermitHeatPoints(d.points); setPermitMode('heatmap') }
+          else if (d.permits) { setNycPermitData(d.permits); setPermitMode('scatter') }
+        })
         .catch(() => {})
     }
 
@@ -488,8 +585,11 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
         .catch(() => {})
 
       // Fetch permits for this ZIP
-      dedupedFetchJson<{ permits?: PermitPayload[] }>(`/api/permits?zip=${marketData.zip}&types=NB,A1,DM&limit=500`)
-        .then((d) => { if (d.permits) setNycPermitData(d.permits) })
+      dedupedFetchJson<PermitResponse>(`/api/permits?zip=${marketData.zip}&zoom=13`)
+        .then((d) => {
+          if (d.mode === 'heatmap' && d.points) { setPermitHeatPoints(d.points); setPermitMode('heatmap') }
+          else if (d.permits) { setNycPermitData(d.permits); setPermitMode('scatter') }
+        })
         .catch(() => {})
     }
 
@@ -853,46 +953,68 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
       )
     }
 
-    // NYC Permits — 3D columns colored by job type, height = cost
-    if (effectiveLayers.nycPermits && nycPermitData.length > 0) {
-      const costs = nycPermitData.map((p) => p.initial_cost ?? 0).filter((v) => v > 0)
-      const maxCost = costs.length ? Math.max(...costs) : 1
+    // NYC Permits — zoom-adaptive: heatmap at low zoom, scatter at mid, bbox-filtered at street level
+    if (effectiveLayers.nycPermits) {
+      if (permitMode === 'heatmap' && permitHeatPoints.length > 0) {
+        result.push(
+          new HeatmapLayer({
+            id: 'permit-heatmap',
+            data: permitHeatPoints,
+            getPosition: (d: PermitHeatPoint) => d.position,
+            getWeight: (d: PermitHeatPoint) => d.weight,
+            radiusPixels: 35,
+            intensity: 2,
+            threshold: 0.05,
+            colorRange: [
+              [20, 10, 5, 0],
+              [80, 30, 10, 120],
+              [160, 70, 20, 180],
+              [215, 107, 61, 210],
+              [240, 160, 80, 230],
+              [255, 220, 140, 250],
+            ],
+          })
+        )
+      } else if (permitMode === 'scatter' && nycPermitData.length > 0) {
+        const filtered = permitTypeFilter === 'all'
+          ? nycPermitData
+          : nycPermitData.filter((p) => p.job_type === permitTypeFilter)
 
-      result.push(
-        new ColumnLayer({
-          id: 'nyc-permits',
-          data: nycPermitData,
-          diskResolution: 4, // square columns
-          radius: 8,
-          extruded: true,
-          getPosition: (d: PermitPayload) => [d.lng, d.lat],
-          getElevation: (d: PermitPayload) => {
-            const v = Math.max(d.initial_cost ?? 0, 1)
-            const logVal = Math.log10(v)
-            const t = Math.min(Math.max((logVal - 3) / 6, 0), 1)
-            return 10 + t * 300
-          },
-          getFillColor: (d: PermitPayload) => {
-            switch (d.job_type) {
-              case 'NB': return [215, 107, 61, 240]   // New Building — orange
-              case 'A1': return [100, 180, 255, 220]  // Major Alteration — blue
-              case 'A2': return [160, 220, 160, 200]  // Minor Alteration — green
-              case 'DM': return [220, 80, 80, 220]    // Demolition — red
-              default:   return [180, 180, 180, 180]
-            }
-          },
-          pickable: true,
-          onClick: (info: PickingInfo) => {
-            const d = info.object as PermitPayload | undefined
-            setSelectedPermit(d ?? null)
-          },
-          onHover: (info: PickingInfo) => {
-            const d = info.object as PermitPayload | undefined
-            if (d) setTooltipStable({ x: info.x, y: info.y, text: `${d.job_type_label} · ${d.address}` })
-            else setTooltipStable(null)
-          },
-        })
-      )
+        result.push(
+          new ScatterplotLayer({
+            id: 'nyc-permits-scatter',
+            data: filtered,
+            getPosition: (d: PermitPayload) => [d.lng, d.lat],
+            getRadius: (d: PermitPayload) => {
+              const cost = d.initial_cost ?? 0
+              if (cost > 10_000_000) return 18
+              if (cost > 1_000_000) return 12
+              return 7
+            },
+            getFillColor: (d: PermitPayload) => {
+              switch (d.job_type) {
+                case 'NB': return [215, 107, 61, 230]   // orange
+                case 'A1': return [100, 180, 255, 210]  // blue
+                case 'DM': return [220, 80, 80, 220]    // red
+                default:   return [180, 180, 180, 180]
+              }
+            },
+            getLineColor: [0, 0, 0, 60],
+            lineWidthMinPixels: 0,
+            radiusUnits: 'pixels',
+            pickable: true,
+            onClick: (info: PickingInfo) => {
+              const d = info.object as PermitPayload | undefined
+              setSelectedPermit(d ?? null)
+            },
+            onHover: (info: PickingInfo) => {
+              const d = info.object as PermitPayload | undefined
+              if (d) setTooltipStable({ x: info.x, y: info.y, text: `${d.job_type_label} · ${d.address}` })
+              else setTooltipStable(null)
+            },
+          })
+        )
+      }
     }
 
     // Uploaded client data markers (from Agentic Normalizer) — 3D columns
@@ -928,7 +1050,7 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
     }
 
     return result
-  }, [primaryBoundary, neighborBoundaries, cityBoundaries, boroughBoundary, transitStops, blockGroupData, parcelData, tractData, amenityPoints, floodData, nycPermitData, effectiveLayers, colorScale, primaryMetricValue, effectiveMetric, zip, setTooltipStable, uploadedMarkers])
+  }, [primaryBoundary, neighborBoundaries, cityBoundaries, boroughBoundary, transitStops, blockGroupData, parcelData, tractData, amenityPoints, floodData, nycPermitData, permitHeatPoints, permitMode, permitTypeFilter, effectiveLayers, colorScale, primaryMetricValue, effectiveMetric, zip, setTooltipStable, uploadedMarkers])
 
   const handleToggle = useCallback((key: keyof LayerState) => {
     setLayers((prev) => ({ ...prev, [key]: !prev[key] }))
@@ -948,6 +1070,7 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
         >
           <MapFitter boundary={primaryBoundary ?? (cityBoundaries[0]?.geojson ?? null)} zip={zip ?? cityZips?.[0]?.zip ?? null} />
           <TiltController tilt={tilt} heading={heading} />
+          <ZoomTracker onZoomChange={handleZoomChange} />
           <DeckGlOverlay layers={deckLayers} />
         </Map>
       </APIProvider>
@@ -1065,6 +1188,41 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
         </div>
 
         <div className="h-px bg-white/6 mx-3" />
+
+        {/* Permit type filter — only shown when permits layer is on */}
+        {effectiveLayers.nycPermits && (
+          <>
+            <div className="px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-500 mb-1.5">Permit Type</p>
+              <div className="flex flex-wrap gap-1">
+                {([
+                  { key: 'all' as const, label: 'All', color: '#a1a1aa' },
+                  { key: 'NB' as const, label: 'New Bldg', color: '#D76B3D' },
+                  { key: 'A1' as const, label: 'Major Reno', color: '#60a5fa' },
+                  { key: 'DM' as const, label: 'Demo', color: '#f87171' },
+                ]).map(({ key, label, color }) => (
+                  <button
+                    key={key}
+                    onClick={() => setPermitTypeFilter(key)}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all"
+                    style={{
+                      background: permitTypeFilter === key ? `${color}20` : 'rgba(255,255,255,0.03)',
+                      border: `1px solid ${permitTypeFilter === key ? color : 'rgba(255,255,255,0.07)'}`,
+                      color: permitTypeFilter === key ? '#fff' : '#71717a',
+                    }}
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: permitTypeFilter === key ? color : '#52525b' }} />
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[9px] text-zinc-600 mt-1.5">
+                {mapZoom < 13 ? 'Heatmap' : mapZoom >= 16 ? 'Street view' : 'Scatter'} · zoom {Math.round(mapZoom)}
+              </p>
+            </div>
+            <div className="h-px bg-white/6 mx-3" />
+          </>
+        )}
 
         {/* Metric */}
         <div className="px-3 py-2">

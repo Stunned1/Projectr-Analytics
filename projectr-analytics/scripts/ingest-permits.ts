@@ -25,8 +25,11 @@ const supabase = createClient(
 const SOCRATA_URL = 'https://data.cityofnewyork.us/resource/ic3t-wcy2.json'
 const BATCH_SIZE = 500
 const PAGE_SIZE = 1000
-const JOB_TYPES = ['NB', 'A1', 'A2', 'DM']
+// A2 (minor alterations) excluded — too noisy (bathroom renos, window swaps, etc.)
+// A1 filtered to initial_cost > $500k to keep only major renovations
+const JOB_TYPES = ['NB', 'A1', 'DM']
 const BOROUGHS = ['MANHATTAN', 'BROOKLYN', 'QUEENS', 'BRONX', 'STATEN ISLAND']
+const A1_MIN_COST = 500_000 // filter A1s below this cost
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -75,7 +78,9 @@ function parsePermit(r: RawPermit) {
 }
 
 async function fetchPage(borough: string, jobType: string, offset: number): Promise<RawPermit[]> {
-  const where = `borough='${borough}' AND job_type='${jobType}' AND gis_latitude IS NOT NULL AND pre__filing_date>'01/01/2022'`
+  let where = `borough='${borough}' AND job_type='${jobType}' AND gis_latitude IS NOT NULL AND pre__filing_date>'01/01/2022'`
+  // For A1, only pull high-cost major alterations (skip minor renos)
+  if (jobType === 'A1') where += ` AND initial_cost>'${A1_MIN_COST}'`
   const url = `${SOCRATA_URL}?$limit=${PAGE_SIZE}&$offset=${offset}&$where=${encodeURIComponent(where)}&$order=pre__filing_date DESC`
 
   const res = await fetch(url)
@@ -126,7 +131,7 @@ async function main() {
   console.log('=== NYC Permits Ingestion ===')
   console.log(`Supabase: ${process.env.NEXT_PUBLIC_SUPABASE_URL}`)
   console.log(`Boroughs: ${BOROUGHS.join(', ')}`)
-  console.log(`Job types: ${JOB_TYPES.join(', ')} (2022+)\n`)
+  console.log(`Job types: NB, DM (all), A1 (initial_cost > $${A1_MIN_COST.toLocaleString()}) — A2 excluded\n`)
 
   let grand = 0
   for (const borough of BOROUGHS) {
