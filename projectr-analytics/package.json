@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "ingest:zillow": "tsx scripts/ingest-zillow.ts",
-    "populate:centroids": "tsx scripts/populate-centroids.ts"
+    "populate:centroids": "tsx scripts/populate-centroids.ts",
+    "ingest:permits": "tsx scripts/ingest-permits.ts"
   },
   "dependencies": {
     "@deck.gl/aggregation-layers": "^9.2.11",

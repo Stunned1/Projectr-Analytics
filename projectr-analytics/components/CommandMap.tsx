@@ -95,6 +95,7 @@ interface LayerState {
   tracts: boolean
   amenityHeatmap: boolean
   floodRisk: boolean
+  nycPermits: boolean
   clientData: boolean
 }
 
@@ -102,6 +103,24 @@ interface MapViewState {
   lat: number
   lng: number
   zoom: number
+}
+
+interface PermitPayload {
+  id: string
+  lat: number
+  lng: number
+  job_type: string | null
+  job_type_label: string
+  job_status: string | null
+  job_description: string | null
+  address: string
+  owner_business: string | null
+  initial_cost: number | null
+  proposed_stories: number | null
+  proposed_units: number | null
+  filing_date: string | null
+  nta_name: string | null
+  zip_code: string | null
 }
 
 interface ParcelPayload {
@@ -292,6 +311,8 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
   const [tractData, setTractData] = useState<TractCollection | null>(null)
   const [amenityPoints, setAmenityPoints] = useState<AmenityPoint[]>([])
   const [floodData, setFloodData] = useState<FloodCollection | null>(null)
+  const [nycPermitData, setNycPermitData] = useState<PermitPayload[]>([])
+  const [selectedPermit, setSelectedPermit] = useState<PermitPayload | null>(null)
   const [layers, setLayers] = useState<LayerState>({
     zipBoundary: true,
     transitStops: true,
@@ -301,6 +322,7 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
     tracts: false,
     amenityHeatmap: false,
     floodRisk: false,
+    nycPermits: false,
     clientData: true,
   })
   const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null)
@@ -363,6 +385,12 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
             setParcelData({ parcels: d.parcels, stats: d.stats })
           }
         })
+        .catch(() => {})
+
+      // Fetch permits for this borough
+      const boroughParam = detectedBorough.charAt(0).toUpperCase() + detectedBorough.slice(1).toLowerCase()
+      dedupedFetchJson<{ permits?: PermitPayload[] }>(`/api/permits?borough=${boroughParam.toUpperCase()}&types=NB,A1,DM&limit=2000`)
+        .then((d) => { if (d.permits) setNycPermitData(d.permits) })
         .catch(() => {})
     }
 
@@ -457,6 +485,11 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
             setParcelData({ parcels: d.parcels, stats: d.stats })
           }
         })
+        .catch(() => {})
+
+      // Fetch permits for this ZIP
+      dedupedFetchJson<{ permits?: PermitPayload[] }>(`/api/permits?zip=${marketData.zip}&types=NB,A1,DM&limit=500`)
+        .then((d) => { if (d.permits) setNycPermitData(d.permits) })
         .catch(() => {})
     }
 
@@ -820,6 +853,48 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
       )
     }
 
+    // NYC Permits — 3D columns colored by job type, height = cost
+    if (effectiveLayers.nycPermits && nycPermitData.length > 0) {
+      const costs = nycPermitData.map((p) => p.initial_cost ?? 0).filter((v) => v > 0)
+      const maxCost = costs.length ? Math.max(...costs) : 1
+
+      result.push(
+        new ColumnLayer({
+          id: 'nyc-permits',
+          data: nycPermitData,
+          diskResolution: 4, // square columns
+          radius: 8,
+          extruded: true,
+          getPosition: (d: PermitPayload) => [d.lng, d.lat],
+          getElevation: (d: PermitPayload) => {
+            const v = Math.max(d.initial_cost ?? 0, 1)
+            const logVal = Math.log10(v)
+            const t = Math.min(Math.max((logVal - 3) / 6, 0), 1)
+            return 10 + t * 300
+          },
+          getFillColor: (d: PermitPayload) => {
+            switch (d.job_type) {
+              case 'NB': return [215, 107, 61, 240]   // New Building — orange
+              case 'A1': return [100, 180, 255, 220]  // Major Alteration — blue
+              case 'A2': return [160, 220, 160, 200]  // Minor Alteration — green
+              case 'DM': return [220, 80, 80, 220]    // Demolition — red
+              default:   return [180, 180, 180, 180]
+            }
+          },
+          pickable: true,
+          onClick: (info: PickingInfo) => {
+            const d = info.object as PermitPayload | undefined
+            setSelectedPermit(d ?? null)
+          },
+          onHover: (info: PickingInfo) => {
+            const d = info.object as PermitPayload | undefined
+            if (d) setTooltipStable({ x: info.x, y: info.y, text: `${d.job_type_label} · ${d.address}` })
+            else setTooltipStable(null)
+          },
+        })
+      )
+    }
+
     // Uploaded client data markers (from Agentic Normalizer) — 3D columns
     if (effectiveLayers.clientData && uploadedMarkers?.length) {
       const values = uploadedMarkers.map((d) => d.value ?? 0).filter((v) => v > 0)
@@ -853,7 +928,7 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
     }
 
     return result
-  }, [primaryBoundary, neighborBoundaries, cityBoundaries, boroughBoundary, transitStops, blockGroupData, parcelData, tractData, amenityPoints, floodData, effectiveLayers, colorScale, primaryMetricValue, effectiveMetric, zip, setTooltipStable, uploadedMarkers])
+  }, [primaryBoundary, neighborBoundaries, cityBoundaries, boroughBoundary, transitStops, blockGroupData, parcelData, tractData, amenityPoints, floodData, nycPermitData, effectiveLayers, colorScale, primaryMetricValue, effectiveMetric, zip, setTooltipStable, uploadedMarkers])
 
   const handleToggle = useCallback((key: keyof LayerState) => {
     setLayers((prev) => ({ ...prev, [key]: !prev[key] }))
@@ -887,6 +962,65 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
         </div>
       )}
 
+      {/* Permit detail panel */}
+      {selectedPermit && (
+        <div className="absolute bottom-4 left-4 z-40 w-72 rounded-xl overflow-hidden shadow-2xl"
+          style={{ background: 'rgba(6,6,6,0.88)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div className="flex items-start justify-between px-4 pt-3 pb-2" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+            <div>
+              <p className="text-white text-sm font-semibold leading-tight">{selectedPermit.address}</p>
+              <p className="text-zinc-500 text-[10px] mt-0.5">{selectedPermit.zip_code} · {selectedPermit.nta_name}</p>
+            </div>
+            <button onClick={() => setSelectedPermit(null)} className="text-zinc-600 hover:text-white ml-2 flex-shrink-0">×</button>
+          </div>
+          <div className="px-4 py-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                style={{
+                  background: selectedPermit.job_type === 'NB' ? 'rgba(215,107,61,0.2)' : selectedPermit.job_type === 'DM' ? 'rgba(220,80,80,0.2)' : 'rgba(100,180,255,0.2)',
+                  color: selectedPermit.job_type === 'NB' ? '#D76B3D' : selectedPermit.job_type === 'DM' ? '#f87171' : '#60a5fa',
+                  border: `1px solid ${selectedPermit.job_type === 'NB' ? 'rgba(215,107,61,0.3)' : selectedPermit.job_type === 'DM' ? 'rgba(220,80,80,0.3)' : 'rgba(100,180,255,0.3)'}`,
+                }}>
+                {selectedPermit.job_type_label}
+              </span>
+              <span className="text-zinc-500 text-[10px]">{selectedPermit.job_status}</span>
+            </div>
+            {selectedPermit.job_description && (
+              <p className="text-zinc-300 text-[11px] leading-relaxed">{selectedPermit.job_description.slice(0, 200)}{selectedPermit.job_description.length > 200 ? '...' : ''}</p>
+            )}
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              {selectedPermit.initial_cost != null && selectedPermit.initial_cost > 0 && (
+                <div>
+                  <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Est. Cost</p>
+                  <p className="text-white text-xs font-medium">${selectedPermit.initial_cost.toLocaleString()}</p>
+                </div>
+              )}
+              {selectedPermit.proposed_stories != null && selectedPermit.proposed_stories > 0 && (
+                <div>
+                  <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Stories</p>
+                  <p className="text-white text-xs font-medium">{selectedPermit.proposed_stories}</p>
+                </div>
+              )}
+              {selectedPermit.proposed_units != null && selectedPermit.proposed_units > 0 && (
+                <div>
+                  <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Units</p>
+                  <p className="text-white text-xs font-medium">{selectedPermit.proposed_units}</p>
+                </div>
+              )}
+              {selectedPermit.filing_date && (
+                <div>
+                  <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Filed</p>
+                  <p className="text-white text-xs font-medium">{selectedPermit.filing_date}</p>
+                </div>
+              )}
+            </div>
+            {selectedPermit.owner_business && (
+              <p className="text-zinc-500 text-[10px] pt-1">{selectedPermit.owner_business}</p>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Layer toggles */}
       <div className="absolute top-4 right-4 z-40 w-56 flex flex-col gap-0 bg-black/70 backdrop-blur-md border border-white/10 rounded-xl overflow-hidden shadow-xl">
 
@@ -903,6 +1037,7 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
               { key: 'tracts' as const, label: 'Tracts', color: '#2dd4bf' },
               { key: 'amenityHeatmap' as const, label: 'Amenity', color: '#facc15' },
               { key: 'floodRisk' as const, label: 'Flood', color: '#f87171' },
+              { key: 'nycPermits' as const, label: 'Permits', color: '#D76B3D' },
               { key: 'clientData' as const, label: 'Client', color: '#D76B3D', showWhen: !!uploadedMarkers?.length },
             ]).filter(({ zipOnly, showWhen }) => {
               if (showWhen === false) return false
