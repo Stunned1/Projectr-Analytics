@@ -38,6 +38,13 @@ interface TrendsData {
   latest_score: number | null
   data_points: number
   series: Array<{ date: string; value: number }>
+  /** Set when Google Trends failed or returned an HTTP error body */
+  error?: string | null
+  /** Set when the request succeeded but there are no weekly points */
+  empty_message?: string | null
+  /** Explains keyword + US-state geo (not neighborhood polygons) */
+  geo_note?: string | null
+  zip?: string | null
 }
 
 interface AggregateData {
@@ -104,6 +111,23 @@ function fmtGrowth(n: number | null | undefined) {
   if (n == null) return null
   const sign = n > 0 ? '+' : ''
   return `${sign}${Number(n).toFixed(2)}%`
+}
+
+/** PDF / payload: fold geo note, empty, and errors into keyword_scope; omit series on hard failure. */
+function trendsShapeForReport(t: TrendsData | null): { series: { date: string; value: number }[]; keyword_scope: string } | null {
+  if (!t) return null
+  if (t.error) {
+    return {
+      series: [],
+      keyword_scope: `Search sentiment unavailable — ${t.error}`,
+    }
+  }
+  const scopeParts = [t.geo_note, t.keyword_scope].filter((s): s is string => Boolean(s && String(s).trim()))
+  let keyword_scope = scopeParts.join(' · ')
+  if (t.empty_message) {
+    keyword_scope = keyword_scope ? `${keyword_scope} — ${t.empty_message}` : t.empty_message
+  }
+  return { series: t.series, keyword_scope: keyword_scope || t.keyword_scope || 'Google Trends' }
 }
 
 const MONEY_METRICS = ['Rent', 'Income', 'FMR', 'Value', 'Price']
@@ -286,6 +310,71 @@ export default function Home() {
     } catch { /* non-critical */ }
   }
 
+  /** Normalize `/api/trends` JSON into panel + PDF state (always sets `trends` so analysts see errors). */
+  function applyTrendsApiBody(body: Record<string, unknown> | null, httpOk: boolean) {
+    if (!httpOk || !body || typeof body !== 'object') {
+      const msg =
+        typeof body?.error === 'string'
+          ? body.error
+          : 'Search sentiment unavailable (could not reach Google Trends).'
+      setTrends({
+        is_fallback: false,
+        keyword_scope: msg,
+        latest_score: null,
+        data_points: 0,
+        series: [],
+        error: msg,
+        empty_message: null,
+        geo_note: null,
+        zip: null,
+      })
+      return
+    }
+    const err = typeof body.error === 'string' && body.error ? body.error : null
+    const emptyMsg =
+      typeof body.empty_message === 'string' && body.empty_message ? body.empty_message : null
+    const series = Array.isArray(body.series)
+      ? (body.series as Array<{ date: string; value: number }>)
+      : []
+    const geoNote = typeof body.geo_note === 'string' ? body.geo_note : null
+    setTrends({
+      is_fallback: Boolean(body.is_fallback),
+      keyword_scope: typeof body.keyword_scope === 'string' ? body.keyword_scope : '',
+      latest_score: typeof body.latest_score === 'number' ? body.latest_score : null,
+      data_points: typeof body.data_points === 'number' ? body.data_points : series.length,
+      series,
+      error: err,
+      empty_message: emptyMsg,
+      geo_note: geoNote,
+      zip: typeof body.zip === 'string' ? body.zip : null,
+    })
+  }
+
+  async function fetchTrendsForMultiZipArea(
+    cityZips: CityZip[],
+    args: { cityForKeyword: string; state: string }
+  ) {
+    const first = cityZips[0]
+    if (!first?.zip) {
+      setTrends(null)
+      return
+    }
+    const st = args.state.trim().toUpperCase()
+    let url: string
+    if (st.length === 2) {
+      url = `/api/trends?city=${encodeURIComponent(args.cityForKeyword.trim())}&state=${encodeURIComponent(st)}&anchor_zip=${encodeURIComponent(first.zip)}`
+    } else {
+      url = `/api/trends?zip=${encodeURIComponent(first.zip)}`
+    }
+    try {
+      const trendsRes = await fetch(url)
+      const trendsData = (await trendsRes.json()) as Record<string, unknown>
+      applyTrendsApiBody(trendsData, trendsRes.ok)
+    } catch {
+      applyTrendsApiBody(null, false)
+    }
+  }
+
   const BOROUGHS = new Set(['manhattan', 'brooklyn', 'queens', 'bronx', 'staten island'])
 
   async function fetchMarket(e: React.FormEvent) {
@@ -297,6 +386,7 @@ export default function Home() {
     setCityZips(null)
     setBoroughBoundary(null)
     setAggregateData(null)
+    setTrends(null)
 
     if (/^\d{5}$/.test(input)) {
       // ZIP code search — clear city mode state
@@ -311,11 +401,11 @@ export default function Home() {
         ])
         const data = await marketRes.json()
         const transitData = await transitRes.json()
-        const trendsData = await trendsRes.json()
+        const trendsData = (await trendsRes.json()) as Record<string, unknown>
         if (data.error) { setError(data.error); return }
         setResult(data)
         if (!transitData.error) setTransit(transitData)
-        if (!trendsData.error) setTrends(trendsData)
+        applyTrendsApiBody(trendsData, trendsRes.ok)
         setPanelOpen(true)
       } catch {
         setError('Failed to fetch data')
@@ -336,9 +426,12 @@ export default function Home() {
           setResult(null)
           setZip('')
           setTransit(null)
-          setTrends(null)
           setPanelOpen(true)
           fetchAggregate(data.zips.map((z: CityZip) => z.zip), data.borough)
+          void fetchTrendsForMultiZipArea(data.zips, {
+            cityForKeyword: data.borough,
+            state: typeof data.state === 'string' ? data.state : 'NY',
+          })
         } catch {
           setError('Failed to fetch borough data')
         }
@@ -359,9 +452,15 @@ export default function Home() {
           setResult(null)
           setZip('')
           setTransit(null)
-          setTrends(null)
           setPanelOpen(true)
+          const st =
+            (stateAbbr || data.zips[0]?.state || '')
+              .toString()
+              .trim()
+              .toUpperCase()
+              .slice(0, 2) || ''
           fetchAggregate(data.zips.map((z: CityZip) => z.zip), `${cityName}${stateAbbr ? ', ' + stateAbbr : ''}`)
+          void fetchTrendsForMultiZipArea(data.zips, { cityForKeyword: cityName, state: st })
         } catch {
           setError('Failed to fetch city data')
         }
@@ -469,7 +568,17 @@ export default function Home() {
             <BottomStat label="Days to Pending" value={fmtNum(result.metro_velocity?.doz_pending_latest, ' days')} />
             <BottomStat label="Price Cuts" value={fmtNum(result.metro_velocity?.price_cut_pct_latest, '%')} sub="of listings" />
             {transit && <BottomStat label="Transit Stops" value={transit.stop_count.toLocaleString()} sub="nearby" />}
-            {trends?.latest_score != null && <BottomStat label="Search Interest" value={`${trends.latest_score} / 100`} sub={trends.is_fallback ? 'state-level' : 'local'} />}
+            {trends && (
+              <BottomStat
+                label="Search interest"
+                value={trends.latest_score != null ? `${trends.latest_score} / 100` : '—'}
+                sub={
+                  trends.error
+                    ? trends.error
+                    : [trends.is_fallback ? 'State-level keyword' : 'Local keyword', trends.keyword_scope].filter(Boolean).join(' · ')
+                }
+              />
+            )}
             </>) : aggregateData ? (<>
             <BottomStat label="ZIP Codes" value={aggregateData.zip_count.toString()} sub={aggregateData.label} />
             <BottomStat label="Avg Rent (ZORI)" value={fmtMoney(aggregateData.zillow.avg_zori)} sub={aggregateData.zillow.zori_growth_12m != null ? `▲ ${fmtGrowth(aggregateData.zillow.zori_growth_12m)} YoY` : null} accent="green" />
@@ -478,6 +587,24 @@ export default function Home() {
             <BottomStat label="Vacancy Rate" value={fmtNum(aggregateData.housing.vacancy_rate, '%')} />
             <BottomStat label="Active Listings" value={fmtNum(aggregateData.metro_velocity?.inventory_latest)} sub={aggregateData.metro_velocity?.region_name ?? undefined} />
             <BottomStat label="Days to Pending" value={fmtNum(aggregateData.metro_velocity?.doz_pending_latest, ' days')} />
+            {trends && (
+              <BottomStat
+                label="Search interest"
+                value={trends.latest_score != null ? `${trends.latest_score} / 100` : '—'}
+                sub={
+                  trends.error
+                    ? trends.error
+                    : [
+                        aggregateData.metro_velocity?.region_name
+                          ? `Metro: ${aggregateData.metro_velocity.region_name}`
+                          : null,
+                        trends.keyword_scope,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ') || undefined
+                }
+              />
+            )}
             </>) : null}
             <div className="ml-auto pl-4 flex-shrink-0">
               <button onClick={() => setPanelOpen(!panelOpen)} className="text-xs text-[#D76B3D] border border-[#D76B3D]/30 bg-[#D76B3D]/10 hover:bg-[#D76B3D]/20 px-3 py-1.5 rounded-md transition-colors whitespace-nowrap">
@@ -541,6 +668,30 @@ export default function Home() {
               </PanelSection>
             )}
 
+            {trends && (
+              <PanelSection title="Search sentiment (Google Trends)">
+                {trends.error && <p className="text-amber-400 text-[10px] mb-2 leading-snug">{trends.error}</p>}
+                {!trends.error && trends.empty_message && (
+                  <p className="text-zinc-500 text-[10px] mb-2 leading-snug">{trends.empty_message}</p>
+                )}
+                {trends.geo_note && (
+                  <p className="text-zinc-600 text-[9px] mb-2 leading-snug">{trends.geo_note}</p>
+                )}
+                <MetricRow
+                  label="Interest score"
+                  value={trends.latest_score != null ? `${trends.latest_score} / 100` : '—'}
+                  sub={trends.keyword_scope}
+                />
+                {trends.data_points > 1 && trends.series.length > 1 && (
+                  <div className="flex items-end gap-px h-7 mt-2">
+                    {trends.series.map((p, i) => (
+                      <div key={i} className="flex-1 bg-white/20 rounded-sm" style={{ height: `${Math.max(p.value, 4)}%` }} />
+                    ))}
+                  </div>
+                )}
+              </PanelSection>
+            )}
+
             {aggregateData.fred.length > 0 && (
               <PanelSection title="Economic Indicators (FRED)">
                 {Object.entries(
@@ -587,7 +738,7 @@ export default function Home() {
                 result={null}
                 aggregateData={aggregateData}
                 cityZips={cityZips}
-                trends={null}
+                trends={trendsShapeForReport(trends)}
               />
             </PanelSection>
             <PanelSection title="Executive Memo">
@@ -605,6 +756,7 @@ export default function Home() {
                   inventory: aggregateData.metro_velocity?.inventory_latest,
                   permit_units: aggregateData.permits.total_units,
                   population: aggregateData.total_population,
+                  search_interest: trends?.error ? null : trends?.latest_score,
                 }}
               />
             </PanelSection>
@@ -691,14 +843,21 @@ export default function Home() {
             )}
 
             {/* Google Trends */}
-            {trends && trends.data_points > 0 && (
-              <PanelSection title="Search Sentiment">
+            {trends && (
+              <PanelSection title="Search sentiment (Google Trends)">
+                {trends.error && <p className="text-amber-400 text-[10px] mb-2 leading-snug">{trends.error}</p>}
+                {!trends.error && trends.empty_message && (
+                  <p className="text-zinc-500 text-[10px] mb-2 leading-snug">{trends.empty_message}</p>
+                )}
+                {trends.geo_note && (
+                  <p className="text-zinc-600 text-[9px] mb-2 leading-snug">{trends.geo_note}</p>
+                )}
                 <MetricRow
-                  label="Interest Score"
+                  label="Interest score"
                   value={trends.latest_score != null ? `${trends.latest_score} / 100` : '—'}
                   sub={trends.keyword_scope}
                 />
-                {trends.series.length > 1 && (
+                {trends.data_points > 1 && trends.series.length > 1 && (
                   <div className="flex items-end gap-px h-7 mt-2">
                     {trends.series.map((p, i) => (
                       <div key={i} className="flex-1 bg-white/20 rounded-sm" style={{ height: `${Math.max(p.value, 4)}%` }} />
@@ -723,11 +882,7 @@ export default function Home() {
                 result={result}
                 aggregateData={null}
                 cityZips={null}
-                trends={
-                  trends
-                    ? { series: trends.series, keyword_scope: trends.keyword_scope }
-                    : null
-                }
+                trends={trendsShapeForReport(trends)}
               />
             </PanelSection>
             <PanelSection title="Executive Memo">
@@ -746,7 +901,7 @@ export default function Home() {
                   permit_units: result.data.find((r) => r.metric_name === 'Permit_Units')?.metric_value,
                   population: result.data.find((r) => r.metric_name === 'Total_Population')?.metric_value,
                   transit_stops: transit?.stop_count,
-                  search_interest: trends?.latest_score,
+                  search_interest: trends?.error ? null : trends?.latest_score,
                 }}
               />
             </PanelSection>

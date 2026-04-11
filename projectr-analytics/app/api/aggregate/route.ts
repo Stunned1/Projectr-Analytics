@@ -77,10 +77,47 @@ export async function POST(request: NextRequest) {
     const avgZoriGrowth = avg(snaps.map((s) => s.zori_growth_12m))
     const avgZhviGrowth = avg(snaps.map((s) => s.zhvi_growth_12m))
 
-    // 4. Aggregate Census data
+    // 4. Aggregate Census data — vacancy: prefer summed units (true area rate); if unit rows
+    //    are missing from cache (common until ZIPs are cold-loaded), fall back to weighted Vacancy_Rate.
+    let vacancyRate: number | null = null
+    const zipsWithUnitBreakdown = zips.filter((z) => {
+      const total = metricsByZip[z]?.['Total_Housing_Units']
+      const vacant = metricsByZip[z]?.['Vacant_Units']
+      return total != null && total > 0 && vacant != null && Number.isFinite(vacant)
+    })
+    if (zipsWithUnitBreakdown.length > 0) {
+      const th = zipsWithUnitBreakdown.reduce((s, z) => s + metricsByZip[z]!['Total_Housing_Units']!, 0)
+      const tv = zipsWithUnitBreakdown.reduce((s, z) => s + metricsByZip[z]!['Vacant_Units']!, 0)
+      vacancyRate = parseFloat(((tv / th) * 100).toFixed(1))
+    } else {
+      const weighted = zips
+        .map((z) => {
+          const rate = metricsByZip[z]?.['Vacancy_Rate']
+          const w =
+            metricsByZip[z]?.['Total_Population'] ??
+            metricsByZip[z]?.['Total_Housing_Units'] ??
+            0
+          return rate != null && Number.isFinite(rate) && w > 0 ? { rate, w } : null
+        })
+        .filter((x): x is { rate: number; w: number } => x != null)
+      if (weighted.length > 0) {
+        const tw = weighted.reduce((s, x) => s + x.w, 0)
+        vacancyRate = parseFloat(
+          (weighted.reduce((s, x) => s + x.rate * x.w, 0) / tw).toFixed(1)
+        )
+      } else {
+        const rates = zips
+          .map((z) => metricsByZip[z]?.['Vacancy_Rate'])
+          .filter((r): r is number => r != null && Number.isFinite(r))
+        if (rates.length > 0) {
+          vacancyRate = parseFloat(
+            (rates.reduce((s, r) => s + r, 0) / rates.length).toFixed(1)
+          )
+        }
+      }
+    }
+
     const totalHousingUnits = zips.reduce((s, z) => s + (metricsByZip[z]?.['Total_Housing_Units'] ?? 0), 0)
-    const totalVacant = zips.reduce((s, z) => s + (metricsByZip[z]?.['Vacant_Units'] ?? 0), 0)
-    const vacancyRate = totalHousingUnits > 0 ? parseFloat(((totalVacant / totalHousingUnits) * 100).toFixed(1)) : null
 
     const avgIncome = wavg(zips.map((z) => ({
       value: metricsByZip[z]?.['Median_Household_Income'] ?? 0,

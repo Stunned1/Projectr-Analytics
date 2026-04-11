@@ -13,6 +13,21 @@ export interface GeoResult {
   fullFips: string // e.g. "51121"
 }
 
+/** City + USPS state only — for Google Trends (keyword + `US-XX`), when ZIP geocoding is skipped. */
+export function geoTrendsStub(city: string, stateAbbr: string): GeoResult {
+  const st = stateAbbr.trim().toUpperCase()
+  const abbr = st.length === 2 ? st : st.slice(0, 2)
+  return {
+    lat: 0,
+    lng: 0,
+    city: city.trim(),
+    state: abbr,
+    stateFips: STATE_FIPS[abbr] ?? '',
+    countyFips: '',
+    fullFips: '',
+  }
+}
+
 const STATE_FIPS: Record<string, string> = {
   AL:'01',AK:'02',AZ:'04',AR:'05',CA:'06',CO:'08',CT:'09',DE:'10',FL:'12',GA:'13',
   HI:'15',ID:'16',IL:'17',IN:'18',IA:'19',KS:'20',KY:'21',LA:'22',ME:'23',MD:'24',

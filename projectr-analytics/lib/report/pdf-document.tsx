@@ -93,10 +93,11 @@ function fmtMoney(n: number | null | undefined) {
   return '$' + Math.round(n).toLocaleString('en-US')
 }
 
+/** Helvetica in @react-pdf often lacks Unicode arrows — use ASCII-only marks. */
 function arrowChar(a: SignalIndicator['arrow']) {
-  if (a === 'up') return '↑'
-  if (a === 'down') return '↓'
-  return '→'
+  if (a === 'up') return '+'
+  if (a === 'down') return '-'
+  return '~'
 }
 
 export interface SiteCompareRow {
