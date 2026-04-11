@@ -204,9 +204,8 @@ function hasFeatures(value: unknown): value is { features: unknown[] } {
 
 const DATA_LAYER_REGISTRY = [
   { label: 'ZIP Boundary', source: 'Census TIGER', visualized: true, layerType: 'GeoJsonLayer (outline)' },
-  { label: 'ZORI Rent Index', source: 'Zillow Research', visualized: true, layerType: 'GeoJsonLayer (choropleth — multi-ZIP)' },
+  { label: 'Rent/value fill', source: 'Zillow Research', visualized: true, layerType: 'GeoJsonLayer choropleth — ZORI or ZHVI (metric toggle)' },
   { label: 'Transit Stops', source: 'GTFS / OSM', visualized: true, layerType: 'ScatterplotLayer (cyan dots)' },
-  { label: 'ZHVI Home Value', source: 'Zillow Research', visualized: true, layerType: 'GeoJsonLayer (choropleth — multi-ZIP)' },
   { label: 'Census Tracts', source: 'Census TIGER + ACS', visualized: true, layerType: 'GeoJsonLayer (rent/income choropleth)' },
   { label: 'Amenity Heatmap', source: 'OpenStreetMap', visualized: true, layerType: 'HeatmapLayer (weighted by amenity type)' },
   { label: 'Flood Risk Zones', source: 'FEMA NFHL', visualized: true, layerType: 'GeoJsonLayer (red = high risk)' },
@@ -1380,7 +1379,12 @@ function CommandMap({
             {([
               { key: 'zipBoundary' as const, label: 'ZIP', color: '#a1a1aa' },
               { key: 'transitStops' as const, label: 'Transit', color: '#38bdf8' },
-              { key: 'rentChoropleth' as const, label: 'Rent', color: '#a78bfa' },
+              {
+                key: 'rentChoropleth' as const,
+                label: 'Rent/value fill',
+                color: '#a78bfa',
+                title: 'Color ZIP polygons by rent (ZORI) or home value (ZHVI) from Zillow. Turn on, then choose Fill metric below.',
+              },
               { key: 'parcels' as const, label: 'Parcels', color: '#fbbf24', zipOnly: true },
               { key: 'tracts' as const, label: 'Tracts', color: '#2dd4bf' },
               { key: 'amenityHeatmap' as const, label: 'Amenity', color: '#facc15' },
@@ -1393,11 +1397,13 @@ function CommandMap({
               if (showWhen === false) return false
               if (zipOnly) return (!cityZips?.length) || parcelData !== null
               return true
-            }).map(({ key, label, color }) => {
+            }).map(({ key, label, color, title }) => {
               const active = effectiveLayers[key] ?? false
               return (
                 <button
                   key={key}
+                  type="button"
+                  title={title}
                   onClick={() => handleToggle(key)}
                   className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium transition-all"
                   style={{
@@ -1501,25 +1507,32 @@ function CommandMap({
           </>
         )}
 
-        {/* Metric */}
-        <div className="px-3 py-2">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-500 mb-1.5">Metric</p>
-          <div className="flex overflow-hidden rounded-lg border border-border/80 bg-muted/25">
-            {(['zori', 'zhvi'] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => setActiveMetric(m)}
-                className={`flex-1 py-1.5 text-[10px] font-medium transition-all ${
-                  activeMetric === m ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                {m === 'zori' ? 'Rent' : 'Value'}
-              </button>
-            ))}
-          </div>
-        </div>
+        {/* ZORI vs ZHVI — only applies when rent/value fill choropleth is on */}
+        {effectiveLayers.rentChoropleth && (
+          <>
+            <div className="px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-500 mb-0.5">Fill metric</p>
+              <p className="text-[9px] text-zinc-600 mb-1.5 leading-snug">Zillow index used for ZIP polygon colors</p>
+              <div className="flex overflow-hidden rounded-lg border border-border/80 bg-muted/25">
+                {(['zori', 'zhvi'] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    title={m === 'zori' ? 'Zillow Observed Rent Index' : 'Zillow Home Value Index'}
+                    onClick={() => setActiveMetric(m)}
+                    className={`flex-1 py-1.5 text-[10px] font-medium transition-all ${
+                      activeMetric === m ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {m === 'zori' ? 'ZORI' : 'ZHVI'}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-        <div className="mx-3 h-px bg-border/70" />
+            <div className="mx-3 h-px bg-border/70" />
+          </>
+        )}
 
         {/* Tilt & Rotation */}
         <div className="px-3 py-2">
