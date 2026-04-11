@@ -197,6 +197,7 @@ _4.11.2026_
 - **Layers UI** — map layers stack top-right clears the 300px data panel when open; **expandable layers panel** sits left (toward map center); **active dots** above **Layers** toggle in a fixed right column; dots **toggle that layer off** on click; panel uses width/opacity/slide transition.
 - **AI agent** — sidebar footer **AI** button opens docked chat beside the nav (red dot when a reply arrived while closed); floating FAB removed from the map on the home page.
 - **3D** — tilt/rotation sliders removed from the map; **3D** pill in the right data panel header toggles 45° perspective (Projectr orange when on); agent `set_tilt` still overrides until cleared.
+- Sidebar market search — removed **Analyze Market** button; **Enter** submits; small spinner in the field while the request runs (map page + `/upload` sidebar).
 
 _4.12.2026_
 - City and borough search loads Google Trends (keyword from borough name or city query via `/api/trends?city=&state=`); stats bar shows metro name plus keyword scope; panel surfaces Trends errors/empty data before PDF export; aggregate PDF includes Trends when loaded

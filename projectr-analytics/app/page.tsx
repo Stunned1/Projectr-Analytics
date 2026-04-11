@@ -906,22 +906,34 @@ export default function Home() {
                 <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none">
                   <SearchIcon />
                 </span>
+                {loading && (
+                  <span
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-[#D76B3D]"
+                    aria-label="Loading"
+                  >
+                    <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path
+                        className="opacity-90"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      />
+                    </svg>
+                  </span>
+                )}
                 <input
                   type="text"
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
-                  placeholder="ZIP, City, ST, or Borough..."
-                  className="w-full bg-white/5 border border-white/10 rounded-md pl-7 pr-3 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-[#D76B3D]/50 transition-colors"
+                  disabled={loading}
+                  placeholder="ZIP, City, ST, or Borough — Enter"
+                  className={cn(
+                    'w-full bg-white/5 border border-white/10 rounded-md pl-7 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-[#D76B3D]/50 transition-colors disabled:opacity-60',
+                    loading ? 'pr-9' : 'pr-3'
+                  )}
                 />
               </div>
               {error && <p className="text-red-400 text-[10px] mt-1 px-0.5">{error}</p>}
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full mt-2 bg-[#D76B3D] hover:bg-[#c45e32] text-white text-xs font-semibold py-2 rounded-md transition-colors disabled:opacity-50"
-              >
-                {loading ? 'Analyzing...' : 'Analyze Market'}
-              </button>
             </form>
           </div>
         )}

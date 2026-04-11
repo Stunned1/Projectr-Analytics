@@ -4,7 +4,6 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import ShortlistPanel from '@/components/ShortlistPanel'
-import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { Site } from '@/lib/sites-store'
 import { cn } from '@/lib/utils'
@@ -103,26 +102,36 @@ export default function CommandCenterSidebar({
             <span className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground">
               <SearchIcon />
             </span>
+            {loading && (
+              <span
+                className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-primary"
+                aria-label="Loading"
+              >
+                <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path
+                    className="opacity-90"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                  />
+                </svg>
+              </span>
+            )}
             <Input
               type="text"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="ZIP, City, ST, or Borough..."
+              disabled={loading}
+              placeholder="ZIP, City, ST, or Borough — Enter"
               className={cn(
-                'h-8 rounded-md border-input bg-input/40 pl-7 pr-3 text-xs text-sidebar-foreground placeholder:text-muted-foreground',
-                'focus-visible:border-primary focus-visible:ring-primary/25'
+                'h-8 rounded-md border-input bg-input/40 pl-7 text-xs text-sidebar-foreground placeholder:text-muted-foreground',
+                'focus-visible:border-primary focus-visible:ring-primary/25',
+                loading ? 'pr-9' : 'pr-3',
+                loading && 'opacity-60'
               )}
             />
           </div>
           {error && <p className="text-red-400 text-[10px] mt-1 px-0.5">{error}</p>}
-          <Button
-            type="submit"
-            disabled={loading}
-            size="sm"
-            className="mt-2 h-8 w-full text-xs font-semibold shadow-sm shadow-black/25"
-          >
-            {loading ? 'Analyzing...' : 'Analyze Market'}
-          </Button>
         </form>
       </div>
 
