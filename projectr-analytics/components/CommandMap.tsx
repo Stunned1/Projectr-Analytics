@@ -8,6 +8,13 @@ import { HeatmapLayer } from '@deck.gl/aggregation-layers'
 import type { Layer, PickingInfo } from '@deck.gl/core'
 import type { GeoJSON, Feature, FeatureCollection, Geometry } from 'geojson'
 import { dedupedFetchJson } from '@/lib/request-cache'
+import type { Site } from '@/lib/sites-store'
+
+function shortlistPinColor(stage: string | undefined): [number, number, number, number] {
+  if (stage === 'Expansion') return [34, 197, 94, 255]
+  if (stage === 'Recovery') return [245, 158, 11, 255]
+  return [239, 68, 68, 255]
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -335,6 +342,8 @@ interface CommandMapProps {
   cityZips?: Array<{ zip: string; lat: number | null; lng: number | null; zori_latest: number | null; zhvi_latest: number | null; city: string; state: string | null }> | null
   boroughBoundary?: object | null
   uploadedMarkers?: Array<{ lat: number; lng: number; value: number | null; label: string }> | null
+  /** Saved analyst shortlist — always drawn while browsing other ZIPs. */
+  shortlistSites?: Site[]
   agentLayerOverrides?: Record<string, boolean>
   agentMetric?: 'zori' | 'zhvi' | null
   agentTilt?: number | null
@@ -342,7 +351,19 @@ interface CommandMapProps {
   onLayersChange?: (snapshot: LayerState & { choroplethMetric: 'zori' | 'zhvi' }) => void
 }
 
-function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, uploadedMarkers, agentLayerOverrides, agentMetric, agentTilt, onLayersChange }: CommandMapProps) {
+function CommandMap({
+  zip,
+  marketData,
+  transitData,
+  cityZips,
+  boroughBoundary,
+  uploadedMarkers,
+  shortlistSites = [],
+  agentLayerOverrides,
+  agentMetric,
+  agentTilt,
+  onLayersChange,
+}: CommandMapProps) {
   const perfDebug = process.env.NEXT_PUBLIC_PERF_DEBUG === '1'
 
   const [primaryBoundary, setPrimaryBoundary] = useState<GeoJSON | null>(null)
@@ -1027,6 +1048,33 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
       }
     }
 
+    if (shortlistSites.length > 0) {
+      result.push(
+        new ScatterplotLayer({
+          id: 'shortlist-sites',
+          data: shortlistSites,
+          getPosition: (d: Site) => [d.lng, d.lat],
+          getRadius: 14,
+          getFillColor: (d: Site) => shortlistPinColor(d.cycleStage),
+          getLineColor: [255, 255, 255, 220],
+          lineWidthMinPixels: 2,
+          stroked: true,
+          radiusUnits: 'pixels',
+          pickable: true,
+          onHover: (info: PickingInfo) => {
+            const d = info.object as Site | undefined
+            if (d) {
+              setTooltipStable({
+                x: info.x,
+                y: info.y,
+                text: `Shortlist · ${d.label || d.marketLabel}`,
+              })
+            } else setTooltipStable(null)
+          },
+        })
+      )
+    }
+
     // Uploaded client data markers (from Agentic Normalizer) — 3D columns
     if (effectiveLayers.clientData && uploadedMarkers?.length) {
       const values = uploadedMarkers.map((d) => d.value ?? 0).filter((v) => v > 0)
@@ -1060,7 +1108,30 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
     }
 
     return result
-  }, [primaryBoundary, neighborBoundaries, cityBoundaries, boroughBoundary, transitStops, blockGroupData, parcelData, tractData, amenityPoints, floodData, nycPermitData, permitHeatPoints, permitMode, permitTypeFilter, effectiveLayers, colorScale, primaryMetricValue, effectiveMetric, zip, setTooltipStable, uploadedMarkers])
+  }, [
+    primaryBoundary,
+    neighborBoundaries,
+    cityBoundaries,
+    boroughBoundary,
+    transitStops,
+    blockGroupData,
+    parcelData,
+    tractData,
+    amenityPoints,
+    floodData,
+    nycPermitData,
+    permitHeatPoints,
+    permitMode,
+    permitTypeFilter,
+    effectiveLayers,
+    colorScale,
+    primaryMetricValue,
+    effectiveMetric,
+    zip,
+    setTooltipStable,
+    uploadedMarkers,
+    shortlistSites,
+  ])
 
   const handleToggle = useCallback((key: keyof LayerState) => {
     setLayers((prev) => ({ ...prev, [key]: !prev[key] }))

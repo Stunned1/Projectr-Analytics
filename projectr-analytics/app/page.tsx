@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import dynamic from 'next/dynamic'
 import Image from 'next/image'
 import AgenticNormalizer from '@/components/AgenticNormalizer'
@@ -10,6 +10,14 @@ import AgentChat, { type AgentAction } from '@/components/AgentChat'
 import type { CycleAnalysis } from '@/lib/cycle/types'
 import type { MapLayersSnapshot } from '@/lib/report/types'
 import { parseCycleAnalysisField } from '@/lib/report/validate-cycle'
+import { useSitesStore } from '@/lib/sites-store'
+import SitesBootstrap from '@/components/SitesBootstrap'
+import ShortlistPanel from '@/components/ShortlistPanel'
+import { MetricTooltip } from '@/components/MetricTooltip'
+import { MomentumExplainBlock } from '@/components/MomentumExplainBlock'
+import { CycleExplainCard } from '@/components/CycleExplainCard'
+import type { MetricKey } from '@/lib/metric-definitions'
+import { metricKeyFromDataRow, sparklineMetricKey } from '@/lib/metric-definitions'
 
 const CommandMap = dynamic(() => import('@/components/CommandMap'), { ssr: false })
 
@@ -79,6 +87,8 @@ interface CityZip {
   zhvi_growth_12m: number | null
 }
 
+const NYC_BOROUGHS = new Set(['manhattan', 'brooklyn', 'queens', 'bronx', 'staten island'])
+
 interface MarketData {
   zip: string
   cached: boolean
@@ -101,6 +111,43 @@ interface MarketData {
     inventory_latest: number | null
     as_of_date: string
   } | null
+}
+
+/** Human-facing site name for shortlist / PDF (ZIP stays the data key only). */
+function defaultHumanSiteLabel(market: MarketData): string {
+  const g = market.geo
+  if (g?.city?.trim()) {
+    const c = g.city.trim()
+    const st = g.state?.trim()
+    if (st && !c.toLowerCase().includes(st.toLowerCase())) return `${c}, ${st}`
+    return c
+  }
+  if (market.zillow?.city?.trim()) return market.zillow.city.trim()
+  const metro = market.zillow?.metro_name?.trim()
+  if (metro) {
+    const head = metro.split(',')[0]?.trim()
+    if (head) return head
+  }
+  return `ZIP ${market.zip}`
+}
+
+/** Map pin anchor for a city/borough ZIP list (first ZIP with coords, else geocode first ZIP). */
+async function resolveAggregateAnchorGeo(cityZips: CityZip[]): Promise<{ zip: string; lat: number; lng: number } | null> {
+  const withGeo = cityZips.find((z) => z.lat != null && z.lng != null && /^\d{5}$/.test(z.zip))
+  const fallback = cityZips.find((z) => /^\d{5}$/.test(z.zip))
+  const z = withGeo ?? fallback
+  if (!z) return null
+  if (z.lat != null && z.lng != null) return { zip: z.zip, lat: z.lat, lng: z.lng }
+  try {
+    const res = await fetch(`/api/market?zip=${encodeURIComponent(z.zip)}`)
+    const data = await res.json()
+    if (data.geo?.lat != null && data.geo?.lng != null) {
+      return { zip: z.zip, lat: data.geo.lat, lng: data.geo.lng }
+    }
+  } catch {
+    /* ignore */
+  }
+  return null
 }
 
 // ── Formatters ────────────────────────────────────────────────────────────────
@@ -168,12 +215,15 @@ function NavItem({ icon, label, active, onClick }: {
   )
 }
 
-function BottomStat({ label, value, sub, accent }: {
+function BottomStat({ label, value, sub, accent, metricKey }: {
   label: string; value: string; sub?: string | null; accent?: 'green' | 'red' | null
+  metricKey?: MetricKey
 }) {
   return (
     <div className="flex flex-col gap-0.5 px-5 border-r border-white/5 last:border-0 min-w-[100px]">
-      <p className="text-[9px] uppercase tracking-widest text-zinc-500">{label}</p>
+      <p className="text-[9px] uppercase tracking-widest text-zinc-500">
+        {metricKey ? <MetricTooltip metricKey={metricKey}>{label}</MetricTooltip> : label}
+      </p>
       <p className="text-white font-semibold text-sm">{value}</p>
       {sub && (
         <p className={`text-[10px] ${accent === 'green' ? 'text-emerald-400' : accent === 'red' ? 'text-red-400' : 'text-zinc-500'}`}>
@@ -193,31 +243,157 @@ function PanelSection({ title, children }: { title: string; children: React.Reac
   )
 }
 
-function CycleHeadlineAboveMemo({
-  marketLabel,
+function ShortlistToggleButton({
+  market,
   cycle,
-  subtitle,
 }: {
-  marketLabel: string
-  cycle: CycleAnalysis
-  subtitle?: string
+  market: MarketData
+  cycle: CycleAnalysis | null
 }) {
+  const zipCode = market.zip
+  const geo = market.geo!
+  const hasZip = useSitesStore((s) => s.hasZip(zipCode))
+  const getSiteIdByZip = useSitesStore((s) => s.getSiteIdByZip)
+  const removeSite = useSitesStore((s) => s.removeSite)
+  const addSite = useSitesStore((s) => s.addSite)
+  const [pending, setPending] = useState(false)
+
+  async function toggle() {
+    if (hasZip) {
+      const id = getSiteIdByZip(zipCode)
+      if (id) await removeSite(id)
+      return
+    }
+    setPending(true)
+    let momentum: number | null = null
+    try {
+      const res = await fetch('/api/momentum', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ zips: [zipCode] }),
+      })
+      if (res.ok) {
+        const j = (await res.json()) as { scores?: { zip: string; score: number }[] }
+        momentum = j.scores?.find((x) => x.zip === zipCode)?.score ?? null
+      }
+    } catch {
+      /* non-fatal */
+    }
+    const human = defaultHumanSiteLabel(market)
+    await addSite({
+      label: human,
+      zip: zipCode,
+      lat: geo.lat,
+      lng: geo.lng,
+      marketLabel: human,
+      cyclePosition: cycle?.cyclePosition,
+      cycleStage: cycle?.cycleStage,
+      momentumScore: momentum,
+    })
+    setPending(false)
+  }
+
   return (
-    <div className="mb-4 rounded-lg border border-[#D76B3D]/30 bg-[#D76B3D]/10 px-3 py-3">
-      <p className="text-[9px] uppercase tracking-widest text-[#D76B3D] mb-1">Market cycle</p>
-      <p className="text-white text-[15px] font-bold leading-tight">
-        {marketLabel} is in {cycle.cycleStage} {cycle.cyclePosition}
-      </p>
-      <p className="text-zinc-500 text-[10px] mt-1.5 leading-snug">{cycle.confidenceLine}</p>
-      {subtitle && <p className="text-zinc-600 text-[9px] mt-2 leading-snug">{subtitle}</p>}
+    <button
+      type="button"
+      onClick={() => void toggle()}
+      disabled={pending}
+      className="mt-3 mb-4 w-full py-2 rounded-lg text-xs font-semibold border transition-colors disabled:opacity-50 bg-white/8 hover:bg-white/12 border-white/15 text-white"
+    >
+      {pending ? 'Saving…' : hasZip ? '✓ On shortlist — tap to remove' : '+ Add to shortlist'}
+    </button>
+  )
+}
+
+function AggregateShortlistToggle({
+  aggregateData,
+  cityZips,
+  cycle,
+  savedSearch,
+}: {
+  aggregateData: AggregateData
+  cityZips: CityZip[]
+  cycle: CycleAnalysis | null
+  savedSearch: string
+}) {
+  const q = savedSearch.trim()
+  const hasArea = useSitesStore((s) => (q ? s.hasAggregateSaved(q) : false))
+  const getAggregateSiteId = useSitesStore((s) => s.getAggregateSiteId)
+  const removeSite = useSitesStore((s) => s.removeSite)
+  const addSite = useSitesStore((s) => s.addSite)
+  const [pending, setPending] = useState(false)
+  const [localError, setLocalError] = useState<string | null>(null)
+
+  async function toggle() {
+    setLocalError(null)
+    if (!q) return
+    if (hasArea) {
+      const id = getAggregateSiteId(q)
+      if (id) await removeSite(id)
+      return
+    }
+    setPending(true)
+    const pin = await resolveAggregateAnchorGeo(cityZips)
+    if (!pin) {
+      setLocalError('Could not place pin — no coordinates for this area.')
+      setPending(false)
+      return
+    }
+    let momentum: number | null = null
+    try {
+      const zipsList = cityZips.map((z) => z.zip).filter((z) => /^\d{5}$/.test(z))
+      if (zipsList.length) {
+        const res = await fetch('/api/momentum', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ zips: zipsList.slice(0, 40) }),
+        })
+        if (res.ok) {
+          const j = (await res.json()) as { scores?: { zip: string; score: number }[] }
+          momentum = j.scores?.find((x) => x.zip === pin.zip)?.score ?? null
+        }
+      }
+    } catch {
+      /* optional */
+    }
+    const human = aggregateData.label.trim() || q
+    await addSite({
+      label: human,
+      zip: pin.zip,
+      lat: pin.lat,
+      lng: pin.lng,
+      marketLabel: human,
+      isAggregate: true,
+      savedSearch: q,
+      cyclePosition: cycle?.cyclePosition,
+      cycleStage: cycle?.cycleStage,
+      momentumScore: momentum,
+    })
+    setPending(false)
+  }
+
+  return (
+    <div className="mb-4">
+      <button
+        type="button"
+        onClick={() => void toggle()}
+        disabled={pending || !q}
+        className="mt-3 w-full py-2 rounded-lg text-xs font-semibold border transition-colors disabled:opacity-50 bg-white/8 hover:bg-white/12 border-white/15 text-white"
+      >
+        {pending ? 'Saving…' : hasArea ? '✓ Area on shortlist — tap to remove' : '+ Add area to shortlist'}
+      </button>
+      {localError && <p className="text-[9px] text-red-400 mt-1.5 px-0.5">{localError}</p>}
     </div>
   )
 }
 
-function MetricRow({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function MetricRow({ label, value, sub, metricKey }: { label: string; value: string; sub?: string; metricKey?: MetricKey }) {
+  const labelText = label.replace(/_/g, ' ')
   return (
     <div className="flex justify-between items-start py-1.5 border-b border-white/5 last:border-0">
-      <p className="text-zinc-400 text-xs">{label.replace(/_/g, ' ')}</p>
+      <p className="text-zinc-400 text-xs">
+        {metricKey ? <MetricTooltip metricKey={metricKey}>{labelText}</MetricTooltip> : labelText}
+      </p>
       <div className="text-right ml-4">
         <p className="text-white text-xs font-medium">{value}</p>
         {sub && <p className="text-zinc-600 text-[10px]">{sub}</p>}
@@ -275,6 +451,19 @@ export default function Home() {
   const handleMapLayersChange = useCallback((snapshot: MapLayersSnapshot) => {
     setMapLayersSnapshot(snapshot)
   }, [])
+
+  const sitesForMap = useSitesStore((s) => s.sites)
+  const selectedComparisonIds = useSitesStore((s) => s.selectedForComparison)
+  const pdfComparisonPins = useMemo(() => {
+    const sel = sitesForMap.filter((s) => selectedComparisonIds.includes(s.id))
+    if (sel.length < 2) return null
+    return sel.map((s) => ({
+      lat: s.lat,
+      lng: s.lng,
+      label: s.label,
+      value: s.momentumScore ?? null,
+    }))
+  }, [sitesForMap, selectedComparisonIds])
 
   async function handleNormalizerIngested(result: { triage: { bucket: string }; marker_points?: Array<{ lat: number; lng: number; value: number | null; label: string }> }) {
     if (result.triage.bucket === 'GEOSPATIAL' && result.marker_points?.length) {
@@ -356,7 +545,7 @@ export default function Home() {
   }
 
   /** Normalize `/api/trends` JSON into panel + PDF state (always sets `trends` so analysts see errors). */
-  function applyTrendsApiBody(body: Record<string, unknown> | null, httpOk: boolean) {
+  const applyTrendsApiBody = useCallback((body: Record<string, unknown> | null, httpOk: boolean) => {
     if (!httpOk || !body || typeof body !== 'object') {
       const msg =
         typeof body?.error === 'string'
@@ -393,7 +582,48 @@ export default function Home() {
       geo_note: geoNote,
       zip: typeof body.zip === 'string' ? body.zip : null,
     })
-  }
+  }, [])
+
+  const loadZipMarket = useCallback(
+    async (zipInput: string) => {
+      setLoading(true)
+      setError(null)
+      setCityZips(null)
+      setBoroughBoundary(null)
+      setAggregateData(null)
+      setTrends(null)
+      setCycleData(null)
+      setZip(zipInput)
+      try {
+        const [marketRes, transitRes, trendsRes, cycleRes] = await Promise.all([
+          fetch(`/api/market?zip=${zipInput}`),
+          fetch(`/api/transit?zip=${zipInput}`),
+          fetch(`/api/trends?zip=${zipInput}`),
+          fetch(`/api/cycle?zip=${encodeURIComponent(zipInput)}`),
+        ])
+        const data = await marketRes.json()
+        const transitData = await transitRes.json()
+        const trendsData = (await trendsRes.json()) as Record<string, unknown>
+        const cycleJson = await cycleRes.json()
+        if (data.error) {
+          setError(data.error)
+          return
+        }
+        setResult(data)
+        if (!transitData.error) setTransit(transitData)
+        applyTrendsApiBody(trendsData, trendsRes.ok)
+        const parsedCycle =
+          cycleRes.ok && !('error' in cycleJson && cycleJson.error) ? parseCycleAnalysisField(cycleJson) : null
+        setCycleData(parsedCycle)
+        setPanelOpen(true)
+      } catch {
+        setError('Failed to fetch data')
+      } finally {
+        setLoading(false)
+      }
+    },
+    [applyTrendsApiBody]
+  )
 
   async function fetchTrendsForMultiZipArea(
     cityZips: CityZip[],
@@ -420,12 +650,9 @@ export default function Home() {
     }
   }
 
-  const BOROUGHS = new Set(['manhattan', 'brooklyn', 'queens', 'bronx', 'staten island'])
-
-  async function fetchMarket(e: React.FormEvent) {
-    e.preventDefault()
-    const input = searchInput.trim()
-    if (!input) return
+  async function runAggregateSearch(input: string) {
+    const trimmed = input.trim()
+    if (!trimmed) return
     setLoading(true)
     setError(null)
     setCityZips(null)
@@ -433,43 +660,17 @@ export default function Home() {
     setAggregateData(null)
     setTrends(null)
     setCycleData(null)
-
-    if (/^\d{5}$/.test(input)) {
-      // ZIP code search — clear city mode state
-      setCityZips(null)
-      setBoroughBoundary(null)
-      setZip(input)
-      try {
-        // Parallel load: market + transit + trends + cycle classifier (GET /api/cycle uses cached Supabase + Gemini only).
-        const [marketRes, transitRes, trendsRes, cycleRes] = await Promise.all([
-          fetch(`/api/market?zip=${input}`),
-          fetch(`/api/transit?zip=${input}`),
-          fetch(`/api/trends?zip=${input}`),
-          fetch(`/api/cycle?zip=${encodeURIComponent(input)}`),
-        ])
-        const data = await marketRes.json()
-        const transitData = await transitRes.json()
-        const trendsData = (await trendsRes.json()) as Record<string, unknown>
-        const cycleJson = await cycleRes.json()
-        if (data.error) { setError(data.error); return }
-        setResult(data)
-        if (!transitData.error) setTransit(transitData)
-        applyTrendsApiBody(trendsData, trendsRes.ok)
-        const parsedCycle = cycleRes.ok && !('error' in cycleJson && cycleJson.error) ? parseCycleAnalysisField(cycleJson) : null
-        setCycleData(parsedCycle)
-        setPanelOpen(true)
-      } catch {
-        setError('Failed to fetch data')
-      }
-    } else {
-      // Check if it's a borough name
-      const lowerInput = input.toLowerCase().replace(/,.*$/, '').trim()
-      if (BOROUGHS.has(lowerInput)) {
+    setResult(null)
+    setZip('')
+    setTransit(null)
+    try {
+      const lowerInput = trimmed.toLowerCase().replace(/,.*$/, '').trim()
+      if (NYC_BOROUGHS.has(lowerInput)) {
         try {
           const res = await fetch(`/api/borough?name=${encodeURIComponent(lowerInput)}`)
           const data = await res.json()
           if (data.error || !data.zips?.length) {
-            setError(`No data found for "${input}"`)
+            setError(`No data found for "${trimmed}"`)
             return
           }
           setCityZips(data.zips)
@@ -487,8 +688,7 @@ export default function Home() {
           setError('Failed to fetch borough data')
         }
       } else {
-        // City search — parse "City, ST" or just "City"
-        const parts = input.split(',').map((s) => s.trim())
+        const parts = trimmed.split(',').map((s) => s.trim())
         const cityName = parts[0]
         const stateAbbr = parts[1] ?? ''
         try {
@@ -496,10 +696,11 @@ export default function Home() {
           const res = await fetch(url)
           const data = await res.json()
           if (data.error || !data.zips?.length) {
-            setError(`No data found for "${input}". Try "City, ST" format.`)
+            setError(`No data found for "${trimmed}". Try "City, ST" format.`)
             return
           }
           setCityZips(data.zips)
+          setBoroughBoundary(null)
           setResult(null)
           setZip('')
           setTransit(null)
@@ -516,8 +717,24 @@ export default function Home() {
           setError('Failed to fetch city data')
         }
       }
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
+  }
+
+  async function fetchMarket(e: React.FormEvent) {
+    e.preventDefault()
+    const input = searchInput.trim()
+    if (!input) return
+
+    if (/^\d{5}$/.test(input)) {
+      setSearchInput(input)
+      await loadZipMarket(input)
+      return
+    }
+
+    setSearchInput(input)
+    await runAggregateSearch(input)
   }
 
   const fredSeries: Record<string, Array<{ date: string; value: number }>> = {}
@@ -536,6 +753,7 @@ export default function Home() {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-black text-white">
+      <SitesBootstrap />
 
       {/* ── Left Sidebar ── */}
       <aside className="w-[200px] flex-shrink-0 flex flex-col bg-[#0a0a0a] border-r border-white/8 z-20">
@@ -572,9 +790,21 @@ export default function Home() {
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 px-2 py-3 flex flex-col gap-0.5">
+        <nav className="flex-1 px-2 py-3 flex flex-col gap-0.5 min-h-0">
           <NavItem icon={<MapIcon />} label="Map" active={activeNav === 'map'} onClick={() => setActiveNav('map')} />
           <NavItem icon={<ReportsIcon />} label="Case Studies" active={activeNav === 'reports'} onClick={() => setActiveNav('reports')} />
+          <ShortlistPanel
+            onOpenSite={(site) => {
+              if (site.isAggregate && site.savedSearch?.trim()) {
+                const q = site.savedSearch.trim()
+                setSearchInput(q)
+                void runAggregateSearch(q)
+                return
+              }
+              setSearchInput(site.zip)
+              void loadZipMarket(site.zip)
+            }}
+          />
         </nav>
 
         {/* Active market badge */}
@@ -606,22 +836,35 @@ export default function Home() {
 
       {/* ── Map ── */}
       <div className="flex-1 relative overflow-hidden">
-        <CommandMap zip={result?.zip ?? null} marketData={result} transitData={transit} cityZips={cityZips} boroughBoundary={boroughBoundary} uploadedMarkers={uploadedMarkers} agentLayerOverrides={agentLayerOverrides} agentMetric={agentMetric} agentTilt={agentTilt} onLayersChange={handleMapLayersChange} />
+        <CommandMap
+          zip={result?.zip ?? null}
+          marketData={result}
+          transitData={transit}
+          cityZips={cityZips}
+          boroughBoundary={boroughBoundary}
+          uploadedMarkers={uploadedMarkers}
+          shortlistSites={sitesForMap}
+          agentLayerOverrides={agentLayerOverrides}
+          agentMetric={agentMetric}
+          agentTilt={agentTilt}
+          onLayersChange={handleMapLayersChange}
+        />
 
         {/* Bottom stats bar */}
         {(result || aggregateData) && (
           <div className="absolute bottom-0 left-0 right-0 z-30 bg-black/85 backdrop-blur-sm border-t border-white/8 flex items-center h-[60px] px-3 overflow-x-auto">
             {result ? (<>
             <BottomStat label="Market Status" value={marketStatus ?? '—'} sub={marketStatus === 'Active' ? '● Live' : marketStatus === 'Moderate' ? '● Moderate' : null} accent={marketStatus === 'Active' ? 'green' : null} />
-            <BottomStat label="Median Rent" value={fmtMoney(result.zillow?.zori_latest)} sub={zoriGrowth ? `▲ ${zoriGrowth} YoY` : null} accent={result.zillow?.zori_growth_12m != null && result.zillow.zori_growth_12m > 0 ? 'green' : null} />
-            <BottomStat label="Home Value" value={fmtMoney(result.zillow?.zhvi_latest)} sub={fmtGrowth(result.zillow?.zhvi_growth_12m) ?? undefined} />
-            <BottomStat label="Active Listings" value={fmtNum(result.metro_velocity?.inventory_latest)} sub={result.metro_velocity?.region_name ?? undefined} />
-            <BottomStat label="Days to Pending" value={fmtNum(result.metro_velocity?.doz_pending_latest, ' days')} />
-            <BottomStat label="Price Cuts" value={fmtNum(result.metro_velocity?.price_cut_pct_latest, '%')} sub="of listings" />
-            {transit && <BottomStat label="Transit Stops" value={transit.stop_count.toLocaleString()} sub="nearby" />}
+            <BottomStat label="Median Rent" value={fmtMoney(result.zillow?.zori_latest)} sub={zoriGrowth ? `▲ ${zoriGrowth} YoY` : null} accent={result.zillow?.zori_growth_12m != null && result.zillow.zori_growth_12m > 0 ? 'green' : null} metricKey="zori" />
+            <BottomStat label="Home Value" value={fmtMoney(result.zillow?.zhvi_latest)} sub={fmtGrowth(result.zillow?.zhvi_growth_12m) ?? undefined} metricKey="zhvi" />
+            <BottomStat label="Active Listings" value={fmtNum(result.metro_velocity?.inventory_latest)} sub={result.metro_velocity?.region_name ?? undefined} metricKey="inventory" />
+            <BottomStat label="Days to Pending" value={fmtNum(result.metro_velocity?.doz_pending_latest, ' days')} metricKey="dozPending" />
+            <BottomStat label="Price Cuts" value={fmtNum(result.metro_velocity?.price_cut_pct_latest, '%')} sub="of listings" metricKey="priceCuts" />
+            {transit && <BottomStat label="Transit Stops" value={transit.stop_count.toLocaleString()} sub="nearby" metricKey="transit" />}
             {trends && (
               <BottomStat
                 label="Search interest"
+                metricKey="trends"
                 value={trends.latest_score != null ? `${trends.latest_score} / 100` : '—'}
                 sub={
                   trends.error
@@ -632,15 +875,16 @@ export default function Home() {
             )}
             </>) : aggregateData ? (<>
             <BottomStat label="ZIP Codes" value={aggregateData.zip_count.toString()} sub={aggregateData.label} />
-            <BottomStat label="Avg Rent (ZORI)" value={fmtMoney(aggregateData.zillow.avg_zori)} sub={aggregateData.zillow.zori_growth_12m != null ? `▲ ${fmtGrowth(aggregateData.zillow.zori_growth_12m)} YoY` : null} accent="green" />
-            <BottomStat label="Avg Home Value" value={fmtMoney(aggregateData.zillow.avg_zhvi)} sub={fmtGrowth(aggregateData.zillow.zhvi_growth_12m) ?? undefined} />
-            <BottomStat label="Population" value={fmtNum(aggregateData.total_population)} />
-            <BottomStat label="Vacancy Rate" value={fmtNum(aggregateData.housing.vacancy_rate, '%')} />
-            <BottomStat label="Active Listings" value={fmtNum(aggregateData.metro_velocity?.inventory_latest)} sub={aggregateData.metro_velocity?.region_name ?? undefined} />
-            <BottomStat label="Days to Pending" value={fmtNum(aggregateData.metro_velocity?.doz_pending_latest, ' days')} />
+            <BottomStat label="Avg Rent (ZORI)" value={fmtMoney(aggregateData.zillow.avg_zori)} sub={aggregateData.zillow.zori_growth_12m != null ? `▲ ${fmtGrowth(aggregateData.zillow.zori_growth_12m)} YoY` : null} accent="green" metricKey="zori" />
+            <BottomStat label="Avg Home Value" value={fmtMoney(aggregateData.zillow.avg_zhvi)} sub={fmtGrowth(aggregateData.zillow.zhvi_growth_12m) ?? undefined} metricKey="zhvi" />
+            <BottomStat label="Population" value={fmtNum(aggregateData.total_population)} metricKey="population" />
+            <BottomStat label="Vacancy Rate" value={fmtNum(aggregateData.housing.vacancy_rate, '%')} metricKey="vacancy" />
+            <BottomStat label="Active Listings" value={fmtNum(aggregateData.metro_velocity?.inventory_latest)} sub={aggregateData.metro_velocity?.region_name ?? undefined} metricKey="inventory" />
+            <BottomStat label="Days to Pending" value={fmtNum(aggregateData.metro_velocity?.doz_pending_latest, ' days')} metricKey="dozPending" />
             {trends && (
               <BottomStat
                 label="Search interest"
+                metricKey="trends"
                 value={trends.latest_score != null ? `${trends.latest_score} / 100` : '—'}
                 sub={
                   trends.error
@@ -692,30 +936,33 @@ export default function Home() {
             </div>
 
             <PanelSection title="Market Pricing (Zillow)">
-              <MetricRow label="Avg Median Rent (ZORI)" value={fmtMoney(aggregateData.zillow.avg_zori)} sub={aggregateData.zillow.zori_growth_12m != null ? `${fmtGrowth(aggregateData.zillow.zori_growth_12m)} YoY avg` : undefined} />
-              <MetricRow label="Avg Home Value (ZHVI)" value={fmtMoney(aggregateData.zillow.avg_zhvi)} sub={aggregateData.zillow.zhvi_growth_12m != null ? `${fmtGrowth(aggregateData.zillow.zhvi_growth_12m)} YoY avg` : undefined} />
+              <MetricRow metricKey="zori" label="Avg Median Rent (ZORI)" value={fmtMoney(aggregateData.zillow.avg_zori)} sub={aggregateData.zillow.zori_growth_12m != null ? `${fmtGrowth(aggregateData.zillow.zori_growth_12m)} YoY avg` : undefined} />
+              <MetricRow metricKey="zhvi" label="Avg Home Value (ZHVI)" value={fmtMoney(aggregateData.zillow.avg_zhvi)} sub={aggregateData.zillow.zhvi_growth_12m != null ? `${fmtGrowth(aggregateData.zillow.zhvi_growth_12m)} YoY avg` : undefined} />
             </PanelSection>
 
             <PanelSection title="Housing & Demographics">
-              <MetricRow label="Total Population" value={fmtNum(aggregateData.total_population)} />
-              <MetricRow label="Total Housing Units" value={fmtNum(aggregateData.housing.total_units)} />
-              <MetricRow label="Vacancy Rate" value={fmtNum(aggregateData.housing.vacancy_rate, '%')} />
-              <MetricRow label="Median Household Income" value={fmtMoney(aggregateData.housing.median_income)} />
-              <MetricRow label="Median Gross Rent" value={fmtMoney(aggregateData.housing.median_rent)} />
+              <MetricRow metricKey="population" label="Total Population" value={fmtNum(aggregateData.total_population)} />
+              <MetricRow metricKey="housingUnits" label="Total Housing Units" value={fmtNum(aggregateData.housing.total_units)} />
+              <MetricRow metricKey="vacancy" label="Vacancy Rate" value={fmtNum(aggregateData.housing.vacancy_rate, '%')} />
+              <MetricRow metricKey="income" label="Median Household Income" value={fmtMoney(aggregateData.housing.median_income)} />
+              <MetricRow metricKey="medianGrossRent" label="Median Gross Rent" value={fmtMoney(aggregateData.housing.median_rent)} />
+              {aggregateData.housing.migration_movers != null && (
+                <MetricRow metricKey="migration" label="Migration movers (diff. state)" value={fmtNum(aggregateData.housing.migration_movers)} />
+              )}
             </PanelSection>
 
             {aggregateData.permits.total_units != null && aggregateData.permits.total_units > 0 && (
               <PanelSection title="Building Permits (2021–2023)">
-                <MetricRow label="Total Units Permitted" value={fmtNum(aggregateData.permits.total_units)} />
-                <MetricRow label="Total Construction Value" value={fmtMoney(aggregateData.permits.total_value)} />
+                <MetricRow metricKey="permits" label="Total Units Permitted" value={fmtNum(aggregateData.permits.total_units)} />
+                <MetricRow metricKey="permitValue" label="Total Construction Value" value={fmtMoney(aggregateData.permits.total_value)} />
               </PanelSection>
             )}
 
             {aggregateData.metro_velocity && (
               <PanelSection title="Market Velocity">
-                <MetricRow label="Days to Pending" value={fmtNum(aggregateData.metro_velocity.doz_pending_latest, ' days')} />
-                <MetricRow label="Price Cuts" value={fmtNum(aggregateData.metro_velocity.price_cut_pct_latest, '%')} sub="of listings" />
-                <MetricRow label="Active Inventory" value={fmtNum(aggregateData.metro_velocity.inventory_latest)} />
+                <MetricRow metricKey="dozPending" label="Days to Pending" value={fmtNum(aggregateData.metro_velocity.doz_pending_latest, ' days')} />
+                <MetricRow metricKey="priceCuts" label="Price Cuts" value={fmtNum(aggregateData.metro_velocity.price_cut_pct_latest, '%')} sub="of listings" />
+                <MetricRow metricKey="inventory" label="Active Inventory" value={fmtNum(aggregateData.metro_velocity.inventory_latest)} />
               </PanelSection>
             )}
 
@@ -729,6 +976,7 @@ export default function Home() {
                   <p className="text-zinc-600 text-[9px] mb-2 leading-snug">{trends.geo_note}</p>
                 )}
                 <MetricRow
+                  metricKey="trends"
                   label="Interest score"
                   value={trends.latest_score != null ? `${trends.latest_score} / 100` : '—'}
                   sub={trends.keyword_scope}
@@ -759,10 +1007,14 @@ export default function Home() {
                   const isRate = metric.includes('Rate')
                   const isMoney = metric.includes('GDP')
                   const latestDisplay = isMoney ? fmtMoney(latest?.metric_value) : isRate ? fmtNum(latest?.metric_value, '%') : fmtNum(latest?.metric_value)
+                  const mk = sparklineMetricKey(metric)
+                  const labelText = metric.replace(/_/g, ' ')
                   return (
                     <div key={metric} className="mb-3">
                       <div className="flex justify-between mb-1">
-                        <p className="text-zinc-400 text-[11px]">{metric.replace(/_/g, ' ')}</p>
+                        <p className="text-zinc-400 text-[11px]">
+                          {mk ? <MetricTooltip metricKey={mk}>{labelText}</MetricTooltip> : labelText}
+                        </p>
                         <p className="text-white text-[11px] font-medium">{latestDisplay}</p>
                       </div>
                       <div className="flex items-end gap-px h-7">
@@ -782,10 +1034,30 @@ export default function Home() {
         {/* Aggregate panel memo + normalizer */}
         {aggregateData && panelOpen && !result && (
           <div className="px-4 pb-4 min-w-[300px]">
+            <MomentumExplainBlock
+              anchorZip={cityZips?.find((z) => /^\d{5}$/.test(z.zip))?.zip ?? null}
+              aggregateZips={cityZips?.map((z) => z.zip).filter((z) => /^\d{5}$/.test(z)) ?? null}
+            />
+            {cycleData && (
+              <CycleExplainCard
+                marketLabel={aggregateData.label}
+                cycle={cycleData}
+                subtitle="Cycle geography uses the first ZIP in this area; county-level signals (BPS, FRED) follow that anchor."
+              />
+            )}
+            {cityZips && cityZips.length > 0 && (
+              <AggregateShortlistToggle
+                aggregateData={aggregateData}
+                cityZips={cityZips}
+                cycle={cycleData}
+                savedSearch={searchInput}
+              />
+            )}
             <PanelSection title="Market brief (PDF)">
               <MarketReportExport
                 mapLayersSnapshot={mapLayersSnapshot}
                 uploadedMarkers={uploadedMarkers}
+                comparisonPins={pdfComparisonPins}
                 result={null}
                 aggregateData={aggregateData}
                 cityZips={cityZips}
@@ -793,13 +1065,6 @@ export default function Home() {
                 cycleAnalysis={cycleData}
               />
             </PanelSection>
-            {cycleData && (
-              <CycleHeadlineAboveMemo
-                marketLabel={aggregateData.label}
-                cycle={cycleData}
-                subtitle="Cycle geography uses the first ZIP in this area; county-level signals (BPS, FRED) follow that anchor."
-              />
-            )}
             <PanelSection title="Executive Memo">
               <ExecutiveMemo
                 marketLabel={aggregateData.label}
@@ -840,9 +1105,10 @@ export default function Home() {
             {/* Zillow pricing */}
             {result.zillow && (
               <PanelSection title="Market Pricing">
-                <MetricRow label="Median Rent (ZORI)" value={fmtMoney(result.zillow.zori_latest)} sub={zoriGrowth ? `${zoriGrowth} YoY` : undefined} />
-                <MetricRow label="Home Value (ZHVI)" value={fmtMoney(result.zillow.zhvi_latest)} sub={fmtGrowth(result.zillow.zhvi_growth_12m) ?? undefined} />
+                <MetricRow metricKey="zori" label="Median Rent (ZORI)" value={fmtMoney(result.zillow.zori_latest)} sub={zoriGrowth ? `${zoriGrowth} YoY` : undefined} />
+                <MetricRow metricKey="zhvi" label="Home Value (ZHVI)" value={fmtMoney(result.zillow.zhvi_latest)} sub={fmtGrowth(result.zillow.zhvi_growth_12m) ?? undefined} />
                 <MetricRow
+                  metricKey="zhvf"
                   label="1yr Forecast"
                   value={result.zillow.zhvf_growth_1yr != null && Math.abs(result.zillow.zhvf_growth_1yr) < 50
                     ? fmtNum(result.zillow.zhvf_growth_1yr, '%') : '—'}
@@ -853,9 +1119,9 @@ export default function Home() {
             {/* Metro velocity */}
             {result.metro_velocity && (
               <PanelSection title="Market Velocity">
-                <MetricRow label="Days to Pending" value={fmtNum(result.metro_velocity.doz_pending_latest, ' days')} />
-                <MetricRow label="Price Cuts" value={fmtNum(result.metro_velocity.price_cut_pct_latest, '%')} sub="of listings" />
-                <MetricRow label="Active Inventory" value={fmtNum(result.metro_velocity.inventory_latest)} />
+                <MetricRow metricKey="dozPending" label="Days to Pending" value={fmtNum(result.metro_velocity.doz_pending_latest, ' days')} />
+                <MetricRow metricKey="priceCuts" label="Price Cuts" value={fmtNum(result.metro_velocity.price_cut_pct_latest, '%')} sub="of listings" />
+                <MetricRow metricKey="inventory" label="Active Inventory" value={fmtNum(result.metro_velocity.inventory_latest)} />
               </PanelSection>
             )}
 
@@ -865,6 +1131,7 @@ export default function Home() {
                 {tabularRows.map((r) => (
                   <MetricRow
                     key={r.metric_name + r.data_source}
+                    metricKey={metricKeyFromDataRow(r.metric_name) ?? undefined}
                     label={r.metric_name}
                     value={formatMetricValue(r.metric_name, r.metric_value)}
                     sub={r.data_source}
@@ -884,10 +1151,14 @@ export default function Home() {
                   const isRate = metric.includes('Rate')
                   const isMoney = metric.includes('GDP') || metric.includes('Value') || metric.includes('Permit_Value')
                   const latestDisplay = isMoney ? fmtMoney(latest?.value) : isRate ? fmtNum(latest?.value, '%') : fmtNum(latest?.value)
+                  const mk = sparklineMetricKey(metric)
+                  const labelText = metric.replace(/_/g, ' ')
                   return (
                     <div key={metric} className="mb-3">
                       <div className="flex justify-between mb-1">
-                        <p className="text-zinc-400 text-[11px]">{metric.replace(/_/g, ' ')}</p>
+                        <p className="text-zinc-400 text-[11px]">
+                          {mk ? <MetricTooltip metricKey={mk}>{labelText}</MetricTooltip> : labelText}
+                        </p>
                         <p className="text-white text-[11px] font-medium">{latestDisplay}</p>
                       </div>
                       <div className="flex items-end gap-px h-7">
@@ -913,6 +1184,7 @@ export default function Home() {
                   <p className="text-zinc-600 text-[9px] mb-2 leading-snug">{trends.geo_note}</p>
                 )}
                 <MetricRow
+                  metricKey="trends"
                   label="Interest score"
                   value={trends.latest_score != null ? `${trends.latest_score} / 100` : '—'}
                   sub={trends.keyword_scope}
@@ -930,8 +1202,16 @@ export default function Home() {
             {/* Transit */}
             {transit && transit.stop_count > 0 && (
               <PanelSection title="Transit Connectivity">
-                <MetricRow label="Nearby Stops" value={transit.stop_count.toLocaleString()} sub="bus stops within radius" />
+                <MetricRow metricKey="transit" label="Nearby Stops" value={transit.stop_count.toLocaleString()} sub="bus stops within radius" />
               </PanelSection>
+            )}
+
+            <MomentumExplainBlock anchorZip={/^\d{5}$/.test(result.zip) ? result.zip : null} aggregateZips={null} />
+            {cycleData && (
+              <CycleExplainCard marketLabel={result.zillow?.city ?? result.zip} cycle={cycleData} />
+            )}
+            {result?.geo && /^\d{5}$/.test(result.zip) && (
+              <ShortlistToggleButton market={result} cycle={cycleData} />
             )}
 
             {/* PDF + Executive Memo */}
@@ -939,6 +1219,7 @@ export default function Home() {
               <MarketReportExport
                 mapLayersSnapshot={mapLayersSnapshot}
                 uploadedMarkers={uploadedMarkers}
+                comparisonPins={pdfComparisonPins}
                 result={result}
                 aggregateData={null}
                 cityZips={null}
@@ -946,9 +1227,6 @@ export default function Home() {
                 cycleAnalysis={cycleData}
               />
             </PanelSection>
-            {cycleData && (
-              <CycleHeadlineAboveMemo marketLabel={result.zillow?.city ?? result.zip} cycle={cycleData} />
-            )}
             <PanelSection title="Executive Memo">
               <ExecutiveMemo
                 marketLabel={result.zillow?.city ?? result.zip}

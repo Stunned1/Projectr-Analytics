@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react'
 import type { CycleAnalysis } from '@/lib/cycle/types'
-import type { ClientReportPayload, MapLayersSnapshot } from '@/lib/report/types'
+import type { ClientReportPayload, ClientReportPin, MapLayersSnapshot } from '@/lib/report/types'
 import {
   buildClientReportPayloadFromAggregate,
   buildClientReportPayloadFromZip,
@@ -17,6 +17,8 @@ type BuildResult = { ok: true; payload: ClientReportPayload } | { ok: false; rea
 interface MarketReportExportProps {
   mapLayersSnapshot: MapLayersSnapshot
   uploadedMarkers: Array<{ lat: number; lng: number; label: string; value: number | null }> | null
+  /** When 2+ sites are checked for comparison, PDF Page 4 uses these pins instead of CSV upload markers. */
+  comparisonPins?: ClientReportPin[] | null
   result: ZipMarketShape | null
   aggregateData: AggregateShape | null
   cityZips: CityZipShape[] | null
@@ -27,6 +29,7 @@ interface MarketReportExportProps {
 export default function MarketReportExport({
   mapLayersSnapshot,
   uploadedMarkers,
+  comparisonPins = null,
   result,
   aggregateData,
   cityZips,
@@ -37,12 +40,14 @@ export default function MarketReportExport({
   const [error, setError] = useState<string | null>(null)
 
   const buildPayload = useCallback((): BuildResult => {
-    const pins = (uploadedMarkers ?? []).map((m) => ({
+    const fromUpload = (uploadedMarkers ?? []).map((m) => ({
       lat: m.lat,
       lng: m.lng,
       label: m.label,
       value: m.value,
     }))
+    const pins: ClientReportPin[] =
+      comparisonPins && comparisonPins.length >= 2 ? comparisonPins : fromUpload
     if (result) {
       return {
         ok: true,
@@ -69,7 +74,7 @@ export default function MarketReportExport({
       }
     }
     return { ok: false, reason: 'Run a ZIP or city/borough search first.' }
-  }, [aggregateData, cityZips, cycleAnalysis, mapLayersSnapshot, result, trends, uploadedMarkers])
+  }, [aggregateData, cityZips, comparisonPins, cycleAnalysis, mapLayersSnapshot, result, trends, uploadedMarkers])
 
   const downloadPdf = useCallback(async () => {
     setError(null)
@@ -125,7 +130,7 @@ export default function MarketReportExport({
       {error && <p className="text-red-400 text-[10px]">{error}</p>}
       <p className="text-zinc-600 text-[9px] leading-relaxed">
         Multi-page analyst brief: cycle headline, signals, metrics vs metro, charts, static map, and site comparison
-        when 2+ client pins are on the map.
+        when 2+ shortlist sites are checked for compare or 2+ client CSV pins are on the map.
       </p>
     </div>
   )

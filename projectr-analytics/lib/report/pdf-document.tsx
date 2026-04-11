@@ -11,6 +11,7 @@ import { BarChartPdf, SparklinePdf } from './pdf-charts'
 import { CycleSignalTilesPdf, CycleWheelPdf } from './pdf-cycle-visual'
 import { PdfTrendArrow, trendKindToVariant, signalIndicatorToVariant } from './pdf-trend-arrow'
 import type { ZoriSeriesSource } from './fetch-zori-series'
+import { METHODOLOGY_PDF_ROWS } from '@/lib/metric-definitions'
 
 /** A4 content width (595.28pt − 40pt padding × 2). Fixed pt width fixes @react-pdf Text wrap. */
 const PDF_CONTENT_WIDTH_PT = 515
@@ -103,6 +104,19 @@ const styles = StyleSheet.create({
   td: { fontSize: 8, color: ink },
   foot: { marginTop: 12, fontSize: 7, color: muted, lineHeight: 1.35 },
   mapBox: { marginTop: 8, borderWidth: 1, borderColor: '#ddd' },
+  methTitle: {
+    fontSize: 9,
+    fontFamily: 'Helvetica',
+    fontWeight: 'bold',
+    color: ink,
+    marginTop: 12,
+    marginBottom: 6,
+  },
+  methHeaderRow: { flexDirection: 'row', borderBottomWidth: 0.5, borderBottomColor: '#ddd', paddingBottom: 3, marginBottom: 2 },
+  methRow: { flexDirection: 'row', paddingVertical: 3 },
+  methColMetric: { width: '18%', fontSize: 6.5, fontFamily: 'Helvetica', fontWeight: 'bold', color: '#444' },
+  methColDef: { width: '57%', fontSize: 6.5, color: '#555', lineHeight: 1.35, paddingRight: 6 },
+  methColSrc: { width: '25%', fontSize: 6.5, color: muted, lineHeight: 1.35 },
 })
 
 function fmtMoney(n: number | null | undefined) {
@@ -322,6 +336,30 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
           <Text style={styles.confidence} wrap hyphenationCallback={(word) => [word]}>
             Confidence — {brief.confidenceLine}
           </Text>
+
+          <Text style={styles.methTitle}>Methodology & definitions</Text>
+          <Text style={{ fontSize: 6.5, color: muted, marginBottom: 6, width: PDF_CONTENT_WIDTH_PT }} wrap>
+            Key metrics below are documented for client deliverables. Cycle position uses four directional signals (rent,
+            vacancy, permits, employment); momentum blends labor, rent level, and permit volume vs. a ZIP comparison set.
+          </Text>
+          <View style={styles.methHeaderRow}>
+            <Text style={styles.methColMetric}>Metric</Text>
+            <Text style={styles.methColDef}>Definition</Text>
+            <Text style={styles.methColSrc}>Source</Text>
+          </View>
+          {METHODOLOGY_PDF_ROWS.map((row) => (
+            <View key={row.metric} style={styles.methRow} wrap={false}>
+              <Text style={styles.methColMetric} wrap={false}>
+                {row.metric}
+              </Text>
+              <Text style={styles.methColDef} wrap>
+                {row.definition}
+              </Text>
+              <Text style={styles.methColSrc} wrap>
+                {row.source}
+              </Text>
+            </View>
+          ))}
 
           {cycleAnalysis && (
             <Text style={[styles.foot, { marginBottom: 6, width: PDF_CONTENT_WIDTH_PT }]} wrap hyphenationCallback={(word) => [word]}>
