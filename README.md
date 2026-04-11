@@ -23,6 +23,7 @@ NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID   # must be a Vector map ID
 GEMINI_API_KEY
 GOOGLE_MAPS_STATIC_KEY           # optional; Static Maps API for PDF brief (falls back to NEXT_PUBLIC_GOOGLE_MAPS_API_KEY)
 HUD_API_TOKEN                    # optional, falls back to Census ACS rent data
+TRANSITLAND_API_KEY=             # free at transit.land/sign-up (Developer API, 10k queries/month)
 ```
 
 ### First-time data setup
@@ -95,6 +96,7 @@ _4.11.2026_
 - `20260411190000_saved_sites.sql` adds `saved_sites` (ZIP, geo, cycle/momentum snapshot, notes, `user_id`) with RLS; the client uses Zustand (`lib/sites-store.ts`) and attempts `signInAnonymously()` when unauthenticated so rows can be written after Anonymous Auth is enabled in Supabase.
 - `/api/agent` system prompt lists `nycPermits` (not `permits`) so Gemini layer toggles match `CommandMap` layer keys.
 - `npm run warm:demo` — `scripts/warm-demo-zips.ts` warms `/api/market`, `/api/transit`, `/api/trends`, and `/api/cycle` for demo ZIPs 11201, 10001, and 60614; run with dev server up; optional `WARM_BASE_URL` override.
+- Added `/api/pois` — Overture Maps POI endpoint; returns categorized places (coffee, grocery, pharmacy, fitness, schools) + named anchor tenants (Whole Foods, Equinox, SoulCycle, etc.) by lat/lng radius; 7-day cache; nationwide coverage
 
 _4.12.2026_
 - `/api/trends` — optional `city` + `state` (USPS 2-letter) and `anchor_zip` (5 digits) skip ZIP geocoding and build the same keyword/geo flow; JSON adds `geo_note`, `empty_message`, and a soft `error` (HTTP 200) when Google Trends fails or returns no series; `fetchTrends` surfaces errors instead of failing silently
@@ -124,8 +126,10 @@ _4.9.2026_
 
 _4.11.2026_
 - NYC PLUTO parcels now support borough mode — auto-detects borough from city ZIP range and fetches all parcels via `/api/parcels?borough=`
-- NYC permits zoom-adaptive visualization — `HeatmapLayer` (zoom < 13, NB+A1 weighted), `ScatterplotLayer` (zoom 13-15, top 2000 by cost), bbox-filtered scatter (zoom ≥ 16, 500 cap); type filter pill (All/New Bldg/Major Reno/Demo) appears in layer panel when permits are active; clickable detail panel shows address, cost, stories, units, filing date
-- Permits layer fetched automatically on ZIP and borough search; refetches on zoom/pan with 400ms debounce- Layer panel redesigned as pill buttons with colored dot indicators — removed all emojis and default HTML styling
+- Overture Maps POI `ScatterplotLayer` — color-coded by category (anchors=orange with white outline, coffee=brown, grocery=green, pharmacy=blue, fitness=pink, school=yellow); anchor tenants rendered larger (10px) vs signals (5px); nationwide coverage via Overture Maps API
+- NYC PLUTO parcels now include FAR/air rights data — `builtfar`, `residfar`, `commfar`, `facilfar`, `air_rights_sqft` ((max_far - built_far) × lot_area), `far_utilization`; parcel color mode toggle in layer panel switches between Land Use and Air Rights (green=low potential → red=high); top underbuilt lots surfaced in stats
+- Momentum score layer — `/api/momentum` upgraded to use Zillow ZORI 12m growth + population growth alongside FRED unemployment and Census BPS permits; renders as ZIP choropleth (purple=weak → orange=strong); separate layer toggle; fetches on toggle, scores all loaded ZIPs at once
+- NYC permits zoom-adaptive visualization — `HeatmapLayer` (zoom < 15, NB+A1 weighted, orange gradient), `ColumnLayer` 3D columns (zoom ≥ 15, height = log cost, NB=orange/A1=blue/DM=red); all filtering is client-side from a single upfront fetch — no API calls on pan/zoom; multi-select type filter pills (New Bldg/Major Reno/Demo) in layer panel; clickable 3D columns open detail panel with address, cost, stories, units, filing date- Layer panel redesigned as pill buttons with colored dot indicators — removed all emojis and default HTML styling
 - Added map tilt and heading sliders to layer panel
 - Disabled Google Maps default UI controls (map/satellite toggle, zoom buttons, fullscreen, street view)
 - Removed Data Layer Status dev sidebar
@@ -144,7 +148,7 @@ _4.8.2026_
 - Fixed Google Maps drag/movement snapping back to original position
 
 _4.9.2026_
-- Added Census block group sub-ZIP choropleth layer (population density, ~64 polygons per county)
+- Transit layer upgraded to Transitland REST API (primary) — returns routes with actual brand colors (A train blue, 1 train red, etc.), `MultiLineString` geometry flattened to `PathLayer` segments, stops from Transitland; Overpass OSM remains as fallback; 10k queries/month free tier; `TRANSITLAND_API_KEY` required in `.env.local`
 - Added OSM building footprints — 3D extruded `PolygonLayer` colored by building type
 - Layer panel now includes Block Groups and 3D Buildings toggles (off by default)
 - Added NYC PLUTO parcel `ColumnLayer` — 3D columns per parcel, height = assessed value/sqft, color = land use (NYC ZIPs only)
@@ -183,6 +187,10 @@ _4.11.2026_
 - **Client CSV** — `/upload` shares `CommandCenterSidebar` with the map; analyze/shortlist stash `lib/pending-navigation` in `sessionStorage` then resume on `/`; replaces Case Studies.
 - **Methodology first in panel** — Momentum and Market cycle explain blocks sit directly under the panel header (single-ZIP and aggregate); cycle card defaults expanded; momentum loads on mount when ZIP context exists.
 - **shadcn/ui experiment** — Initialized Radix Nova preset (Tailwind v4): `components.json`, `lib/utils.ts`, `components/ui/*` (button, input, card, badge, checkbox, collapsible, label, scroll-area); root `html` uses `dark` plus Geist font variables; Command Center sidebar search/submit and Shortlist panel use these primitives while keeping the existing charcoal/orange styling.
+- **Visible theme refresh** — Dark mode tokens in `app/globals.css` use a cool graphite base, elevated `card`/`popover` surfaces, Projectr orange as `--primary` (plus `--primary-deep` and `bg-gradient-primary` utility); sidebar uses `bg-sidebar` tokens; shell, stats bubble, data panel, map layer stack, agent chat, cycle/memo/upload accents, and shortlist use semantic `primary` / `border` / `muted` classes instead of flat `#0a0a0a` / `#D76B3D` hex everywhere.
+- Left sidebar now collapsible — collapses to 48px icon strip, expands to 200px; search, nav labels, and active market badge hidden when collapsed
+- Bottom stats bar replaced with floating pill bubble (bottom-center, glassmorphism) — scrollable stats with dividers; ↗ button opens data panel
+- Right data panel gains Overview/All Data tab toggle — "All Data" tab shows every metric as a flat table (Zillow, velocity, Census, FRED, transit, trends)
 
 _4.12.2026_
 - City and borough search loads Google Trends (keyword from borough name or city query via `/api/trends?city=&state=`); stats bar shows metro name plus keyword scope; panel surfaces Trends errors/empty data before PDF export; aggregate PDF includes Trends when loaded

@@ -12,7 +12,7 @@ const SYSTEM_PROMPT = `You are the Projectr Analytics AI Agent — a spatial int
 You can control the entire dashboard: navigate to markets, toggle data layers, analyze conditions, and respond to analyst briefs or uploaded client CSV context.
 
 AVAILABLE LAYERS (exact key names):
-- zipBoundary, transitStops, rentChoropleth, blockGroups, parcels, tracts, amenityHeatmap, floodRisk, clientData, nycPermits
+- zipBoundary, transitStops, rentChoropleth, parcels, tracts, amenityHeatmap, floodRisk, clientData, permits, pois, momentum
 
 AVAILABLE ACTIONS:
 - Navigate to a market: {"type":"search","query":"manhattan"} or {"type":"search","query":"10001"}

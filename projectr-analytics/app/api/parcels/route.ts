@@ -1,7 +1,12 @@
 /**
  * NYC PLUTO Parcel Data
  * Supports both ZIP-level and borough-level queries.
- * Used for ColumnLayer 3D visualization — height = assessed value per sqft, color = land use.
+ *
+ * Now includes FAR (Floor Area Ratio) data:
+ * - builtfar: what's currently built
+ * - residfar / commfar / facilfar: what zoning allows
+ * - air_rights_sqft: (max_allowed_far - builtfar) * lotarea — unused development potential
+ * - far_utilization: builtfar / max_allowed_far — 0–1, how "full" the lot is
  *
  * Query modes:
  * - ?zip=10001         → single ZIP, up to 1000 parcels
@@ -12,6 +17,7 @@ import { type NextRequest, NextResponse } from 'next/server'
 export const dynamic = 'force-dynamic'
 
 const PLUTO_URL = 'https://data.cityofnewyork.us/resource/64uk-42ks.json'
+const PLUTO_SELECT = 'address,assesstot,numfloors,yearbuilt,landuse,latitude,longitude,bldgarea,lotarea,builtfar,residfar,commfar,facilfar,zonedist1,bldgclass,unitsres,unitstotal'
 
 const LAND_USE: Record<string, string> = {
   '1': 'One & Two Family',
@@ -27,13 +33,8 @@ const LAND_USE: Record<string, string> = {
   '11': 'Vacant Land',
 }
 
-// Borough name → PLUTO borocode
 const BOROUGH_CODES: Record<string, string> = {
-  manhattan: '1',
-  bronx: '2',
-  brooklyn: '3',
-  queens: '4',
-  'staten island': '5',
+  manhattan: '1', bronx: '2', brooklyn: '3', queens: '4', 'staten island': '5',
 }
 
 const NYC_ZIPS = new Set([
@@ -66,7 +67,21 @@ function parseParcels(raw: Record<string, string>[]) {
     .filter((r) => r.latitude && r.longitude && r.assesstot)
     .map((r) => {
       const assesstot = parseFloat(r.assesstot) || 0
-      const bldgarea = parseFloat(r.bldgarea) || 1
+      const bldgarea = parseFloat(r.bldgarea) || 0
+      const lotarea = parseFloat(r.lotarea) || 0
+
+      // FAR values
+      const builtfar = parseFloat(r.builtfar) || 0
+      const residfar = parseFloat(r.residfar) || 0
+      const commfar = parseFloat(r.commfar) || 0
+      const facilfar = parseFloat(r.facilfar) || 0
+      const maxAllowedFar = Math.max(residfar, commfar, facilfar)
+
+      // Air rights = unused development potential in sqft
+      const farDelta = maxAllowedFar > 0 ? Math.max(maxAllowedFar - builtfar, 0) : 0
+      const airRightsSqft = lotarea > 0 ? Math.round(farDelta * lotarea) : 0
+      const farUtilization = maxAllowedFar > 0 ? Math.min(builtfar / maxAllowedFar, 1) : null
+
       return {
         lat: parseFloat(r.latitude),
         lng: parseFloat(r.longitude),
@@ -78,15 +93,49 @@ function parseParcels(raw: Record<string, string>[]) {
         land_use: r.landuse ?? null,
         land_use_label: LAND_USE[r.landuse ?? ''] ?? 'Other',
         bldg_area: bldgarea,
+        lot_area: lotarea,
+        // FAR fields
+        built_far: builtfar,
+        resid_far: residfar,
+        comm_far: commfar,
+        facil_far: facilfar,
+        max_allowed_far: maxAllowedFar,
+        air_rights_sqft: airRightsSqft,
+        far_utilization: farUtilization !== null ? parseFloat(farUtilization.toFixed(3)) : null,
+        zone_dist: r.zonedist1 ?? null,
+        bldg_class: r.bldgclass ?? null,
+        units_res: parseInt(r.unitsres) || 0,
+        units_total: parseInt(r.unitstotal) || 0,
       }
     })
 }
 
-function computeStats(parcels: { assessed_per_sqft: number }[]) {
-  const values = parcels.map((p) => p.assessed_per_sqft).filter((v) => v > 0).sort((a, b) => a - b)
+function computeStats(parcels: ReturnType<typeof parseParcels>) {
+  const perSqft = parcels.map((p) => p.assessed_per_sqft).filter((v) => v > 0).sort((a, b) => a - b)
+  const airRights = parcels.map((p) => p.air_rights_sqft).filter((v) => v > 0).sort((a, b) => a - b)
+
+  // Top underbuilt lots — high air rights, not vacant/parking
+  const underbuilt = parcels
+    .filter((p) => p.air_rights_sqft > 5000 && p.land_use !== '10' && p.land_use !== '11' && p.far_utilization !== null && p.far_utilization < 0.5)
+    .sort((a, b) => b.air_rights_sqft - a.air_rights_sqft)
+    .slice(0, 10)
+    .map((p) => ({
+      address: p.address,
+      zone: p.zone_dist,
+      built_far: p.built_far,
+      max_far: p.max_allowed_far,
+      air_rights_sqft: p.air_rights_sqft,
+      far_utilization: p.far_utilization,
+      land_use: p.land_use_label,
+    }))
+
   return {
-    p25_per_sqft: values[Math.floor(values.length * 0.25)] ?? 0,
-    p75_per_sqft: values[Math.floor(values.length * 0.75)] ?? 1,
+    p25_per_sqft: perSqft[Math.floor(perSqft.length * 0.25)] ?? 0,
+    p75_per_sqft: perSqft[Math.floor(perSqft.length * 0.75)] ?? 1,
+    p75_air_rights: airRights[Math.floor(airRights.length * 0.75)] ?? 0,
+    max_air_rights: airRights[airRights.length - 1] ?? 0,
+    underbuilt_count: parcels.filter((p) => p.far_utilization !== null && p.far_utilization < 0.5 && p.max_allowed_far > 0).length,
+    top_underbuilt: underbuilt,
   }
 }
 
@@ -95,29 +144,20 @@ export async function GET(request: NextRequest) {
   const borough = request.nextUrl.searchParams.get('borough')?.toLowerCase()
 
   try {
-    // Borough mode — top 5000 parcels by assessed value
     if (borough) {
       const borocode = BOROUGH_CODES[borough]
-      if (!borocode) {
-        return NextResponse.json({ error: `Unknown borough "${borough}"` }, { status: 404 })
-      }
+      if (!borocode) return NextResponse.json({ error: `Unknown borough "${borough}"` }, { status: 404 })
 
-      const url = `${PLUTO_URL}?$limit=5000&borocode=${borocode}&$select=address,assesstot,numfloors,yearbuilt,landuse,latitude,longitude,bldgarea&$order=assesstot+DESC`
-      const res = await fetch(url, { next: { revalidate: 86400 } })
+      // Use cache: 'no-store' — response is >2MB so Next.js fetch cache can't handle it
+      // Limit to 3000 top parcels to keep response manageable
+      const url = `${PLUTO_URL}?$limit=3000&borocode=${borocode}&$select=${PLUTO_SELECT}&$order=assesstot+DESC`
+      const res = await fetch(url, { cache: 'no-store' })
       if (!res.ok) return NextResponse.json({ error: 'PLUTO API unavailable' }, { status: 503 })
 
-      const raw = await res.json()
-      const parcels = parseParcels(raw)
-
-      return NextResponse.json({
-        borough,
-        count: parcels.length,
-        stats: computeStats(parcels),
-        parcels,
-      })
+      const parcels = parseParcels(await res.json())
+      return NextResponse.json({ borough, count: parcels.length, stats: computeStats(parcels), parcels })
     }
 
-    // ZIP mode
     if (!zip || !/^\d{5}$/.test(zip)) {
       return NextResponse.json({ error: 'Provide zip or borough parameter' }, { status: 400 })
     }
@@ -125,19 +165,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Parcel data only available for NYC ZIPs', nyc_only: true }, { status: 404 })
     }
 
-    const url = `${PLUTO_URL}?$limit=1000&$where=zipcode='${zip}'&$select=address,assesstot,numfloors,yearbuilt,landuse,latitude,longitude,lotarea,bldgarea`
+    const url = `${PLUTO_URL}?$limit=1000&$where=zipcode='${zip}'&$select=${PLUTO_SELECT}`
     const res = await fetch(url, { next: { revalidate: 86400 * 7 } })
     if (!res.ok) return NextResponse.json({ error: 'PLUTO API unavailable' }, { status: 503 })
 
-    const raw = await res.json()
-    const parcels = parseParcels(raw)
-
-    return NextResponse.json({
-      zip,
-      count: parcels.length,
-      stats: computeStats(parcels),
-      parcels,
-    })
+    const parcels = parseParcels(await res.json())
+    return NextResponse.json({ zip, count: parcels.length, stats: computeStats(parcels), parcels })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unexpected error'
     return NextResponse.json({ error: message }, { status: 500 })

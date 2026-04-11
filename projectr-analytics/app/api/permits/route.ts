@@ -64,29 +64,37 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ mode: 'heatmap', count: points.length, points })
     }
 
-    // Street zoom: bbox filter, tight cap
-    const limit = zoom >= 16 ? 500 : 2000
+    // Street zoom: fetch each job type separately so no type gets crowded out by another
+    const limit = zoom >= 16 ? 200 : 2000
 
-    let query = supabase
-      .from('nyc_permits')
-      .select('id, borough, house_number, street_name, zip_code, job_type, job_status, job_description, owner_business, initial_cost, proposed_stories, proposed_units, filing_date, lat, lng, nta_name')
-      .in('job_type', jobTypes)
-      .not('lat', 'is', null)
-      .order('initial_cost', { ascending: false })
-      .limit(limit)
+    // Fetch all requested types in parallel, each with its own cap
+    const typeResults = await Promise.all(
+      jobTypes.map(async (jt) => {
+        let q = supabase
+          .from('nyc_permits')
+          .select('id, borough, house_number, street_name, zip_code, job_type, job_status, job_description, owner_business, initial_cost, proposed_stories, proposed_units, filing_date, lat, lng, nta_name')
+          .eq('job_type', jt)
+          .not('lat', 'is', null)
+          .limit(limit)
 
-    if (borough) query = query.eq('borough', borough)
-    if (zip) query = query.eq('zip_code', zip)
-    if (hasBbox) {
-      query = query
-        .gte('lat', minLat).lte('lat', maxLat)
-        .gte('lng', minLng).lte('lng', maxLng)
-    }
+        if (borough) q = q.eq('borough', borough)
+        if (zip) q = q.eq('zip_code', zip)
+        if (hasBbox) {
+          q = q
+            .gte('lat', minLat).lte('lat', maxLat)
+            .gte('lng', minLng).lte('lng', maxLng)
+            .order('initial_cost', { ascending: false })
+        }
 
-    const { data, error } = await query
-    if (error) throw new Error(error.message)
+        const { data, error } = await q
+        if (error) return []
+        return data ?? []
+      })
+    )
 
-    const permits = (data ?? []).map((p) => ({
+    const rawData = typeResults.flat()
+
+    const permits = rawData.map((p) => ({
       ...p,
       job_type_label: JOB_TYPE_LABELS[p.job_type ?? ''] ?? p.job_type,
       address: `${p.house_number ?? ''} ${p.street_name ?? ''}`.trim(),
