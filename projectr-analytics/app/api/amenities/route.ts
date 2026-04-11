@@ -55,9 +55,10 @@ export async function GET(request: NextRequest) {
     let text = ''
     for (let attempt = 0; attempt < 3; attempt++) {
       if (attempt > 0) await new Promise((r) => setTimeout(r, 2000 * attempt))
+      const body = new URLSearchParams({ data: query })
       const res = await fetch('https://overpass-api.de/api/interpreter', {
         method: 'POST',
-        body: `data=${encodeURIComponent(query)}`,
+        body: body.toString(),
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         signal: AbortSignal.timeout(18000),
       })

@@ -2,7 +2,9 @@
 
 import { useState, useCallback, useMemo, useEffect } from 'react'
 import dynamic from 'next/dynamic'
+import Image from 'next/image'
 import ExecutiveMemo from '@/components/ExecutiveMemo'
+import AgenticNormalizer from '@/components/AgenticNormalizer'
 import MarketReportExport from '@/components/MarketReportExport'
 import AgentChat, { type AgentAction } from '@/components/AgentChat'
 import type { CycleAnalysis } from '@/lib/cycle/types'
@@ -34,10 +36,28 @@ interface DataRow {
 interface TransitData {
   zip: string
   stop_count: number
+  route_count?: number
+  routes?: Array<{
+    id: string
+    name: string
+    long_name?: string
+    type: string
+    route_type?: number
+    color: [number, number, number]
+    paths: [number, number][][]
+  }>
   geojson: {
     features: Array<{
-      properties: { stop_id: string; stop_name: string }
+      properties: { stop_id: string; stop_name: string; stop_type?: string }
       geometry: { coordinates: [number, number] }
+    }>
+    routes?: Array<{
+      id: string
+      name: string
+      long_name?: string
+      type: string
+      color: [number, number, number]
+      paths: [number, number][][]
     }>
   }
 }
@@ -384,7 +404,28 @@ function MetricRow({ label, value, sub, metricKey }: { label: string; value: str
   )
 }
 
-// ── Icons ─────────────────────────────────────────────────────────────────────
+function BubbleStat({ label, value, sub, accent }: { label: string; value: string; sub?: string | null; accent?: 'green' | 'red' | null }) {
+  return (
+    <div className="flex flex-col gap-0 px-3 py-2 min-w-[72px]">
+      <p className="text-[9px] uppercase tracking-widest text-zinc-500 whitespace-nowrap">{label}</p>
+      <p className="text-white font-semibold text-[13px] leading-tight whitespace-nowrap">{value}</p>
+      {sub && <p className={`text-[9px] whitespace-nowrap ${accent === 'green' ? 'text-emerald-400' : accent === 'red' ? 'text-red-400' : 'text-zinc-500'}`}>{sub}</p>}
+    </div>
+  )
+}
+
+function BubbleDivider() {
+  return <div className="w-px h-8 bg-white/8 flex-shrink-0" />
+}
+
+function NavItem({ icon, label, active, onClick }: { icon: React.ReactNode; label: string; active?: boolean; onClick?: () => void }) {
+  return (
+    <button onClick={onClick} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${active ? 'bg-[#D76B3D]/15 text-[#D76B3D] border-l-2 border-[#D76B3D]' : 'text-zinc-400 hover:text-white hover:bg-white/5 border-l-2 border-transparent'}`}>
+      <span className="w-4 h-4 flex-shrink-0">{icon}</span>
+      <span className="font-medium tracking-wide">{label}</span>
+    </button>
+  )
+}
 
 const DEFAULT_MAP_LAYERS: MapLayersSnapshot = {
   zipBoundary: false,
@@ -399,6 +440,12 @@ const DEFAULT_MAP_LAYERS: MapLayersSnapshot = {
   clientData: false,
   choroplethMetric: 'zori',
 }
+const MapIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21" /><line x1="9" y1="3" x2="9" y2="18" /><line x1="15" y1="6" x2="15" y2="21" /></svg>
+const ReportsIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></svg>
+const SearchIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-3.5 h-3.5"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+const ChevronRight = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3 h-3"><polyline points="9 18 15 12 9 6" /></svg>
+const CollapseIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4"><polyline points="15 18 9 12 15 6" /></svg>
+const ExpandIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4"><polyline points="9 18 15 12 9 6" /></svg>
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
@@ -420,6 +467,14 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null)
   const [panelOpen, setPanelOpen] = useState(false)
   const [mapLayersSnapshot, setMapLayersSnapshot] = useState<MapLayersSnapshot>(DEFAULT_MAP_LAYERS)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [panelTab, setPanelTab] = useState<'data' | 'table'>('data')
+  const [activeNav, setActiveNav] = useState<'map' | 'reports'>('map')
+
+  function handleNormalizerIngested(res: { triage: { bucket: string }; marker_points?: Array<{ lat: number; lng: number; value: number | null; label: string }> }) {
+    // markers are handled via useClientUploadMarkersStore in AgenticNormalizer
+    void res
+  }
 
   const handleMapLayersChange = useCallback((snapshot: MapLayersSnapshot) => {
     setMapLayersSnapshot(snapshot)
@@ -641,13 +696,23 @@ export default function Home() {
           setCityZips(data.zips)
           setBoroughBoundary(data.boundary ?? null)
           setResult(null)
-          setTransit(null)
+          setTrends(null)
           setPanelOpen(true)
           fetchAggregate(data.zips.map((z: CityZip) => z.zip), data.borough)
           void fetchTrendsForMultiZipArea(data.zips, {
             cityForKeyword: data.borough,
             state: typeof data.state === 'string' ? data.state : 'NY',
           })
+          // Fetch transit for the centroid ZIP
+          const centroidZip = data.zips.find((z: CityZip) => z.lat && z.lng)?.zip
+          if (centroidZip) {
+            fetch(`/api/transit?zip=${centroidZip}`)
+              .then((r) => r.json())
+              .then((d) => { if (!d.error) setTransit({ ...d, zip: centroidZip }) })
+              .catch(() => {})
+          } else {
+            setTransit(null)
+          }
         } catch {
           setError('Failed to fetch borough data')
         }
@@ -666,7 +731,7 @@ export default function Home() {
           setCityZips(data.zips)
           setBoroughBoundary(null)
           setResult(null)
-          setTransit(null)
+          setTrends(null)
           setPanelOpen(true)
           const st =
             (stateAbbr || data.zips[0]?.state || '')
@@ -676,6 +741,16 @@ export default function Home() {
               .slice(0, 2) || ''
           fetchAggregate(data.zips.map((z: CityZip) => z.zip), `${cityName}${stateAbbr ? ', ' + stateAbbr : ''}`)
           void fetchTrendsForMultiZipArea(data.zips, { cityForKeyword: cityName, state: st })
+          // Fetch transit for the centroid ZIP
+          const centroidZipCity = data.zips.find((z: CityZip) => z.lat && z.lng)?.zip
+          if (centroidZipCity) {
+            fetch(`/api/transit?zip=${centroidZipCity}`)
+              .then((r) => r.json())
+              .then((d) => { if (!d.error) setTransit({ ...d, zip: centroidZipCity }) })
+              .catch(() => {})
+          } else {
+            setTransit(null)
+          }
         } catch {
           setError('Failed to fetch city data')
         }
@@ -746,26 +821,104 @@ export default function Home() {
     <div className="flex h-screen w-screen overflow-hidden bg-black text-white">
       <SitesBootstrap />
 
-      <CommandCenterSidebar
-        searchInput={searchInput}
-        setSearchInput={setSearchInput}
-        error={error}
-        loading={loading}
-        onAnalyzeSubmit={fetchMarket}
-        activeMarket={sidebarActiveMarket}
-        panelOpen={panelOpen}
-        onTogglePanel={() => setPanelOpen(!panelOpen)}
-        onShortlistOpenSite={(site) => {
-          if (site.isAggregate && site.savedSearch?.trim()) {
-            const q = site.savedSearch.trim()
-            setSearchInput(q)
-            void runAggregateSearch(q)
-            return
-          }
-          setSearchInput(site.zip)
-          void loadZipMarket(site.zip)
-        }}
-      />
+      {/* ── Left Sidebar — collapsible ── */}
+      <aside
+        className="flex-shrink-0 flex flex-col bg-[#0a0a0a] border-r border-white/8 z-20 transition-all duration-200"
+        style={{ width: sidebarCollapsed ? 48 : 200 }}
+      >
+        {/* Logo + collapse toggle */}
+        <div className="flex items-center justify-between px-3 py-4 border-b border-white/8 min-h-[56px]">
+          {!sidebarCollapsed && (
+            <Image src="/Projectr_Logo.png" alt="Projectr" width={120} height={32} loading="eager" style={{ width: 'auto', height: '28px' }} />
+          )}
+          <button
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            className="text-zinc-500 hover:text-white transition-colors flex-shrink-0 ml-auto"
+          >
+            {sidebarCollapsed ? <ExpandIcon /> : <CollapseIcon />}
+          </button>
+        </div>
+
+        {/* Search — hidden when collapsed */}
+        {!sidebarCollapsed && (
+          <div className="px-3 py-3 border-b border-white/8">
+            <form onSubmit={fetchMarket}>
+              <div className="relative">
+                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none">
+                  <SearchIcon />
+                </span>
+                <input
+                  type="text"
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  placeholder="ZIP, City, ST, or Borough..."
+                  className="w-full bg-white/5 border border-white/10 rounded-md pl-7 pr-3 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-[#D76B3D]/50 transition-colors"
+                />
+              </div>
+              {error && <p className="text-red-400 text-[10px] mt-1 px-0.5">{error}</p>}
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full mt-2 bg-[#D76B3D] hover:bg-[#c45e32] text-white text-xs font-semibold py-2 rounded-md transition-colors disabled:opacity-50"
+              >
+                {loading ? 'Analyzing...' : 'Analyze Market'}
+              </button>
+            </form>
+          </div>
+        )}
+
+        {/* Search icon when collapsed */}
+        {sidebarCollapsed && (
+          <button
+            onClick={() => setSidebarCollapsed(false)}
+            className="flex items-center justify-center h-10 text-zinc-500 hover:text-white transition-colors"
+            title="Search"
+          >
+            <SearchIcon />
+          </button>
+        )}
+
+        {/* Nav */}
+        <nav className="flex-1 px-2 py-3 flex flex-col gap-0.5">
+          {sidebarCollapsed ? (
+            <>
+              <button onClick={() => setActiveNav('map')} className={`flex items-center justify-center h-9 w-9 mx-auto rounded-lg transition-colors ${activeNav === 'map' ? 'text-[#D76B3D] bg-[#D76B3D]/10' : 'text-zinc-500 hover:text-white'}`} title="Map"><MapIcon /></button>
+              <button onClick={() => setActiveNav('reports')} className={`flex items-center justify-center h-9 w-9 mx-auto rounded-lg transition-colors ${activeNav === 'reports' ? 'text-[#D76B3D] bg-[#D76B3D]/10' : 'text-zinc-500 hover:text-white'}`} title="Case Studies"><ReportsIcon /></button>
+            </>
+          ) : (
+            <>
+              <NavItem icon={<MapIcon />} label="Map" active={activeNav === 'map'} onClick={() => setActiveNav('map')} />
+              <NavItem icon={<ReportsIcon />} label="Case Studies" active={activeNav === 'reports'} onClick={() => setActiveNav('reports')} />
+            </>
+          )}
+        </nav>
+
+        {/* Active market badge — hidden when collapsed */}
+        {!sidebarCollapsed && (result || cityZips) && (
+          <div className="px-3 py-3 border-t border-white/8">
+            <div
+              className="bg-white/5 border border-white/8 rounded-lg p-3 cursor-pointer hover:border-[#D76B3D]/30 transition-colors"
+              onClick={() => setPanelOpen(!panelOpen)}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-[9px] text-zinc-500 uppercase tracking-widest">Active Market</p>
+                <ChevronRight />
+              </div>
+              {result ? (
+                <>
+                  <p className="text-white text-sm font-semibold">{result.zillow?.city ?? result.zip}</p>
+                  <p className="text-zinc-500 text-[10px]">{result.zip} · {result.geo?.state}</p>
+                </>
+              ) : cityZips ? (
+                <>
+                  <p className="text-white text-sm font-semibold">{cityZips[0]?.city}</p>
+                  <p className="text-zinc-500 text-[10px]">{cityZips.length} ZIPs · {cityZips[0]?.state}</p>
+                </>
+              ) : null}
+            </div>
+          </div>
+        )}
+      </aside>
 
       {/* ── Map ── */}
       <div className="flex-1 relative overflow-hidden">
@@ -783,62 +936,43 @@ export default function Home() {
           onLayersChange={handleMapLayersChange}
         />
 
-        {/* Bottom stats bar */}
+        {/* Floating stats bubble */}
         {(result || aggregateData) && (
-          <div className="absolute bottom-0 left-0 right-0 z-30 bg-black/85 backdrop-blur-sm border-t border-white/8 flex items-center h-[60px] px-3 overflow-x-auto">
-            {result ? (<>
-            <BottomStat label="Market Status" value={marketStatus ?? '—'} sub={marketStatus === 'Active' ? '● Live' : marketStatus === 'Moderate' ? '● Moderate' : null} accent={marketStatus === 'Active' ? 'green' : null} />
-            <BottomStat label="Median Rent" value={fmtMoney(result.zillow?.zori_latest)} sub={zoriGrowth ? `▲ ${zoriGrowth} YoY` : null} accent={result.zillow?.zori_growth_12m != null && result.zillow.zori_growth_12m > 0 ? 'green' : null} metricKey="zori" />
-            <BottomStat label="Home Value" value={fmtMoney(result.zillow?.zhvi_latest)} sub={fmtGrowth(result.zillow?.zhvi_growth_12m) ?? undefined} metricKey="zhvi" />
-            <BottomStat label="Active Listings" value={fmtNum(result.metro_velocity?.inventory_latest)} sub={result.metro_velocity?.region_name ?? undefined} metricKey="inventory" />
-            <BottomStat label="Days to Pending" value={fmtNum(result.metro_velocity?.doz_pending_latest, ' days')} metricKey="dozPending" />
-            <BottomStat label="Price Cuts" value={fmtNum(result.metro_velocity?.price_cut_pct_latest, '%')} sub="of listings" metricKey="priceCuts" />
-            {transit && <BottomStat label="Transit Stops" value={transit.stop_count.toLocaleString()} sub="nearby" metricKey="transit" />}
-            {trends && (
-              <BottomStat
-                label="Search interest"
-                metricKey="trends"
-                value={trends.latest_score != null ? `${trends.latest_score} / 100` : '—'}
-                sub={
-                  trends.error
-                    ? trends.error
-                    : [trends.is_fallback ? 'State-level keyword' : 'Local keyword', trends.keyword_scope].filter(Boolean).join(' · ')
-                }
-              />
-            )}
-            </>) : aggregateData ? (<>
-            <BottomStat label="ZIP Codes" value={aggregateData.zip_count.toString()} sub={aggregateData.label} />
-            <BottomStat label="Avg Rent (ZORI)" value={fmtMoney(aggregateData.zillow.avg_zori)} sub={aggregateData.zillow.zori_growth_12m != null ? `▲ ${fmtGrowth(aggregateData.zillow.zori_growth_12m)} YoY` : null} accent="green" metricKey="zori" />
-            <BottomStat label="Avg Home Value" value={fmtMoney(aggregateData.zillow.avg_zhvi)} sub={fmtGrowth(aggregateData.zillow.zhvi_growth_12m) ?? undefined} metricKey="zhvi" />
-            <BottomStat label="Population" value={fmtNum(aggregateData.total_population)} metricKey="population" />
-            <BottomStat label="Vacancy Rate" value={fmtNum(aggregateData.housing.vacancy_rate, '%')} metricKey="vacancy" />
-            <BottomStat label="Active Listings" value={fmtNum(aggregateData.metro_velocity?.inventory_latest)} sub={aggregateData.metro_velocity?.region_name ?? undefined} metricKey="inventory" />
-            <BottomStat label="Days to Pending" value={fmtNum(aggregateData.metro_velocity?.doz_pending_latest, ' days')} metricKey="dozPending" />
-            {trends && (
-              <BottomStat
-                label="Search interest"
-                metricKey="trends"
-                value={trends.latest_score != null ? `${trends.latest_score} / 100` : '—'}
-                sub={
-                  trends.error
-                    ? trends.error
-                    : [
-                        aggregateData.metro_velocity?.region_name
-                          ? `Metro: ${aggregateData.metro_velocity.region_name}`
-                          : null,
-                        trends.keyword_scope,
-                      ]
-                        .filter(Boolean)
-                        .join(' · ') || undefined
-                }
-              />
-            )}
-            </>) : null}
-            <div className="ml-auto pl-4 flex-shrink-0">
-              <button onClick={() => setPanelOpen(!panelOpen)} className="text-xs text-[#D76B3D] border border-[#D76B3D]/30 bg-[#D76B3D]/10 hover:bg-[#D76B3D]/20 px-3 py-1.5 rounded-md transition-colors whitespace-nowrap">
-                {panelOpen ? 'Hide Panel' : 'Show Data'}
-              </button>
+          <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30 flex items-center gap-0 rounded-2xl overflow-hidden shadow-2xl"
+            style={{ background: 'rgba(8,8,8,0.88)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.08)', maxWidth: 'calc(100vw - 120px)' }}>
+            <div className="flex items-center overflow-x-auto scrollbar-none px-1">
+              {result ? (<>
+                <BubbleStat label="Rent" value={fmtMoney(result.zillow?.zori_latest)} sub={zoriGrowth ? `${zoriGrowth} YoY` : null} accent={result.zillow?.zori_growth_12m != null && result.zillow.zori_growth_12m > 0 ? 'green' : null} />
+                <BubbleDivider />
+                <BubbleStat label="Home Value" value={fmtMoney(result.zillow?.zhvi_latest)} sub={fmtGrowth(result.zillow?.zhvi_growth_12m) ?? null} />
+                <BubbleDivider />
+                <BubbleStat label="Listings" value={fmtNum(result.metro_velocity?.inventory_latest)} sub={result.metro_velocity?.region_name ?? null} />
+                <BubbleDivider />
+                <BubbleStat label="Days Pending" value={fmtNum(result.metro_velocity?.doz_pending_latest, 'd')} />
+                <BubbleDivider />
+                <BubbleStat label="Price Cuts" value={fmtNum(result.metro_velocity?.price_cut_pct_latest, '%')} />
+                {transit && <><BubbleDivider /><BubbleStat label="Transit" value={transit.stop_count.toLocaleString()} sub="stops" /></>}
+                {trends?.latest_score != null && <><BubbleDivider /><BubbleStat label="Interest" value={`${trends.latest_score}/100`} /></>}
+              </>) : aggregateData ? (<>
+                <BubbleStat label="ZIPs" value={aggregateData.zip_count.toString()} sub={aggregateData.label} />
+                <BubbleDivider />
+                <BubbleStat label="Avg Rent" value={fmtMoney(aggregateData.zillow.avg_zori)} sub={aggregateData.zillow.zori_growth_12m != null ? `${fmtGrowth(aggregateData.zillow.zori_growth_12m)} YoY` : null} accent="green" />
+                <BubbleDivider />
+                <BubbleStat label="Home Value" value={fmtMoney(aggregateData.zillow.avg_zhvi)} />
+                <BubbleDivider />
+                <BubbleStat label="Population" value={fmtNum(aggregateData.total_population)} />
+                <BubbleDivider />
+                <BubbleStat label="Vacancy" value={fmtNum(aggregateData.housing.vacancy_rate, '%')} />
+                <BubbleDivider />
+                <BubbleStat label="Days Pending" value={fmtNum(aggregateData.metro_velocity?.doz_pending_latest, 'd')} />
+              </>) : null}
             </div>
+            <button
+              onClick={() => setPanelOpen(!panelOpen)}
+              className="flex-shrink-0 px-3 py-2 text-[11px] font-semibold text-[#D76B3D] hover:text-white transition-colors border-l border-white/8 whitespace-nowrap"
+            >
+              {panelOpen ? '✕' : '↗'}
+            </button>
           </div>
         )}
 
@@ -848,7 +982,7 @@ export default function Home() {
           onAction={handleAgentAction}
           isOpen={agentOpen}
           onToggle={() => setAgentOpen(!agentOpen)}
-          hasStatsBar={!!(result || aggregateData)}
+          hasStatsBar={false}
         />
       </div>
 
@@ -1025,18 +1159,48 @@ export default function Home() {
         {result && panelOpen && (
           <div className="p-4 min-w-[300px]">
             {/* Header */}
-            <div className="flex items-start justify-between mb-5">
+            <div className="flex items-start justify-between mb-3">
               <div>
                 <h2 className="text-white font-bold text-base leading-tight">{result.zillow?.city ?? result.zip}</h2>
                 <p className="text-zinc-500 text-xs mt-0.5">{result.zillow?.metro_name ?? ''} · {result.zip}</p>
               </div>
               <button onClick={() => setPanelOpen(false)} className="text-zinc-600 hover:text-white text-xl leading-none mt-0.5">×</button>
             </div>
+            {/* Tab bar */}
+            <div className="flex rounded-lg overflow-hidden border border-white/8 mb-4">
+              {(['data', 'table'] as const).map((t) => (
+                <button key={t} onClick={() => setPanelTab(t)}
+                  className={`flex-1 py-1.5 text-[10px] font-medium transition-all capitalize ${panelTab === t ? 'bg-[#D76B3D]/20 text-[#D76B3D]' : 'text-zinc-500 hover:text-zinc-300'}`}>
+                  {t === 'data' ? 'Overview' : 'All Data'}
+                </button>
+              ))}
+            </div>
 
-            <MomentumExplainBlock anchorZip={/^\d{5}$/.test(result.zip) ? result.zip : null} aggregateZips={null} />
+            {panelTab === 'table' && (
+              <div className="space-y-0">
+                <p className="text-[9px] uppercase tracking-widest text-zinc-500 mb-2 pb-1.5 border-b border-white/5">All Metrics</p>
+                {result.zillow && <>
+                  <MetricRow label="Median Rent (ZORI)" value={fmtMoney(result.zillow.zori_latest)} sub={zoriGrowth ?? undefined} />
+                  <MetricRow label="Home Value (ZHVI)" value={fmtMoney(result.zillow.zhvi_latest)} sub={fmtGrowth(result.zillow.zhvi_growth_12m) ?? undefined} />
+                  <MetricRow label="1yr Forecast" value={result.zillow.zhvf_growth_1yr != null && Math.abs(result.zillow.zhvf_growth_1yr) < 50 ? fmtNum(result.zillow.zhvf_growth_1yr, '%') : '—'} />
+                </>}
+                {result.metro_velocity && <>
+                  <MetricRow label="Days to Pending" value={fmtNum(result.metro_velocity.doz_pending_latest, ' days')} />
+                  <MetricRow label="Price Cuts" value={fmtNum(result.metro_velocity.price_cut_pct_latest, '%')} sub="of listings" />
+                  <MetricRow label="Active Inventory" value={fmtNum(result.metro_velocity.inventory_latest)} sub={result.metro_velocity.region_name} />
+                </>}
+                {tabularRows.map((r) => (
+                  <MetricRow key={r.metric_name} label={r.metric_name} value={formatMetricValue(r.metric_name, r.metric_value)} sub={r.data_source} />
+                ))}
+                {transit && <MetricRow label="Transit Stops" value={transit.stop_count.toLocaleString()} sub="nearby stops" />}
+                {trends?.latest_score != null && <MetricRow label="Search Interest" value={`${trends.latest_score} / 100`} sub={trends.is_fallback ? 'state-level' : 'local'} />}
+              </div>
+            )}
+            {panelTab === 'data' && <>            <MomentumExplainBlock anchorZip={/^\d{5}$/.test(result.zip) ? result.zip : null} aggregateZips={null} />
             {cycleData && (
               <CycleExplainCard marketLabel={result.zillow?.city ?? result.zip} cycle={cycleData} />
             )}
+
 
             {/* Zillow pricing */}
             {result.zillow && (
@@ -1181,6 +1345,11 @@ export default function Home() {
               />
             </PanelSection>
 
+            {/* Agentic Normalizer */}
+            <PanelSection title="Agentic Normalizer">
+              <AgenticNormalizer currentZip={result.zip} onIngested={handleNormalizerIngested} />
+            </PanelSection>
+            </>}
           </div>
         )}
       </aside>

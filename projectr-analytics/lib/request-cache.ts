@@ -2,7 +2,7 @@ const inFlight = new Map<string, Promise<unknown>>()
 const responseCache = new Map<string, { expiresAt: number; data: unknown }>()
 
 const DEFAULT_TTL_MS = 5 * 60 * 1000
-const MAX_CACHE_ENTRIES = 40
+const MAX_CACHE_ENTRIES = 100
 const PERF_DEBUG = process.env.NEXT_PUBLIC_PERF_DEBUG === '1'
 
 interface DedupedFetchOptions {

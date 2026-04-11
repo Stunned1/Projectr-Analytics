@@ -3,7 +3,7 @@
 import { memo, useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { APIProvider, Map, useMap } from '@vis.gl/react-google-maps'
 import { GoogleMapsOverlay } from '@deck.gl/google-maps'
-import { GeoJsonLayer, ScatterplotLayer, ColumnLayer } from '@deck.gl/layers'
+import { GeoJsonLayer, ScatterplotLayer, ColumnLayer, PathLayer } from '@deck.gl/layers'
 import { HeatmapLayer } from '@deck.gl/aggregation-layers'
 import type { Layer, PickingInfo } from '@deck.gl/core'
 import type { GeoJSON, Feature, FeatureCollection, Geometry } from 'geojson'
@@ -27,15 +27,29 @@ interface MarketData {
 interface TransitStop {
   position: [number, number]
   name: string
+  stopType: string
+}
+
+interface TransitRoute {
+  id: string
+  name: string
+  long_name?: string
+  type: string
+  route_type?: number
+  color: [number, number, number]
+  paths: [number, number][][]  // multiple segments per route
 }
 
 interface TransitData {
   zip: string
+  stop_count?: number
+  routes?: TransitRoute[]
   geojson: {
     features: Array<{
       geometry: { coordinates: [number, number] }
-      properties: { stop_name: string }
+      properties: { stop_name: string; stop_type?: string }
     }>
+    routes?: TransitRoute[]
   }
 }
 
@@ -69,6 +83,17 @@ interface BlockGroupCollection {
   features: BlockGroupFeature[]
 }
 
+interface POIPoint {
+  id: string
+  position: [number, number]
+  name: string
+  category: string
+  group: string
+  isAnchor: boolean
+  address: string
+  color: [number, number, number]
+}
+
 interface AmenityPoint {
   position: [number, number]
   weight: number
@@ -97,12 +122,14 @@ export interface LayerState {
   zipBoundary: boolean
   transitStops: boolean
   rentChoropleth: boolean
-  blockGroups: boolean
+  blockGroups: boolean  // kept for PDF report compatibility, not shown in UI
   parcels: boolean
   tracts: boolean
   amenityHeatmap: boolean
   floodRisk: boolean
   nycPermits: boolean
+  pois: boolean
+  momentum: boolean
   clientData: boolean
 }
 
@@ -139,6 +166,16 @@ interface ParcelPayload {
   land_use_label: string
   address: string
   assessed_value: number
+  lot_area: number
+  built_far: number
+  max_allowed_far: number
+  air_rights_sqft: number
+  far_utilization: number | null
+  zone_dist: string | null
+  bldg_class: string | null
+  units_res: number
+  units_total: number
+  year_built: number | null
 }
 
 interface PermitHeatPoint {
@@ -155,7 +192,7 @@ interface PermitResponse {
 
 interface ParcelResponse {
   parcels?: ParcelPayload[]
-  stats?: { p25_per_sqft: number; p75_per_sqft: number }
+  stats?: { p25_per_sqft: number; p75_per_sqft: number; p75_air_rights: number; max_air_rights: number; underbuilt_count: number; top_underbuilt: unknown[] }
 }
 
 function hasFeatures(value: unknown): value is { features: unknown[] } {
@@ -187,7 +224,7 @@ const DATA_LAYER_REGISTRY = [
 ]
 
 // Reuse expensive county blockgroup responses across CommandMap remounts.
-const BLOCKGROUP_CACHE = new globalThis.Map<string, BlockGroupCollection>()
+const BLOCKGROUP_CACHE: Record<string, BlockGroupCollection> = {}
 let commandMapRenderCounter = 0
 
 // ── Color scale: blue (low rent) → red (high rent) ───────────────────────────
@@ -292,28 +329,14 @@ function DeckGlOverlay({ layers }: { layers: Layer[] }) {
 
 // ── Zoom + bounds tracker ─────────────────────────────────────────────────────
 
-function ZoomTracker({ onZoomChange }: { onZoomChange: (zoom: number, bounds: { minLat: number; maxLat: number; minLng: number; maxLng: number } | null) => void }) {
+function ZoomTracker({ onZoomChange }: { onZoomChange: (zoom: number) => void }) {
   const map = useMap()
   useEffect(() => {
     if (!map) return
-    const update = () => {
-      const zoom = map.getZoom() ?? 11
-      const b = map.getBounds()
-      const bounds = b ? {
-        minLat: b.getSouthWest().lat(),
-        maxLat: b.getNorthEast().lat(),
-        minLng: b.getSouthWest().lng(),
-        maxLng: b.getNorthEast().lng(),
-      } : null
-      onZoomChange(zoom, bounds)
-    }
+    const update = () => { onZoomChange(map.getZoom() ?? 11) }
     const zoomListener = map.addListener('zoom_changed', update)
-    const idleListener = map.addListener('idle', update)
     update()
-    return () => {
-      google.maps.event.removeListener(zoomListener)
-      google.maps.event.removeListener(idleListener)
-    }
+    return () => { google.maps.event.removeListener(zoomListener) }
   }, [map, onZoomChange])
   return null
 }
@@ -370,18 +393,18 @@ function CommandMap({
   const [neighborBoundaries, setNeighborBoundaries] = useState<ZipBoundary[]>([])
   const [cityBoundaries, setCityBoundaries] = useState<ZipBoundary[]>([])
   const [blockGroupData, setBlockGroupData] = useState<BlockGroupCollection | null>(null)
-  const [parcelData, setParcelData] = useState<{ parcels: ParcelPayload[]; stats: { p25_per_sqft: number; p75_per_sqft: number } } | null>(null)
+  const [parcelData, setParcelData] = useState<{ parcels: ParcelPayload[]; stats: { p25_per_sqft: number; p75_per_sqft: number; p75_air_rights: number; max_air_rights: number; underbuilt_count: number; top_underbuilt: unknown[] } } | null>(null)
   const [tractData, setTractData] = useState<TractCollection | null>(null)
   const [amenityPoints, setAmenityPoints] = useState<AmenityPoint[]>([])
+  const [poiPoints, setPoiPoints] = useState<POIPoint[]>([])
+  const [momentumScores, setMomentumScores] = useState<Record<string, number>>({})
   const [floodData, setFloodData] = useState<FloodCollection | null>(null)
   const [nycPermitData, setNycPermitData] = useState<PermitPayload[]>([])
   const [permitHeatPoints, setPermitHeatPoints] = useState<PermitHeatPoint[]>([])
-  const [permitMode, setPermitMode] = useState<'heatmap' | 'scatter'>('heatmap')
-  const [permitTypeFilter, setPermitTypeFilter] = useState<'all' | 'NB' | 'A1' | 'DM'>('all')
+  // Multi-select type filter — Set of active types, empty = all
+  const [permitTypeFilter, setPermitTypeFilter] = useState<Set<string>>(new Set())
   const [mapZoom, setMapZoom] = useState(11)
-  const [mapBounds, setMapBounds] = useState<{ minLat: number; maxLat: number; minLng: number; maxLng: number } | null>(null)
-  const permitFetchRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const lastPermitFetchKey = useRef<string>('')
+  const handleZoomChange = useCallback((zoom: number) => { setMapZoom(zoom) }, [])
   const [selectedPermit, setSelectedPermit] = useState<PermitPayload | null>(null)
   const [layers, setLayers] = useState<LayerState>({
     zipBoundary: false,
@@ -393,10 +416,13 @@ function CommandMap({
     amenityHeatmap: false,
     floodRisk: false,
     nycPermits: false,
-    clientData: false,
+    pois: false,
+    momentum: false,
+    clientData: true,
   })
   const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null)
   const [activeMetric, setActiveMetric] = useState<'zori' | 'zhvi'>('zori')
+  const [parcelColorMode, setParcelColorMode] = useState<'landuse' | 'airRights'>('landuse')
   const [tilt, setTilt] = useState(0)
   const [heading, setHeading] = useState(0)
   const mapId = process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID ?? process.env.NEXT_PUBLIC_GOOGLE_MAPS_ID ?? undefined
@@ -418,52 +444,34 @@ function CommandMap({
     console.log('[perf] CommandMap render #', commandMapRenderCounter)
   })
 
-  // Zoom-based permit refetch — debounced, only when permits layer is on
-  const handleZoomChange = useCallback((zoom: number, bounds: typeof mapBounds) => {
-    setMapZoom(zoom)
-    setMapBounds(bounds)
-  }, [])
-
+  // Fetch momentum scores when layer is toggled on and we have ZIPs loaded
   useEffect(() => {
-    if (!layers.nycPermits && !agentLayerOverrides?.nycPermits) return
-    // Determine borough or zip context
-    const boroughCtx = (() => {
-      if (!cityZips?.length) return null
-      if (cityZips.every((z) => z.zip >= '10001' && z.zip <= '10282')) return 'MANHATTAN'
-      if (cityZips.every((z) => z.zip >= '10451' && z.zip <= '10475')) return 'BRONX'
-      if (cityZips.every((z) => z.zip >= '11200' && z.zip <= '11256')) return 'BROOKLYN'
-      if (cityZips.every((z) => z.zip >= '11100' && z.zip <= '11436')) return 'QUEENS'
-      if (cityZips.every((z) => z.zip >= '10300' && z.zip <= '10315')) return 'STATEN ISLAND'
-      return null
-    })()
-    const zipCtx = zip ?? null
-    if (!boroughCtx && !zipCtx && !mapBounds) return
+    const isOn = (layers.momentum || agentLayerOverrides?.momentum)
+    if (!isOn) return
 
-    const types = permitTypeFilter === 'all' ? 'NB,A1,DM' : permitTypeFilter
-    const fetchKey = `${mapZoom}|${boroughCtx}|${zipCtx}|${types}|${mapZoom >= 16 ? JSON.stringify(mapBounds) : ''}`
-    if (fetchKey === lastPermitFetchKey.current) return
-    lastPermitFetchKey.current = fetchKey
+    const allZips = [
+      ...(cityZips?.map((z) => z.zip) ?? []),
+      ...(zip ? [zip] : []),
+      ...neighborBoundaries.map((n) => n.zip),
+    ].filter(Boolean)
 
-    if (permitFetchRef.current) clearTimeout(permitFetchRef.current)
-    permitFetchRef.current = setTimeout(async () => {
-      try {
-        let url = `/api/permits?zoom=${mapZoom}&types=${types}`
-        if (boroughCtx) url += `&borough=${boroughCtx}`
-        else if (zipCtx) url += `&zip=${zipCtx}`
-        if (mapZoom >= 16 && mapBounds) {
-          url += `&minLat=${mapBounds.minLat}&maxLat=${mapBounds.maxLat}&minLng=${mapBounds.minLng}&maxLng=${mapBounds.maxLng}`
+    if (!allZips.length) return
+
+    fetch('/api/momentum', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ zips: allZips }),
+    })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.scores) {
+          const scoreMap: Record<string, number> = {}
+          for (const s of d.scores) scoreMap[s.zip] = s.score
+          setMomentumScores(scoreMap)
         }
-        const d = await fetch(url).then((r) => r.json()) as PermitResponse
-        if (d.mode === 'heatmap' && d.points) {
-          setPermitHeatPoints(d.points)
-          setPermitMode('heatmap')
-        } else if (d.permits) {
-          setNycPermitData(d.permits)
-          setPermitMode('scatter')
-        }
-      } catch { /* non-critical */ }
-    }, 400)
-  }, [mapZoom, mapBounds, layers, agentLayerOverrides, zip, cityZips, permitTypeFilter])
+      })
+      .catch(() => {})
+  }, [layers.momentum, agentLayerOverrides, zip, cityZips, neighborBoundaries])
 
   // Fetch city ZIP boundaries when city search is performed
   useEffect(() => {
@@ -504,20 +512,51 @@ function CommandMap({
         })
         .catch(() => {})
 
-      // Fetch permits for this borough
-      const boroughParam = detectedBorough.charAt(0).toUpperCase() + detectedBorough.slice(1).toLowerCase()
-      dedupedFetchJson<PermitResponse>(`/api/permits?borough=${boroughParam.toUpperCase()}&zoom=11`)
+      // Fetch permits for this borough — load full scatter data upfront, derive heatmap client-side
+      const boroughParam = detectedBorough.toUpperCase().replace(' ', '+')
+      dedupedFetchJson<PermitResponse>(`/api/permits?borough=${encodeURIComponent(detectedBorough.toUpperCase())}&zoom=14`)
         .then((d) => {
-          if (d.mode === 'heatmap' && d.points) { setPermitHeatPoints(d.points); setPermitMode('heatmap') }
-          else if (d.permits) { setNycPermitData(d.permits); setPermitMode('scatter') }
+          if (d.permits) {
+            setNycPermitData(d.permits)
+            // Build heatmap points client-side from the same data
+            setPermitHeatPoints(d.permits.map((p) => ({
+              position: [p.lng, p.lat] as [number, number],
+              weight: p.job_type === 'NB' ? 3 : p.job_type === 'A1' ? 2 : 1,
+            })))
+          }
         })
+        .catch(() => {})
+      void boroughParam
+    }
+
+    // Fetch tracts for NYC boroughs using known county FIPS
+    const boroughFips: Record<string, { state: string; county: string }> = {
+      manhattan: { state: '36', county: '061' },
+      bronx: { state: '36', county: '005' },
+      brooklyn: { state: '36', county: '047' },
+      queens: { state: '36', county: '081' },
+      'staten island': { state: '36', county: '085' },
+    }
+    if (detectedBorough && boroughFips[detectedBorough]) {
+      const { state, county } = boroughFips[detectedBorough]
+      dedupedFetchJson<TractCollection>(`/api/tracts?state=${state}&county=${county}`)
+        .then((d) => { if (d.features) setTractData(d) })
         .catch(() => {})
     }
 
-    // Pan map to first ZIP centroid
+    // Fetch amenity/POI/flood data using centroid of first ZIP with coordinates
     const first = cityZips.find((z) => z.lat && z.lng)
     if (first?.lat && first?.lng) {
-      // Will be handled by MapFitter via primaryBoundary
+      const { lat: cLat, lng: cLng } = first
+      dedupedFetchJson<{ points?: AmenityPoint[] }>(`/api/amenities?lat=${cLat}&lng=${cLng}&radius=0.12`)
+        .then((d) => { if (d.points) setAmenityPoints(d.points) })
+        .catch(() => {})
+      dedupedFetchJson<{ points?: POIPoint[] }>(`/api/pois?lat=${cLat}&lng=${cLng}&radius=3000`)
+        .then((d) => { if (d.points) setPoiPoints(d.points) })
+        .catch(() => {})
+      dedupedFetchJson<FloodCollection>(`/api/floodrisk?lat=${cLat}&lng=${cLng}&radius=0.12`)
+        .then((d) => { if (d.features) setFloodData(d) })
+        .catch(() => {})
     }
 
     // Fetch boundaries for all city ZIPs in parallel (limit 30)
@@ -579,18 +618,16 @@ function CommandMap({
     // Block groups — need state + county FIPS
     if (stateFips && countyFips && countyFips !== '000') {
       const countyKey = `${stateFips}-${countyFips}`
-      const cached = BLOCKGROUP_CACHE.get(countyKey)
-      const blockgroupsPromise = cached
+      const cached = BLOCKGROUP_CACHE[countyKey]
+      const blockgroupsPromise: Promise<BlockGroupCollection> = cached
         ? Promise.resolve(cached)
-        : dedupedFetchJson<BlockGroupCollection>(`/api/blockgroups?state=${stateFips}&county=${countyFips}`, {
-          cacheKey: `blockgroups:${countyKey}`,
-          ttlMs: 30 * 60 * 1000,
-        })
+        : fetch(`/api/blockgroups?state=${stateFips}&county=${countyFips}`)
+            .then((r) => r.json())
 
       blockgroupsPromise
         .then((d) => {
           if (d.features?.length) {
-            BLOCKGROUP_CACHE.set(countyKey, d)
+            BLOCKGROUP_CACHE[countyKey] = d
             setBlockGroupData(d)
           }
         })
@@ -607,25 +644,36 @@ function CommandMap({
         })
         .catch(() => {})
 
-      // Fetch permits for this ZIP
-      dedupedFetchJson<PermitResponse>(`/api/permits?zip=${marketData.zip}&zoom=13`)
+      // Fetch permits for this ZIP — load upfront, derive heatmap client-side
+      dedupedFetchJson<PermitResponse>(`/api/permits?zip=${marketData.zip}&zoom=14`)
         .then((d) => {
-          if (d.mode === 'heatmap' && d.points) { setPermitHeatPoints(d.points); setPermitMode('heatmap') }
-          else if (d.permits) { setNycPermitData(d.permits); setPermitMode('scatter') }
+          if (d.permits) {
+            setNycPermitData(d.permits)
+            setPermitHeatPoints(d.permits.map((p) => ({
+              position: [p.lng, p.lat] as [number, number],
+              weight: p.job_type === 'NB' ? 3 : p.job_type === 'A1' ? 2 : 1,
+            })))
+          }
         })
         .catch(() => {})
     }
 
     // Census Tracts with rent/income data
     if (stateFips && countyFips && countyFips !== '000') {
-      dedupedFetchJson<TractCollection>(`/api/tracts?state=${stateFips}&county=${countyFips}`)
-        .then((d) => { if (d.features) setTractData(d) })
+      fetch(`/api/tracts?state=${stateFips}&county=${countyFips}`)
+        .then((r) => r.json())
+        .then((d: TractCollection) => { if (d.features) setTractData(d) })
         .catch(() => {})
     }
 
     // OSM Amenity heatmap points
     dedupedFetchJson<{ points?: AmenityPoint[] }>(`/api/amenities?lat=${lat}&lng=${lng}&radius=0.06`)
       .then((d) => { if (d.points) setAmenityPoints(d.points) })
+      .catch(() => {})
+
+    // Overture Maps POIs — neighborhood signals + anchor tenants
+    dedupedFetchJson<{ points?: POIPoint[] }>(`/api/pois?lat=${lat}&lng=${lng}&radius=1500`)
+      .then((d) => { if (d.points) setPoiPoints(d.points) })
       .catch(() => {})
 
     // FEMA Flood Risk zones
@@ -635,13 +683,18 @@ function CommandMap({
   }, [marketData])
 
   const transitStops = useMemo(() => {
-    if (!zip || !transitData || transitData.zip !== zip) return []
-    if (!transitData.geojson?.features) return []
+    if (!transitData?.geojson?.features) return []
     return transitData.geojson.features.map((f) => ({
       position: f.geometry.coordinates as [number, number],
       name: f.properties.stop_name,
+      stopType: f.properties.stop_type ?? 'bus',
     }))
-  }, [zip, transitData])
+  }, [transitData])
+
+  const transitRoutes = useMemo(() => {
+    if (!transitData) return []
+    return transitData.routes ?? transitData.geojson?.routes ?? []
+  }, [transitData])
 
   // Merge agent layer overrides into local layer state
   const effectiveLayers = useMemo(() => ({
@@ -726,6 +779,48 @@ function CommandMap({
       )
     }
 
+    // Momentum choropleth — overlays ZIP boundaries with score-based color
+    if (effectiveLayers.momentum && Object.keys(momentumScores).length > 0) {
+      const allBoundaries = [
+        ...(primaryBoundary ? [{ zip: zip ?? '', geojson: primaryBoundary }] : []),
+        ...neighborBoundaries.map((n) => ({ zip: n.zip, geojson: n.geojson })),
+        ...cityBoundaries.map((n) => ({ zip: n.zip, geojson: n.geojson })),
+      ]
+      allBoundaries.forEach(({ zip: z, geojson }) => {
+        const score = momentumScores[z] ?? null
+        if (!geojson) return
+        result.push(
+          new GeoJsonLayer({
+            id: `momentum-${z}`,
+            data: geojson,
+            stroked: true,
+            filled: true,
+            getFillColor: () => {
+              if (score === null) return [80, 80, 100, 40]
+              const t = score / 100
+              return [Math.round(80 + t * 135), Math.round(40 + t * 67), Math.round(160 - t * 99), 150]
+            },
+            getLineColor: () => {
+              if (score === null) return [100, 100, 120, 80]
+              const t = score / 100
+              return [Math.round(80 + t * 135), Math.round(40 + t * 67), Math.round(160 - t * 99), 220]
+            },
+            lineWidthMinPixels: 2,
+            pickable: true,
+            onHover: (info: PickingInfo) => {
+              if (info.object) {
+                const label = score === null ? 'No data'
+                  : score >= 65 ? `Strong (${score})`
+                  : score >= 35 ? `Moderate (${score})`
+                  : `Weak (${score})`
+                setTooltipStable({ x: info.x, y: info.y, text: `ZIP ${z} · Momentum: ${label}` })
+              } else setTooltipStable(null)
+            },
+          })
+        )
+      })
+    }
+
     // Neighbor ZIP boundaries (rendered first, behind primary)
     if (effectiveLayers.zipBoundary && neighborBoundaries.length > 0) {
       neighborBoundaries.forEach((n) => {
@@ -761,7 +856,7 @@ function CommandMap({
           id: 'zip-primary',
           data: primaryBoundary,
           stroked: true,
-          filled: !effectiveLayers.blockGroups, // no fill when block groups are showing
+          filled: true,
           getFillColor: effectiveLayers.rentChoropleth ? colorScale(primaryMetricValue) : [255, 255, 255, 30],
           getLineColor: [255, 255, 255, 255],
           lineWidthMinPixels: 3,
@@ -778,65 +873,86 @@ function CommandMap({
       )
     }
 
-    // Transit stops
+    // Transit routes — PathLayer for subway/rail/bus lines with brand colors
+    if (effectiveLayers.transitStops && transitRoutes.length > 0) {
+      const segments = transitRoutes.flatMap((r: TransitRoute) => {
+        const pathList = r.paths ?? []
+        return pathList.map((path: [number, number][]) => ({ path, route: r }))
+      })
+
+      if (segments.length > 0) {
+        result.push(
+          new PathLayer({
+            id: 'transit-routes',
+            data: segments,
+            getPath: (d) => d.path,
+            getColor: (d) => {
+              const c = d.route.color
+              if (c) return [...c, 220] as [number, number, number, number]
+              // fallback by type
+              switch (d.route.type) {
+                case 'subway': return [250, 200, 50, 220]
+                case 'rail':   return [160, 220, 255, 200]
+                case 'tram':   return [180, 255, 180, 200]
+                case 'ferry':  return [100, 200, 255, 200]
+                default:       return [180, 180, 220, 140]
+              }
+            },
+            getWidth: (d) => {
+              switch (d.route.type) {
+                case 'subway': return 5
+                case 'rail':   return 4
+                case 'bus':    return 2
+                default:       return 3
+              }
+            },
+            widthUnits: 'pixels',
+            widthMinPixels: 1,
+            pickable: true,
+            onHover: (info: PickingInfo) => {
+              const d = info.object as typeof segments[0] | undefined
+              if (d) setTooltipStable({ x: info.x, y: info.y, text: `${d.route.type.charAt(0).toUpperCase() + d.route.type.slice(1)} ${d.route.name}${d.route.long_name ? ' · ' + d.route.long_name : ''}` })
+              else setTooltipStable(null)
+            },
+          })
+        )
+      }
+    }
+
+    // Transit stops — colored by type
     if (effectiveLayers.transitStops && transitStops.length > 0) {
       result.push(
         new ScatterplotLayer({
           id: 'transit-stops',
-          data: transitStops,
-          getPosition: (d: TransitStop) => d.position,
-          getRadius: 35,
-          getFillColor: [0, 210, 255, 200],
+          data: transitStops as TransitStop[],
+          getPosition: (d) => d.position,
+          getRadius: (d) => d.stopType === 'subway' || d.stopType === 'rail' ? 6 : 4,
+          getFillColor: (d) => {
+            switch (d.stopType) {
+              case 'subway': return [250, 200, 50, 240]
+              case 'rail':   return [160, 220, 255, 230]
+              case 'tram':   return [180, 255, 180, 220]
+              case 'ferry':  return [100, 200, 255, 220]
+              default:       return [200, 200, 220, 200]
+            }
+          },
+          getLineColor: [0, 0, 0, 80],
+          lineWidthMinPixels: 1,
+          stroked: true,
+          radiusUnits: 'pixels',
           pickable: true,
           onHover: (info: PickingInfo) => {
-            const d = info.object as TransitStop | undefined
-            if (d) setTooltipStable({ x: info.x, y: info.y, text: '\uD83D\uDE8C ' + d.name })
+            const d = info.object as typeof transitStops[0] | undefined
+            if (d) setTooltipStable({ x: info.x, y: info.y, text: d.name })
             else setTooltipStable(null)
           },
         })
       )
     }
 
-    // Block groups — sub-ZIP population density choropleth
-    if (effectiveLayers.blockGroups && blockGroupData) {
-      const bgFeatures = blockGroupData.features ?? []
-      const pops = bgFeatures.map((f) => f.properties.population).filter((p) => p > 0)
-      const minPop = pops.length ? Math.min(...pops) : 0
-      const maxPop = pops.length ? Math.max(...pops) : 1
 
-      result.push(
-        new GeoJsonLayer({
-          id: 'block-groups',
-          data: blockGroupData as unknown as GeoJSON,
-          stroked: true,
-          filled: true,
-          getFillColor: (f: { properties: { population: number } }) => {
-            const pop = f.properties.population ?? 0
-            const t = maxPop === minPop ? 0.5 : Math.min(Math.max((pop - minPop) / (maxPop - minPop), 0), 1)
-            // Green (low density) → yellow → orange (high density)
-            return [Math.round(50 + t * 200), Math.round(200 - t * 100), Math.round(50 * (1 - t)), 140]
-          },
-          getLineColor: [255, 255, 255, 60],
-          lineWidthMinPixels: 1,
-          pickable: true,
-          onHover: (info: PickingInfo) => {
-            const f = info.object as { properties: { population: number; housing_units: number } } | undefined
-            if (f) {
-              setTooltipStable({
-                x: info.x, y: info.y,
-                text: `Pop: ${f.properties.population?.toLocaleString()} · Units: ${f.properties.housing_units?.toLocaleString()}`,
-              })
-            } else setTooltipStable(null)
-          },
-        })
-      )
-    }
-
-    // NYC PLUTO parcels — ColumnLayer (3D columns sized by assessed value per sqft)
+    // NYC PLUTO parcels — ColumnLayer (3D columns sized by assessed value, color = land use or air rights)
     if (effectiveLayers.parcels && parcelData?.parcels?.length) {
-      const { p25_per_sqft, p75_per_sqft } = parcelData.stats
-      const range = p75_per_sqft - p25_per_sqft || 1
-
       result.push(
         new ColumnLayer({
           id: 'nyc-parcels',
@@ -852,6 +968,12 @@ function CommandMap({
             return 5 + t * 400
           },
           getFillColor: (d) => {
+            if (parcelColorMode === 'airRights') {
+              const maxAR = parcelData.stats.p75_air_rights || parcelData.stats.max_air_rights || 50000
+              const t = Math.min(d.air_rights_sqft / maxAR, 1)
+              if (d.max_allowed_far === 0) return [100, 100, 120, 160]
+              return [Math.round(60 + t * 195), Math.round(200 - t * 160), Math.round(60 * (1 - t)), 220]
+            }
             const lu = d.land_use ?? '0'
             if (lu === '1') return [100, 200, 120, 230]
             if (lu === '2') return [60, 160, 100, 230]
@@ -867,12 +989,12 @@ function CommandMap({
           },
           pickable: true,
           onHover: (info: PickingInfo) => {
-            const d = info.object as typeof parcelData.parcels[0] | undefined
+            const d = info.object as ParcelPayload | undefined
             if (d) {
-              setTooltipStable({
-                x: info.x, y: info.y,
-                text: `${d.address} · $${d.assessed_value.toLocaleString()} · ${d.land_use_label}`,
-              })
+              const farInfo = d.max_allowed_far > 0
+                ? ` · FAR ${d.built_far.toFixed(1)}/${d.max_allowed_far.toFixed(1)}`
+                : ''
+              setTooltipStable({ x: info.x, y: info.y, text: `${d.address} · ${d.land_use_label}${farInfo}` })
             } else setTooltipStable(null)
           },
         })
@@ -984,70 +1106,116 @@ function CommandMap({
       )
     }
 
-    // NYC Permits — zoom-adaptive: heatmap at low zoom, scatter at mid, bbox-filtered at street level
+    // NYC Permits — zoom-adaptive: heatmap below zoom 15, 3D ColumnLayer at zoom ≥ 15
+    // All filtering is client-side — no API calls on zoom/pan
     if (effectiveLayers.nycPermits) {
-      if (permitMode === 'heatmap' && permitHeatPoints.length > 0) {
-        result.push(
-          new HeatmapLayer({
-            id: 'permit-heatmap',
-            data: permitHeatPoints,
-            getPosition: (d: PermitHeatPoint) => d.position,
-            getWeight: (d: PermitHeatPoint) => d.weight,
-            radiusPixels: 35,
-            intensity: 2,
-            threshold: 0.05,
-            colorRange: [
-              [20, 10, 5, 0],
-              [80, 30, 10, 120],
-              [160, 70, 20, 180],
-              [215, 107, 61, 210],
-              [240, 160, 80, 230],
-              [255, 220, 140, 250],
-            ],
-          })
-        )
-      } else if (permitMode === 'scatter' && nycPermitData.length > 0) {
-        const filtered = permitTypeFilter === 'all'
-          ? nycPermitData
-          : nycPermitData.filter((p) => p.job_type === permitTypeFilter)
+      const activeTypes = permitTypeFilter.size === 0
+        ? null // all types
+        : permitTypeFilter
 
-        result.push(
-          new ScatterplotLayer({
-            id: 'nyc-permits-scatter',
-            data: filtered,
-            getPosition: (d: PermitPayload) => [d.lng, d.lat],
-            getRadius: (d: PermitPayload) => {
-              const cost = d.initial_cost ?? 0
-              if (cost > 10_000_000) return 18
-              if (cost > 1_000_000) return 12
-              return 7
-            },
-            getFillColor: (d: PermitPayload) => {
-              switch (d.job_type) {
-                case 'NB': return [215, 107, 61, 230]   // orange
-                case 'A1': return [100, 180, 255, 210]  // blue
-                case 'DM': return [220, 80, 80, 220]    // red
-                default:   return [180, 180, 180, 180]
-              }
-            },
-            getLineColor: [0, 0, 0, 60],
-            lineWidthMinPixels: 0,
-            radiusUnits: 'pixels',
-            pickable: true,
-            onClick: (info: PickingInfo) => {
-              const d = info.object as PermitPayload | undefined
-              setSelectedPermit(d ?? null)
-            },
-            onHover: (info: PickingInfo) => {
-              const d = info.object as PermitPayload | undefined
-              if (d) setTooltipStable({ x: info.x, y: info.y, text: `${d.job_type_label} · ${d.address}` })
-              else setTooltipStable(null)
-            },
-          })
-        )
+      if (mapZoom < 15) {
+        // Heatmap — filter by type client-side
+        const heatData = activeTypes
+          ? permitHeatPoints.filter((_, i) => {
+              const p = nycPermitData[i]
+              return p ? activeTypes.has(p.job_type ?? '') : true
+            })
+          : permitHeatPoints
+
+        if (heatData.length > 0) {
+          result.push(
+            new HeatmapLayer({
+              id: 'permit-heatmap',
+              data: heatData,
+              getPosition: (d: PermitHeatPoint) => d.position,
+              getWeight: (d: PermitHeatPoint) => d.weight,
+              radiusPixels: 40,
+              intensity: 2.5,
+              threshold: 0.04,
+              colorRange: [
+                [20, 8, 2, 0],
+                [90, 35, 10, 100],
+                [160, 65, 20, 170],
+                [215, 107, 61, 210],
+                [240, 155, 70, 230],
+                [255, 215, 130, 250],
+              ],
+            })
+          )
+        }
+      } else {
+        // 3D ColumnLayer — filter by active types
+        const filtered = activeTypes
+          ? nycPermitData.filter((p) => activeTypes.has(p.job_type ?? ''))
+          : nycPermitData
+
+        if (filtered.length > 0) {
+          result.push(
+            new ColumnLayer({
+              id: 'nyc-permits-3d',
+              data: filtered,
+              diskResolution: 6,
+              radius: 6,
+              extruded: true,
+              getPosition: (d: PermitPayload) => [d.lng, d.lat],
+              getElevation: (d: PermitPayload) => {
+                const cost = Math.max(d.initial_cost ?? 0, 1)
+                const logVal = Math.log10(cost)
+                // log scale: $100k → ~20m, $1M → ~80m, $50M → ~250m
+                const t = Math.min(Math.max((logVal - 5) / 3.5, 0), 1)
+                return 15 + t * 280
+              },
+              getFillColor: (d: PermitPayload) => {
+                switch (d.job_type) {
+                  case 'NB': return [215, 107, 61, 240]   // orange — new building
+                  case 'A1': return [100, 180, 255, 220]  // blue — major alteration
+                  case 'DM': return [220, 80, 80, 230]    // red — demolition
+                  default:   return [160, 160, 160, 180]
+                }
+              },
+              pickable: true,
+              onClick: (info: PickingInfo) => {
+                const d = info.object as PermitPayload | undefined
+                setSelectedPermit(d ?? null)
+              },
+              onHover: (info: PickingInfo) => {
+                const d = info.object as PermitPayload | undefined
+                if (d) setTooltipStable({ x: info.x, y: info.y, text: `${d.job_type_label} · ${d.address}` })
+                else setTooltipStable(null)
+              },
+            })
+          )
+        }
       }
     }
 
+    // Overture Maps POIs — ScatterplotLayer colored by category, anchors larger
+    if (effectiveLayers.pois && poiPoints.length > 0) {
+      result.push(
+        new ScatterplotLayer({
+          id: 'overture-pois',
+          data: poiPoints,
+          getPosition: (d: POIPoint) => d.position,
+          getRadius: (d: POIPoint) => d.isAnchor ? 10 : 5,
+          getFillColor: (d: POIPoint) => [...d.color, d.isAnchor ? 255 : 200] as [number, number, number, number],
+          getLineColor: (d: POIPoint) => d.isAnchor ? [255, 255, 255, 180] as [number,number,number,number] : [0, 0, 0, 0] as [number,number,number,number],
+          lineWidthMinPixels: 1,
+          stroked: true,
+          radiusUnits: 'pixels',
+          pickable: true,
+          onHover: (info: PickingInfo) => {
+            const d = info.object as POIPoint | undefined
+            if (d) setTooltipStable({
+              x: info.x, y: info.y,
+              text: `${d.isAnchor ? '★ ' : ''}${d.name}${d.address ? ' · ' + d.address : ''}`,
+            })
+            else setTooltipStable(null)
+          },
+        })
+      )
+    }
+
+    // Shortlist sites (from case study workflow)
     if (shortlistSites.length > 0) {
       result.push(
         new ScatterplotLayer({
@@ -1108,30 +1276,7 @@ function CommandMap({
     }
 
     return result
-  }, [
-    primaryBoundary,
-    neighborBoundaries,
-    cityBoundaries,
-    boroughBoundary,
-    transitStops,
-    blockGroupData,
-    parcelData,
-    tractData,
-    amenityPoints,
-    floodData,
-    nycPermitData,
-    permitHeatPoints,
-    permitMode,
-    permitTypeFilter,
-    effectiveLayers,
-    colorScale,
-    primaryMetricValue,
-    effectiveMetric,
-    zip,
-    setTooltipStable,
-    uploadedMarkers,
-    shortlistSites,
-  ])
+  }, [primaryBoundary, neighborBoundaries, cityBoundaries, boroughBoundary, transitStops, transitRoutes, blockGroupData, parcelData, parcelColorMode, tractData, amenityPoints, poiPoints, floodData, nycPermitData, permitHeatPoints, permitTypeFilter, mapZoom, momentumScores, effectiveLayers, colorScale, primaryMetricValue, effectiveMetric, zip, setTooltipStable, uploadedMarkers, shortlistSites])
 
   const handleToggle = useCallback((key: keyof LayerState) => {
     setLayers((prev) => ({ ...prev, [key]: !prev[key] }))
@@ -1236,12 +1381,13 @@ function CommandMap({
               { key: 'zipBoundary' as const, label: 'ZIP', color: '#a1a1aa' },
               { key: 'transitStops' as const, label: 'Transit', color: '#38bdf8' },
               { key: 'rentChoropleth' as const, label: 'Rent', color: '#a78bfa' },
-              { key: 'blockGroups' as const, label: 'Blocks', color: '#34d399' },
               { key: 'parcels' as const, label: 'Parcels', color: '#fbbf24', zipOnly: true },
               { key: 'tracts' as const, label: 'Tracts', color: '#2dd4bf' },
               { key: 'amenityHeatmap' as const, label: 'Amenity', color: '#facc15' },
               { key: 'floodRisk' as const, label: 'Flood', color: '#f87171' },
               { key: 'nycPermits' as const, label: 'Permits', color: '#D76B3D' },
+              { key: 'pois' as const, label: 'POIs', color: '#f59e0b' },
+              { key: 'momentum' as const, label: 'Momentum', color: '#a78bfa' },
               { key: 'clientData' as const, label: 'Client', color: '#D76B3D', showWhen: !!uploadedMarkers?.length },
             ]).filter(({ zipOnly, showWhen }) => {
               if (showWhen === false) return false
@@ -1270,6 +1416,37 @@ function CommandMap({
 
         <div className="h-px bg-white/6 mx-3" />
 
+        {/* Parcel color mode — only shown when parcels layer is on */}
+        {effectiveLayers.parcels && parcelData && (
+          <>
+            <div className="px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-500 mb-1.5">Parcel Color</p>
+              <div className="flex rounded-lg overflow-hidden border border-white/8">
+                {([
+                  { key: 'landuse' as const, label: 'Land Use' },
+                  { key: 'airRights' as const, label: 'Air Rights' },
+                ] as const).map(({ key, label }) => (
+                  <button
+                    key={key}
+                    onClick={() => setParcelColorMode(key)}
+                    className={`flex-1 py-1.5 text-[10px] font-medium transition-all ${
+                      parcelColorMode === key ? 'bg-[#D76B3D]/20 text-[#D76B3D]' : 'text-zinc-500 hover:text-zinc-300'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {parcelColorMode === 'airRights' && parcelData.stats.underbuilt_count > 0 && (
+                <p className="text-[9px] text-zinc-600 mt-1.5">
+                  {parcelData.stats.underbuilt_count} underbuilt lots · green=low, red=high potential
+                </p>
+              )}
+            </div>
+            <div className="h-px bg-white/6 mx-3" />
+          </>
+        )}
+
         {/* Permit type filter — only shown when permits layer is on */}
         {effectiveLayers.nycPermits && (
           <>
@@ -1277,28 +1454,47 @@ function CommandMap({
               <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-500 mb-1.5">Permit Type</p>
               <div className="flex flex-wrap gap-1">
                 {([
-                  { key: 'all' as const, label: 'All', color: '#a1a1aa' },
-                  { key: 'NB' as const, label: 'New Bldg', color: '#D76B3D' },
-                  { key: 'A1' as const, label: 'Major Reno', color: '#60a5fa' },
-                  { key: 'DM' as const, label: 'Demo', color: '#f87171' },
-                ]).map(({ key, label, color }) => (
-                  <button
-                    key={key}
-                    onClick={() => setPermitTypeFilter(key)}
-                    className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all"
-                    style={{
-                      background: permitTypeFilter === key ? `${color}20` : 'rgba(255,255,255,0.03)',
-                      border: `1px solid ${permitTypeFilter === key ? color : 'rgba(255,255,255,0.07)'}`,
-                      color: permitTypeFilter === key ? '#fff' : '#71717a',
-                    }}
-                  >
-                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: permitTypeFilter === key ? color : '#52525b' }} />
-                    {label}
-                  </button>
-                ))}
+                  { key: 'NB', label: 'New Bldg', color: '#D76B3D' },
+                  { key: 'A1', label: 'Major Reno', color: '#60a5fa' },
+                  { key: 'DM', label: 'Demo', color: '#f87171' },
+                ] as const).map(({ key, label, color }) => {
+                  const active = permitTypeFilter.size === 0 || permitTypeFilter.has(key)
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => {
+                        setPermitTypeFilter((prev) => {
+                          const next = new Set(prev)
+                          if (next.size === 0) {
+                            // currently "all" — activate only this one
+                            next.add('NB'); next.add('A1'); next.add('DM')
+                            next.delete(key)
+                          } else if (next.has(key)) {
+                            next.delete(key)
+                            if (next.size === 0) return new Set() // back to all
+                          } else {
+                            next.add(key)
+                            if (next.size === 3) return new Set() // all selected = all
+                          }
+                          return next
+                        })
+                      }}
+                      className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all"
+                      style={{
+                        background: active ? `${color}20` : 'rgba(255,255,255,0.03)',
+                        border: `1px solid ${active ? color : 'rgba(255,255,255,0.07)'}`,
+                        color: active ? '#fff' : '#52525b',
+                      }}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: active ? color : '#3f3f46' }} />
+                      {label}
+                    </button>
+                  )
+                })}
               </div>
               <p className="text-[9px] text-zinc-600 mt-1.5">
-                {mapZoom < 13 ? 'Heatmap' : mapZoom >= 16 ? 'Street view' : 'Scatter'} · zoom {Math.round(mapZoom)}
+                {mapZoom < 15 ? `Heatmap · zoom ${Math.round(mapZoom)}` : `3D · zoom ${Math.round(mapZoom)}`}
+                {mapZoom < 15 && <span className="text-zinc-700"> (zoom in for 3D)</span>}
               </p>
             </div>
             <div className="h-px bg-white/6 mx-3" />
