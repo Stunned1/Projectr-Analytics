@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useMemo, useEffect } from 'react'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import dynamic from 'next/dynamic'
 import ExecutiveMemo from '@/components/ExecutiveMemo'
 import AgenticNormalizer from '@/components/AgenticNormalizer'
@@ -13,6 +13,9 @@ import { parseCycleAnalysisField } from '@/lib/report/validate-cycle'
 import { useSitesStore } from '@/lib/sites-store'
 import type { Site } from '@/lib/sites-store'
 import { useClientUploadMarkersStore } from '@/lib/client-upload-markers-store'
+import { useClientUploadSessionStore } from '@/lib/client-upload-session-store'
+import type { NormalizerIngestPayload } from '@/lib/normalize-client-types'
+import { aggregateClientUploadSession } from '@/lib/client-upload-session-aggregate'
 import SitesBootstrap from '@/components/SitesBootstrap'
 import CommandCenterSidebar from '@/components/CommandCenterSidebar'
 import { takePendingNav } from '@/lib/pending-navigation'
@@ -23,11 +26,15 @@ import { CycleExplainCard } from '@/components/CycleExplainCard'
 import type { MetricKey } from '@/lib/metric-definitions'
 import { metricKeyFromDataRow, sparklineMetricKey } from '@/lib/metric-definitions'
 import { cn } from '@/lib/utils'
+import type { LayerState } from '@/components/CommandMap'
 import {
   denormalizeAgentLayersForContext,
   normalizeAgentLayerKey,
   normalizeAgentLayersRecord,
+  patchTurnsEveryLayerOff,
 } from '@/lib/agent-map-layers'
+import { ALL_LAYERS_OFF } from '@/lib/slash-layer-keys'
+import { normalizeHeadingDegrees } from '@/lib/slash-commands'
 import { normalizeUsStateToAbbr } from '@/lib/us-state-abbr'
 
 const CommandMap = dynamic(() => import('@/components/CommandMap'), { ssr: false })
@@ -52,8 +59,9 @@ interface TransitData {
     long_name?: string
     type: string
     route_type?: number
-    color: [number, number, number]
-    paths: [number, number][][]
+    color?: [number, number, number]
+    paths?: [number, number][][]
+    path?: [number, number][]
   }>
   geojson: {
     features: Array<{
@@ -65,8 +73,9 @@ interface TransitData {
       name: string
       long_name?: string
       type: string
-      color: [number, number, number]
-      paths: [number, number][][]
+      color?: [number, number, number]
+      paths?: [number, number][][]
+      path?: [number, number][]
     }>
   }
 }
@@ -409,7 +418,7 @@ function BubbleDivider() {
 }
 
 const DEFAULT_MAP_LAYERS: MapLayersSnapshot = {
-  zipBoundary: false,
+  zipBoundary: true,
   transitStops: true,
   rentChoropleth: true,
   blockGroups: false,
@@ -501,10 +510,16 @@ export default function Home() {
   const [boroughBoundary, setBoroughBoundary] = useState<object | null>(null)
   const [aggregateData, setAggregateData] = useState<AggregateData | null>(null)
   const uploadedMarkers = useClientUploadMarkersStore((s) => s.markers)
+  const clientUploadSession = useClientUploadSessionStore((s) => s.session)
+  const clientUploadAgg = useMemo(
+    () => aggregateClientUploadSession(clientUploadSession),
+    [clientUploadSession]
+  )
   const [agentTerminalSize, setAgentTerminalSize] = useState<AgentTerminalSize>('collapsed')
   const [agentLayerOverrides, setAgentLayerOverrides] = useState<Record<string, boolean>>({})
   const [agentMetric, setAgentMetric] = useState<'zori' | 'zhvi' | null>(null)
   const [agentTilt, setAgentTilt] = useState<number | null>(null)
+  const [mapHeading, setMapHeading] = useState(0)
   /** User 3D pill (45°) when agent has not overridden tilt. */
   const [map3DEnabled, setMap3DEnabled] = useState(false)
   const [analysisSites, setAnalysisSites] = useState<AnalysisSite[]>([])
@@ -517,12 +532,23 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null)
   const [panelOpen, setPanelOpen] = useState(false)
   const [mapLayersSnapshot, setMapLayersSnapshot] = useState<MapLayersSnapshot>(DEFAULT_MAP_LAYERS)
+  const layerStateResyncIdRef = useRef(0)
+  const [layerStateResync, setLayerStateResync] = useState<{ id: number; state: LayerState } | null>(null)
   const [marketPanelTab, setMarketPanelTab] = useState<'analysis' | 'data'>('analysis')
 
-  function handleNormalizerIngested(res: { triage: { bucket: string }; marker_points?: Array<{ lat: number; lng: number; value: number | null; label: string }> }) {
-    // markers are handled via useClientUploadMarkersStore in AgenticNormalizer
-    void res
-  }
+  const handleNormalizerIngested = useCallback((payload: NormalizerIngestPayload) => {
+    const pts = payload.mergedMarkerPoints
+    if (pts.length > 0) {
+      setAgentLayerOverrides((prev) => ({ ...prev, clientData: true }))
+      const lat = pts.reduce((s, p) => s + p.lat, 0) / pts.length
+      const lng = pts.reduce((s, p) => s + p.lng, 0) / pts.length
+      setAgentFlyTo({ lat, lng })
+    } else {
+      setAgentLayerOverrides((prev) => ({ ...prev, clientData: false }))
+      setMarketPanelTab('data')
+      setPanelOpen(true)
+    }
+  }, [])
 
   const handleMapLayersChange = useCallback((snapshot: MapLayersSnapshot) => {
     setMapLayersSnapshot(snapshot)
@@ -552,7 +578,13 @@ export default function Home() {
       case 'toggle_layers': {
         const patch = action.layers
         if (!patch) break
-        setAgentLayerOverrides((prev) => ({ ...prev, ...normalizeAgentLayersRecord(patch) }))
+        if (patchTurnsEveryLayerOff(patch)) {
+          setAgentLayerOverrides({})
+          layerStateResyncIdRef.current += 1
+          setLayerStateResync({ id: layerStateResyncIdRef.current, state: { ...ALL_LAYERS_OFF } as LayerState })
+        } else {
+          setAgentLayerOverrides((prev) => ({ ...prev, ...normalizeAgentLayersRecord(patch) }))
+        }
         break
       }
       case 'set_metric':
@@ -571,10 +603,19 @@ export default function Home() {
         setMarketPanelTab('analysis')
         setPanelOpen(true)
         break
+      case 'focus_data_panel':
+        setMarketPanelTab('data')
+        setPanelOpen(true)
+        break
       case 'set_tilt':
         if (action.tilt != null) {
           setAgentTilt(action.tilt)
           setMap3DEnabled(false)
+        }
+        break
+      case 'set_heading':
+        if (action.heading != null && Number.isFinite(action.heading)) {
+          setMapHeading(normalizeHeadingDegrees(action.heading))
         }
         break
       case 'show_sites':
@@ -601,6 +642,21 @@ export default function Home() {
     zip: result?.zip ?? null,
     hasRankedSites: analysisSites.length > 0,
     rankedSiteCount: analysisSites.length,
+    clientCsv: clientUploadAgg
+      ? {
+          fileName: clientUploadAgg.fileNameLabel,
+          fileCount: clientUploadAgg.sourceCount,
+          fileNames: clientUploadAgg.fileNames,
+          bucket: clientUploadAgg.triage.bucket,
+          visual_bucket: clientUploadAgg.triage.visual_bucket,
+          metric_name: clientUploadAgg.triage.metric_name,
+          reasoning: clientUploadAgg.reasoning,
+          rowsIngested: clientUploadAgg.rowsIngested,
+          mapPinCount: clientUploadAgg.markerCount,
+          mapEligible: clientUploadAgg.mapEligible,
+          ingestedAt: clientUploadAgg.ingestedAt,
+        }
+      : null,
     layers: denormalizeAgentLayersForContext(agentLayerOverrides),
     activeMetric: agentMetric ?? 'zori',
     zori: result?.zillow?.zori_latest ?? aggregateData?.zillow.avg_zori,
@@ -987,7 +1043,7 @@ export default function Home() {
           agentLayerOverrides={agentLayerOverrides}
           agentMetric={agentMetric}
           mapTilt={effectiveMapTilt}
-          mapHeading={0}
+          mapHeading={mapHeading}
           agentFlyTo={agentFlyTo}
           onLayersChange={handleMapLayersChange}
           onClearAgentOverride={(key) => setAgentLayerOverrides((prev) => {
@@ -995,6 +1051,7 @@ export default function Home() {
             delete next[key]
             return next
           })}
+          layerStateResync={layerStateResync}
           map3DActive={map3DActive}
           onToggleMap3D={handleMap3DToggle}
         />
@@ -1550,6 +1607,57 @@ export default function Home() {
                 )}
               </div>
             </details>
+
+            {clientUploadAgg && (
+              <PanelSection title="Client CSV (last upload)">
+                <p className="mb-2 text-[10px] leading-relaxed text-muted-foreground">
+                  {clientUploadAgg.fileNameLabel && (
+                    <span className="font-mono text-foreground/90">{clientUploadAgg.fileNameLabel}</span>
+                  )}{' '}
+                  {clientUploadAgg.sourceCount > 1 ? (
+                    <span className="text-zinc-500">({clientUploadAgg.sourceCount} files)</span>
+                  ) : null}{' '}
+                  · {clientUploadAgg.triage.bucket} / {clientUploadAgg.triage.visual_bucket} ·{' '}
+                  {clientUploadAgg.rowsIngested} rows
+                  {clientUploadAgg.mapPinsActive ? (
+                    <span className="text-primary"> · {clientUploadAgg.markerCount} map pin(s)</span>
+                  ) : null}
+                </p>
+                <p className="mb-2 text-[10px] italic text-zinc-500">&quot;{clientUploadAgg.reasoning}&quot;</p>
+                <div className="max-h-40 overflow-auto rounded border border-border/50 text-[10px]">
+                  <table className="w-full border-collapse">
+                    <thead>
+                      <tr className="border-b border-border/60 bg-muted/30 text-left text-[9px] uppercase text-muted-foreground">
+                        <th className="p-1.5">Geo</th>
+                        <th className="p-1.5">Metric</th>
+                        <th className="p-1.5">Value</th>
+                        <th className="p-1.5">Period</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {clientUploadAgg.previewRows.map((r, i) => (
+                        <tr key={i} className="border-b border-border/40">
+                          <td className="p-1.5 font-mono text-foreground/90">{r.submarket_id ?? '—'}</td>
+                          <td className="p-1.5 text-muted-foreground">{r.metric_name}</td>
+                          <td className="p-1.5">{r.metric_value != null ? r.metric_value.toLocaleString() : '—'}</td>
+                          <td className="p-1.5 text-zinc-500">{r.time_period ?? '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {!clientUploadAgg.mapPinsActive && (
+                  <p className="mt-2 text-[10px] text-muted-foreground">
+                    Not on map — you are viewing it here in this <span className="text-foreground">preview table</span>{' '}
+                    (first rows returned from normalize). Full series is in Supabase{' '}
+                    <span className="text-foreground">projectr_master_data</span> under{' '}
+                    <span className="text-foreground">Client Upload</span>. Rows keyed to the loaded ZIP may also appear
+                    in <span className="text-foreground">All metrics (flat table)</span> above; borough-wide or non-ZIP
+                    keys often will not.
+                  </p>
+                )}
+              </PanelSection>
+            )}
 
             <PanelSection title="Agentic Normalizer">
               <AgenticNormalizer currentZip={result.zip} onIngested={handleNormalizerIngested} />

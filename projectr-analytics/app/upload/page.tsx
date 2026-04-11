@@ -16,17 +16,7 @@ export default function ClientUploadPage() {
   const router = useRouter()
   const [searchInput, setSearchInput] = useState('')
   const markers = useClientUploadMarkersStore((s) => s.markers)
-  const setMarkers = useClientUploadMarkersStore((s) => s.setMarkers)
   const clearMarkers = useClientUploadMarkersStore((s) => s.clearMarkers)
-
-  function handleIngested(result: {
-    triage: { bucket: string }
-    marker_points?: Array<{ lat: number; lng: number; value: number | null; label: string }>
-  }) {
-    if (result.triage.bucket === 'GEOSPATIAL' && result.marker_points?.length) {
-      setMarkers(result.marker_points)
-    }
-  }
 
   function goMapWithPending(site: Site) {
     if (site.isAggregate && site.savedSearch?.trim()) {
@@ -60,11 +50,11 @@ export default function ClientUploadPage() {
         onTogglePanel={() => router.push('/')}
         onShortlistOpenSite={goMapWithPending}
       />
-
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border bg-muted/20 px-5 py-3">
           <div>
-            <h1 className="text-base font-semibold tracking-tight text-foreground">Upload CSV</h1>
+            <h1 className="text-base font-semibold tracking-tight text-foreground">Client CSV</h1>
+            <p className="text-[11px] text-muted-foreground">Projectr</p>
           </div>
           <div className="flex w-full max-w-[min(100%,280px)] shrink-0 items-center justify-end sm:max-w-[280px]">
             <Link
@@ -82,21 +72,24 @@ export default function ClientUploadPage() {
         </header>
 
         <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-        <div className="mx-auto max-w-lg space-y-6 px-5 py-8 pb-16 sm:px-6">
-          <div>
-            <h2 className="text-lg font-semibold tracking-tight text-foreground">Upload a file</h2>
-            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-              Upload a CSV for Gemini triage. Geospatial rows with latitude and longitude columns appear as pins on the
-              map when you open <span className="text-foreground/90">Map</span> and enable the{' '}
-              <span className="text-foreground/90">Client</span> layer.
-            </p>
-          </div>
-          <AgenticNormalizer onIngested={handleIngested} />
+          <div className="mx-auto max-w-lg space-y-6 px-5 py-8 pb-16 sm:px-6">
+            <div>
+              <h2 className="text-lg font-semibold tracking-tight text-foreground">Upload a file</h2>
+              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                Gemini classifies each file. <span className="text-foreground/90">Geospatial</span> rows (lat/lng or ZIP)
+                become orange <span className="text-foreground/90">3D cone pins</span> on the map when you open{' '}
+                <span className="text-foreground/90">Map</span> and enable the <span className="text-foreground/90">Client</span>{' '}
+                layer. <span className="text-foreground/90">Temporal</span> and <span className="text-foreground/90">tabular</span>{' '}
+                sets route to the map page <span className="text-foreground/90">Data</span> tab and ingest into your metrics
+                pipeline.
+              </p>
+            </div>
+          <AgenticNormalizer />
           {markers != null && markers.length > 0 && (
             <div className="flex flex-col gap-3 rounded-xl border border-border/80 bg-card/80 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-xs text-muted-foreground">
-                <span className="font-medium text-foreground">{markers.length}</span> pin{markers.length === 1 ? '' : 's'} saved
-                for the map
+                <span className="font-medium text-foreground">{markers.length}</span> pin{markers.length === 1 ? '' : 's'}{' '}
+                ready — turn on <span className="text-primary">Client</span> on the map
               </p>
               <div className="flex flex-wrap gap-2">
                 <button

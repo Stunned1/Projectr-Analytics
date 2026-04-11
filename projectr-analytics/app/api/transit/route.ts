@@ -61,7 +61,8 @@ const TYPE_COLORS: Record<number, [number, number, number]> = {
 
 /** Filter out pure intercity routes - route must have at least one coord near the ZIP center */
 function isLocalRoute(paths: [number, number][][], centerLng: number, centerLat: number): boolean {
-  const NEARBY_DEG = 0.3
+  /** ~35mi diagonal — strict 0.3 dropped valid commuter lines at outer ZIPs */
+  const NEARBY_DEG = 0.45
   for (const path of paths) {
     for (const [lng, lat] of path) {
       if (Math.abs(lng - centerLng) < NEARBY_DEG && Math.abs(lat - centerLat) < NEARBY_DEG) {
@@ -142,6 +143,8 @@ export async function GET(request: NextRequest) {
             route_type: r.route_type,
             color,
             paths,
+            /** Singular segment for the same contract as OSM `fetchGtfs` / legacy clients. */
+            path: paths[0] ?? [],
           }
         })
         // Filter out intercity routes
@@ -154,18 +157,40 @@ export async function GET(request: NextRequest) {
         stop_type: 'transit',
       }))
 
-      const geojson = {
-        type: 'FeatureCollection' as const,
-        features: stops.map((s) => ({
-          type: 'Feature' as const,
-          geometry: { type: 'Point' as const, coordinates: s.position },
-          properties: { stop_id: s.stop_id, stop_name: s.stop_name, stop_type: s.stop_type },
-        })),
-        routes,
-        stop_count: stops.length,
+      let features = stops.map((s) => ({
+        type: 'Feature' as const,
+        geometry: { type: 'Point' as const, coordinates: s.position },
+        properties: { stop_id: s.stop_id, stop_name: s.stop_name, stop_type: s.stop_type },
+      }))
+
+      let finalRoutes = routes
+
+      // Transitland often returns route rows without geometry, or isLocalRoute drops every segment — we would
+      // incorrectly skip OSM and return zero PathLayer data. Merge Overpass lines when TL has no drawable routes.
+      if (finalRoutes.length === 0) {
+        const osm = await fetchGtfsGeoJSON(geo)
+        // OSM routes omit Transitland-only fields; map client accepts optional long_name / route_type
+        finalRoutes = osm.routes as typeof routes
+        if (features.length === 0 && osm.features.length > 0) {
+          features = osm.features
+        }
       }
 
-      return NextResponse.json({ zip, city: geo.city, stop_count: stops.length, route_count: routes.length, geojson, routes })
+      const geojson = {
+        type: 'FeatureCollection' as const,
+        features,
+        routes: finalRoutes,
+        stop_count: features.length,
+      }
+
+      return NextResponse.json({
+        zip,
+        city: geo.city,
+        stop_count: geojson.stop_count,
+        route_count: finalRoutes.length,
+        geojson,
+        routes: finalRoutes,
+      })
     }
 
     // Fallback to Overpass/OSM

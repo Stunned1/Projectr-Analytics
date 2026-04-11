@@ -5,7 +5,9 @@ export interface AgentAction {
     | 'set_metric'
     | 'search'
     | 'generate_memo'
+    | 'focus_data_panel'
     | 'set_tilt'
+    | 'set_heading'
     | 'run_analysis'
     | 'show_sites'
     | 'set_permit_filter'
@@ -17,6 +19,8 @@ export interface AgentAction {
   metric?: 'zori' | 'zhvi'
   query?: string
   tilt?: number
+  /** Map bearing, degrees clockwise from north (Google Maps). */
+  heading?: number
   borough?: string
   top_n?: number
   sites?: AnalysisSite[]
@@ -59,6 +63,22 @@ export interface AgentMessage {
   analysisSites?: AnalysisSite[]
 }
 
+/** Last client CSV ingest — agent uses for “show my upload / pins / sidebar” intents. */
+export interface MapContextClientCsv {
+  fileName: string | null
+  /** Number of CSVs in the last combined ingest (multi-file drop). */
+  fileCount?: number
+  fileNames?: string[]
+  bucket: string
+  visual_bucket: string
+  metric_name: string
+  reasoning: string
+  rowsIngested: number
+  mapPinCount: number
+  mapEligible: boolean
+  ingestedAt: string
+}
+
 export interface MapContext {
   label?: string | null
   zip?: string | null
@@ -74,4 +94,6 @@ export interface MapContext {
   inventory?: number | null
   transitStops?: number | null
   population?: number | null
+  /** Present after a Client CSV normalize on this session */
+  clientCsv?: MapContextClientCsv | null
 }

@@ -2,6 +2,8 @@
  * Agent JSON uses `permits` for the NYC DOB layer; CommandMap LayerState uses `nycPermits`.
  */
 
+import { SLASH_LAYER_KEYS } from '@/lib/slash-layer-keys'
+
 export function normalizeAgentLayerKey(layer: string): string {
   return layer === 'permits' ? 'nycPermits' : layer
 }
@@ -22,4 +24,13 @@ export function denormalizeAgentLayersForContext(overrides: Record<string, boole
     delete out.nycPermits
   }
   return out
+}
+
+/** True when the patch sets every canonical layer key to `false` (e.g. `/clear:layers`). */
+export function patchTurnsEveryLayerOff(patch: Record<string, boolean>): boolean {
+  const m = normalizeAgentLayersRecord(patch)
+  for (const k of SLASH_LAYER_KEYS) {
+    if (m[k] !== false) return false
+  }
+  return true
 }

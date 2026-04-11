@@ -4,10 +4,20 @@ import { Fragment, useState, useRef, useEffect, useCallback, useMemo } from 'rea
 import type { AgentAction, AnalysisSite } from '@/lib/agent-types'
 import type { MapContext } from '@/lib/agent-types'
 import { useAgentIntelligence, formatActionLogLine } from '@/lib/use-agent-intelligence'
+import { getSlashPaletteState } from '@/lib/slash-commands'
 import { cn } from '@/lib/utils'
 
 const STREAM_MS = 72
-const SUGGESTIONS = ['Show flood risk', 'Transit + amenities on', 'Run Manhattan site analysis']
+const SUGGESTIONS = [
+  '/help',
+  '/go 11201',
+  '/layers:transit,rent',
+  '/clear:terminal',
+  '/clear:workspace',
+  'Show flood risk',
+  'Transit + amenities on',
+  'Run Manhattan site analysis',
+]
 
 /** Scout orange / narrative / system / chrome */
 const C_USER_GT = '#D76B3D'
@@ -145,11 +155,13 @@ export default function AgentTerminal({
   const outputRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const [unread, setUnread] = useState(false)
+  const [slashHighlight, setSlashHighlight] = useState(0)
 
   const shouldNotifyWhileClosed = useCallback(() => size === 'collapsed', [size])
 
   const {
     messages,
+    visibleTerminalMessages,
     input,
     setInput,
     loading,
@@ -165,6 +177,18 @@ export default function AgentTerminal({
       onUnreadChange?.(true)
     },
   })
+
+  const slashPalette = useMemo(() => getSlashPaletteState(input), [input])
+
+  useEffect(() => {
+    const { open, matches } = getSlashPaletteState(input)
+    const n = matches.length
+    if (!open || n === 0) {
+      setSlashHighlight(0)
+      return
+    }
+    setSlashHighlight((h) => Math.min(h, n - 1))
+  }, [input])
 
   const showCaseBriefCta = useMemo(() => {
     const latest = [...messages].reverse().find((m) => m.analysisSites?.length)
@@ -184,7 +208,7 @@ export default function AgentTerminal({
 
   useEffect(() => {
     outputRef.current?.scrollTo({ top: outputRef.current.scrollHeight, behavior: 'smooth' })
-  }, [messages, size, loading])
+  }, [visibleTerminalMessages, size, loading])
 
   useEffect(() => {
     if (size === 'collapsed' || size === 'expanded') return
@@ -197,18 +221,19 @@ export default function AgentTerminal({
     return () => document.removeEventListener('mousedown', onDown, true)
   }, [size])
 
+  const terminalMsgOffset = messages.length - visibleTerminalMessages.length
   const hasUserMessage = useMemo(() => messages.some((m) => m.role === 'user'), [messages])
 
   const lastStatusLine = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i]
+    for (let i = visibleTerminalMessages.length - 1; i >= 0; i--) {
+      const m = visibleTerminalMessages[i]
       if (m.role === 'agent' && m.text) {
         const line = m.text.split('\n')[0].trim()
         return line.length > 72 ? `${line.slice(0, 69)}…` : line
       }
     }
-    return 'Idle - type a command to run the engine.'
-  }, [messages])
+    return 'Idle — type a command to run the engine.'
+  }, [visibleTerminalMessages])
 
   const panelHeight =
     size === 'collapsed' ? 'h-8' : size === 'compact' ? 'h-[200px]' : 'min-h-[200px] h-[min(58vh,560px)] max-h-[560px]'
@@ -234,7 +259,7 @@ export default function AgentTerminal({
     )
   }
 
-  const waitingForModel = loading && !messages.some((m) => m.isAnalyzing)
+  const waitingForModel = loading && !visibleTerminalMessages.some((m) => m.isAnalyzing)
 
   return (
     <div
@@ -310,11 +335,21 @@ export default function AgentTerminal({
       {size !== 'collapsed' && (
         <>
           <div className="shrink-0 border-b border-zinc-800/80 px-2 py-0.5 text-[9px] text-zinc-600">
-            ────────────────────────────────────────────
+            <span className="text-zinc-500">Slash:</span> type <span className="font-mono text-zinc-500">/</span> for
+            suggestions; <span className="font-mono text-zinc-500">/help</span>;{' '}
+            <span className="font-mono text-zinc-500">/view 3d</span> /{' '}
+            <span className="font-mono text-zinc-500">/view 2d</span>;{' '}
+            <span className="font-mono text-zinc-500">/tilt 0–100</span> (% of max 67.5°);{' '}
+            <span className="font-mono text-zinc-500">/rotate °</span> (bearing);{' '}
+            <span className="font-mono text-zinc-500">/go</span> search;{' '}
+            <span className="font-mono text-zinc-500">/layers:a,b</span>;{' '}
+            <span className="font-mono text-zinc-500">/clear:…</span>;{' '}
+            <span className="font-mono text-zinc-500">/restart</span> → y/n; see /help
           </div>
 
           <div ref={outputRef} className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
-            {messages.map((msg, i) => {
+            {visibleTerminalMessages.map((msg, j) => {
+              const i = terminalMsgOffset + j
               const isLatestAgent = msg.role === 'agent' && i === messages.length - 1
 
               if (msg.role === 'user') {
@@ -417,23 +452,79 @@ export default function AgentTerminal({
             >
               &gt;
             </span>
-            <input
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              disabled={loading || isRunningSequence}
-              placeholder={
-                isRunningSequence
-                  ? 'Sequence running…'
-                  : hasUserMessage
-                    ? '_'
-                    : 'Type a command or choose a suggestion above'
-              }
-              className="min-w-0 flex-1 bg-transparent font-mono text-[11px] text-zinc-200 caret-primary outline-none placeholder:text-zinc-700 disabled:opacity-50"
-              style={{ color: C_USER_TEXT }}
-              spellCheck={false}
-              autoComplete="off"
-            />
+            <div className="relative min-w-0 flex-1">
+              {slashPalette.open && (
+                <div
+                  className="absolute bottom-full left-0 right-0 z-50 mb-1 max-h-[9.5rem] overflow-y-auto rounded border border-zinc-700/90 bg-[#121215] py-0.5 shadow-lg"
+                  role="listbox"
+                  aria-label="Slash commands"
+                >
+                  {slashPalette.matches.length === 0 ? (
+                    <div className="px-2 py-1.5 font-mono text-[10px] text-zinc-500">No matching commands — try /help</div>
+                  ) : (
+                    slashPalette.matches.map((cmd, i) => (
+                      <button
+                        key={cmd.command}
+                        type="button"
+                        role="option"
+                        aria-selected={i === slashHighlight}
+                        className={cn(
+                          'flex w-full flex-col gap-0.5 px-2 py-1.5 text-left font-mono text-[10px] transition-colors',
+                          i === slashHighlight ? 'bg-primary/15 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-800/80'
+                        )}
+                        onMouseEnter={() => setSlashHighlight(i)}
+                        onMouseDown={(ev) => ev.preventDefault()}
+                        onClick={() => setInput(`/${cmd.command}`)}
+                      >
+                        <span className="text-primary/90">/{cmd.command}</span>
+                        <span className="text-[9px] font-normal leading-snug text-zinc-500">{cmd.summary}</span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+              <input
+                ref={inputRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  const { open, matches } = getSlashPaletteState(input)
+                  if (!open) return
+                  if (e.key === 'ArrowDown' && matches.length > 0) {
+                    e.preventDefault()
+                    setSlashHighlight((h) => (h + 1) % matches.length)
+                    return
+                  }
+                  if (e.key === 'ArrowUp' && matches.length > 0) {
+                    e.preventDefault()
+                    setSlashHighlight((h) => (h - 1 + matches.length) % matches.length)
+                    return
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault()
+                    setInput('')
+                    return
+                  }
+                  if ((e.key === 'Enter' || e.key === 'Tab') && matches.length > 0) {
+                    e.preventDefault()
+                    const cmd = matches[slashHighlight]?.command
+                    if (cmd) setInput(`/${cmd}`)
+                  }
+                }}
+                disabled={loading || isRunningSequence}
+                placeholder={
+                  isRunningSequence
+                    ? 'Sequence running…'
+                    : hasUserMessage
+                      ? '_'
+                      : '/help · /go ZIP · /layers:rent · /restart · /clear:terminal · or ask…'
+                }
+                className="w-full min-w-0 bg-transparent font-mono text-[11px] text-zinc-200 caret-primary outline-none placeholder:text-zinc-700 disabled:opacity-50"
+                style={{ color: C_USER_TEXT }}
+                spellCheck={false}
+                autoComplete="off"
+              />
+            </div>
             <span className="h-3.5 w-px animate-pulse bg-primary/80" aria-hidden />
           </form>
         </>

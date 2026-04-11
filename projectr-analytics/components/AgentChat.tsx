@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { AGENT_CHAT_STORAGE_KEY } from '@/lib/use-agent-intelligence'
 
 export interface AgentAction {
-  type: 'toggle_layer' | 'toggle_layers' | 'set_metric' | 'search' | 'generate_memo' | 'set_tilt' | 'run_analysis' | 'show_sites' | 'set_permit_filter' | 'fly_to' | 'none'
+  type: 'toggle_layer' | 'toggle_layers' | 'set_metric' | 'search' | 'generate_memo' | 'focus_data_panel' | 'set_tilt' | 'set_heading' | 'run_analysis' | 'show_sites' | 'set_permit_filter' | 'fly_to' | 'none'
   layer?: string
   value?: boolean
   layers?: Record<string, boolean>
@@ -91,6 +91,7 @@ const ACTION_LABELS: Record<string, string> = {
   search: '↳ Navigating to market',
   generate_memo: '↳ Opening memo',
   set_tilt: '↳ Map tilted',
+  set_heading: '↳ Map rotated',
   run_analysis: '↳ Running spatial model...',
   show_sites: '↳ Top sites revealed',
   set_permit_filter: '↳ Permit filter applied',

@@ -4,6 +4,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState, type ReactNode } from 'react'
+import { ClearLocalWorkspaceButton } from '@/components/clear-local-workspace-button'
 import ShortlistPanel from '@/components/ShortlistPanel'
 import { Input } from '@/components/ui/input'
 import type { Site } from '@/lib/sites-store'
@@ -178,7 +179,7 @@ export default function CommandCenterSidebar({
               </span>
               {loading && (
                 <span
-                  className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-muted-foreground"
+                  className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-primary"
                   aria-label="Loading"
                 >
                   <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
@@ -196,7 +197,7 @@ export default function CommandCenterSidebar({
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 disabled={loading}
-                placeholder="Enter ZIP, City, ST, or Borough"
+                placeholder="ZIP, City, ST, or Borough — Enter"
                 className={cn(
                   'h-8 rounded-md border-input bg-input/40 pl-7 text-xs text-sidebar-foreground placeholder:text-muted-foreground',
                   'focus-visible:border-primary focus-visible:ring-primary/25',
@@ -214,8 +215,15 @@ export default function CommandCenterSidebar({
         {!collapsed && (
           <div className="space-y-0.5 border-b border-sidebar-border px-2 py-2">
             <NavLink href="/" icon={<MapIcon />} label="Map" />
-            <NavLink href="/upload" icon={<UploadIcon />} label="Upload CSV" />
+            <NavLink href="/upload" icon={<UploadIcon />} label="Client CSV" />
             <NavLink href="/guide" icon={<BookOpen className="h-4 w-4" strokeWidth={1.5} />} label="Guide" />
+          </div>
+        )}
+
+        {!collapsed && (
+          <div className="space-y-1 border-b border-sidebar-border px-2 py-2">
+            <p className="px-1 text-[9px] font-medium tracking-wider text-muted-foreground uppercase">Testing</p>
+            <ClearLocalWorkspaceButton variant="sidebar" />
           </div>
         )}
 
@@ -223,7 +231,7 @@ export default function CommandCenterSidebar({
           {collapsed ? (
             <div className="flex flex-col gap-1">
               <NavLinkCollapsed href="/" icon={<MapIcon />} title="Map" />
-              <NavLinkCollapsed href="/upload" icon={<UploadIcon />} title="CSV upload" />
+              <NavLinkCollapsed href="/upload" icon={<UploadIcon />} title="Client CSV" />
               <NavLinkCollapsed
                 href="/guide"
                 icon={<BookOpen className="h-4 w-4" strokeWidth={1.5} />}
