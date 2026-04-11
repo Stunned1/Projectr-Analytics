@@ -1,102 +1,131 @@
+/**
+ * Momentum Score API
+ * Computes a 0–100 investment momentum score per ZIP from:
+ * - Job market (FRED unemployment, inverted - lower = better)
+ * - Rent growth (Zillow ZORI 12m YoY - stronger signal than Census median rent)
+ * - Permit density (Census BPS units permitted)
+ * - Population growth (Census ACS 3yr)
+ *
+ * All components normalized 0–100 across the input ZIP set, then weighted.
+ * Returns scores + components for each ZIP.
+ */
 import { type NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 
-interface MomentumWeights {
-  jobGrowth: number    // 0–100
-  rentGrowth: number   // 0–100
-  permitDensity: number // 0–100
-}
-
 interface ZipScore {
   zip: string
-  score: number        // 0–100
+  score: number
+  label: 'Strong' | 'Moderate' | 'Weak' | 'No Data'
   components: {
-    jobGrowth: number | null
+    jobMarket: number | null
     rentGrowth: number | null
     permitDensity: number | null
+    popGrowth: number | null
   }
 }
+
+const PERMIT_METRICS = ['Permit_Units', 'Permit_Buildings', 'Permit_Count']
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const weights: MomentumWeights = {
-      jobGrowth: body.jobGrowth ?? 33,
-      rentGrowth: body.rentGrowth ?? 33,
-      permitDensity: body.permitDensity ?? 34,
-    }
     const zips: string[] = body.zips ?? []
+    if (!zips.length) return NextResponse.json({ error: 'No zip codes provided' }, { status: 400 })
 
-    if (!zips.length) {
-      return NextResponse.json({ error: 'No zip codes provided' }, { status: 400 })
-    }
+    // Weights (must sum to 100)
+    const w = { job: 0.25, rent: 0.35, permit: 0.25, pop: 0.15 }
 
-    // Pull relevant metrics for all requested zips
-    const { data, error } = await supabase
+    // 1. Pull Census/FRED metrics from master data
+    const { data: masterRows } = await supabase
       .from('projectr_master_data')
-      .select('submarket_id, metric_name, metric_value')
+      .select('submarket_id, metric_name, metric_value, created_at')
       .in('submarket_id', zips)
-      .in('metric_name', ['Unemployment_Rate', 'Median_Gross_Rent', 'Permit_Count'])
+      .in('metric_name', ['Unemployment_Rate', 'Population_Growth_3yr', ...PERMIT_METRICS])
+      .order('created_at', { ascending: false })
 
-    if (error) throw new Error(error.message)
+    // 2. Pull Zillow ZORI growth
+    const { data: zillowRows } = await supabase
+      .from('zillow_zip_snapshot')
+      .select('zip, zori_growth_12m, zhvi_growth_12m')
+      .in('zip', zips)
 
-    // Aggregate latest value per zip per metric
-    const byZip: Record<string, Record<string, number[]>> = {}
-    for (const row of data ?? []) {
+    const zillowMap = new Map(zillowRows?.map((r) => [r.zip, r]) ?? [])
+
+    // Latest value per zip per metric
+    const byZip: Record<string, Record<string, number>> = {}
+    for (const row of masterRows ?? []) {
       const z = row.submarket_id!
       if (!byZip[z]) byZip[z] = {}
-      if (!byZip[z][row.metric_name]) byZip[z][row.metric_name] = []
-      if (row.metric_value !== null) byZip[z][row.metric_name].push(row.metric_value)
+      if (row.metric_value !== null && !(row.metric_name in byZip[z])) {
+        byZip[z][row.metric_name] = row.metric_value
+      }
     }
 
-    // Normalize weights to sum to 1
-    const totalWeight = weights.jobGrowth + weights.rentGrowth + weights.permitDensity
-    const w = {
-      job: weights.jobGrowth / totalWeight,
-      rent: weights.rentGrowth / totalWeight,
-      permit: weights.permitDensity / totalWeight,
-    }
+    // Raw component values per ZIP
+    const raw = zips.map((zip) => {
+      const m = byZip[zip] ?? {}
+      const zillow = zillowMap.get(zip)
 
-    // Collect raw values for normalization across zips
-    const rawScores = zips.map((zip) => {
-      const metrics = byZip[zip] ?? {}
-      // Lower unemployment = better job market → invert
-      const unemployment = metrics['Unemployment_Rate']?.at(-1) ?? null
-      const jobScore = unemployment !== null ? Math.max(0, 100 - unemployment * 10) : null
-      const rent = metrics['Median_Gross_Rent']?.at(-1) ?? null
-      const permits = metrics['Permit_Count']?.at(-1) ?? null
+      const unemployment = m['Unemployment_Rate'] ?? null
+      const jobRaw = unemployment !== null ? Math.max(0, 100 - unemployment * 10) : null
 
-      return { zip, jobScore, rent, permits }
+      // Prefer ZORI growth, fall back to ZHVI growth
+      const rentGrowthPct = zillow?.zori_growth_12m ?? zillow?.zhvi_growth_12m ?? null
+
+      const permits = m['Permit_Units'] ?? m['Permit_Buildings'] ?? m['Permit_Count'] ?? null
+      const popGrowth = m['Population_Growth_3yr'] ?? null
+
+      return { zip, jobRaw, rentGrowthPct, permits, popGrowth }
     })
 
-    // Min-max normalize rent and permits across the set
-    const rents = rawScores.map((r) => r.rent).filter((v): v is number => v !== null)
-    const permits = rawScores.map((r) => r.permits).filter((v): v is number => v !== null)
-    const minRent = Math.min(...rents), maxRent = Math.max(...rents)
-    const minPermit = Math.min(...permits), maxPermit = Math.max(...permits)
-
-    const normalize = (val: number | null, min: number, max: number) => {
-      if (val === null || max === min) return null
-      return ((val - min) / (max - min)) * 100
+    // Min-max normalize each component across the ZIP set
+    function normalize(vals: (number | null)[], invert = false): Map<string, number | null> {
+      const valid = vals.filter((v): v is number => v !== null)
+      const min = valid.length ? Math.min(...valid) : NaN
+      const max = valid.length ? Math.max(...valid) : NaN
+      return new Map(
+        zips.map((zip, i) => {
+          const v = vals[i]
+          if (v === null || !Number.isFinite(min) || max === min) return [zip, null]
+          const t = (v - min) / (max - min)
+          return [zip, Math.round((invert ? 1 - t : t) * 100)]
+        })
+      )
     }
 
-    const scores: ZipScore[] = rawScores.map(({ zip, jobScore, rent, permits }) => {
-      const rentScore = normalize(rent, minRent, maxRent)
-      const permitScore = normalize(permits, minPermit, maxPermit)
+    const jobScores = normalize(raw.map((r) => r.jobRaw))
+    const rentScores = normalize(raw.map((r) => r.rentGrowthPct))
+    const permitScores = normalize(raw.map((r) => r.permits))
+    const popScores = normalize(raw.map((r) => r.popGrowth))
 
-      const components = { jobGrowth: jobScore, rentGrowth: rentScore, permitDensity: permitScore }
-      const available = [
-        jobScore !== null ? jobScore * w.job : null,
-        rentScore !== null ? rentScore * w.rent : null,
-        permitScore !== null ? permitScore * w.permit : null,
+    const scores: ZipScore[] = zips.map((zip) => {
+      const job = jobScores.get(zip) ?? null
+      const rent = rentScores.get(zip) ?? null
+      const permit = permitScores.get(zip) ?? null
+      const pop = popScores.get(zip) ?? null
+
+      const components = [
+        job !== null ? job * w.job : null,
+        rent !== null ? rent * w.rent : null,
+        permit !== null ? permit * w.permit : null,
+        pop !== null ? pop * w.pop : null,
       ].filter((v): v is number => v !== null)
 
-      const score = available.length ? Math.round(available.reduce((a, b) => a + b, 0)) : 0
+      const score = components.length ? Math.round(components.reduce((a, b) => a + b, 0)) : 0
+      const label: ZipScore['label'] = components.length === 0 ? 'No Data'
+        : score >= 65 ? 'Strong'
+        : score >= 35 ? 'Moderate'
+        : 'Weak'
 
-      return { zip, score, components }
+      return {
+        zip,
+        score,
+        label,
+        components: { jobMarket: job, rentGrowth: rent, permitDensity: permit, popGrowth: pop },
+      }
     })
 
-    return NextResponse.json({ weights, scores })
+    return NextResponse.json({ scores, zip_count: zips.length })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unexpected error'
     return NextResponse.json({ error: message }, { status: 500 })

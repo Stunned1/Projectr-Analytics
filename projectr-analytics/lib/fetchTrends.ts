@@ -19,6 +19,10 @@ import type { MasterDataRow } from './supabase'
 
 type PartialRow = Omit<MasterDataRow, 'id' | 'created_at'>
 
+export type FetchTrendsResult =
+  | { ok: true; rows: PartialRow[] }
+  | { ok: false; error: string }
+
 interface TrendPoint {
   time: string
   formattedTime: string
@@ -45,18 +49,25 @@ async function queryTrends(keyword: string, geo: string): Promise<TrendPoint[]> 
     endTime,
   })
 
-  const parsed = JSON.parse(raw)
+  let parsed: { default?: { timelineData?: TrendPoint[] } }
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    throw new Error('Google Trends response was not valid JSON')
+  }
   return parsed?.default?.timelineData ?? []
 }
 
-export async function fetchTrends(geo: GeoResult, zip: string): Promise<PartialRow[]> {
+/**
+ * @param submarketId - Stored on synthetic rows (ZIP code, or e.g. `city:Austin:TX`)
+ */
+export async function fetchTrends(geo: GeoResult, submarketId: string): Promise<FetchTrendsResult> {
   const stateGeo = `US-${geo.state}`
   const results: PartialRow[] = []
 
   try {
     let trendsResult: TrendsResult | null = null
 
-    // 1. Try city-level
     const cityKeyword = `apartments in ${geo.city}`
     const cityPoints = await queryTrends(cityKeyword, stateGeo)
     const cityHasData = cityPoints.some((p) => p.hasData[0] && p.value[0] > 0)
@@ -74,7 +85,6 @@ export async function fetchTrends(geo: GeoResult, zip: string): Promise<PartialR
           })),
       }
     } else {
-      // 2. Fall back to state-level — wait briefly to avoid rate limiting
       await new Promise((r) => setTimeout(r, 1000))
       const stateKeyword = `apartments ${geo.state}`
       const statePoints = await queryTrends(stateKeyword, stateGeo)
@@ -92,12 +102,13 @@ export async function fetchTrends(geo: GeoResult, zip: string): Promise<PartialR
       }
     }
 
-    if (!trendsResult || trendsResult.points.length === 0) return []
+    if (!trendsResult || trendsResult.points.length === 0) {
+      return { ok: true, rows: [] }
+    }
 
-    // Store as TIME_SERIES rows
     for (const point of trendsResult.points) {
       results.push({
-        submarket_id: zip,
+        submarket_id: submarketId,
         geometry: null,
         metric_name: trendsResult.isFallback
           ? 'Search_Interest_State'
@@ -109,11 +120,10 @@ export async function fetchTrends(geo: GeoResult, zip: string): Promise<PartialR
       })
     }
 
-    // Also store metadata row: latest value + whether it's a fallback
     const latest = trendsResult.points.at(-1)
     if (latest) {
       results.push({
-        submarket_id: zip,
+        submarket_id: submarketId,
         geometry: null,
         metric_name: 'Search_Interest_Latest',
         metric_value: latest.value,
@@ -122,9 +132,10 @@ export async function fetchTrends(geo: GeoResult, zip: string): Promise<PartialR
         visual_bucket: 'TABULAR',
       })
     }
-  } catch {
-    // Google Trends can be flaky — fail silently
-  }
 
-  return results
+    return { ok: true, rows: results }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Google Trends request failed'
+    return { ok: false, error: msg.length > 160 ? `${msg.slice(0, 157)}…` : msg }
+  }
 }

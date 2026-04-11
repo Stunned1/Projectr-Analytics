@@ -26,12 +26,30 @@ async function fredObs(seriesId: string, key: string, limit = 24) {
 }
 
 // ── FRED ──────────────────────────────────────────────────────────────────────
+/** FRED search text: NYC borough ZCTAs geocode to place names (e.g. Staten Island) that do not match county series titles (Richmond County). */
+function countyLabelForFredSearch(geo: GeoResult): string {
+  const st = geo.state
+  const co = geo.countyFips.padStart(3, '0')
+  if (st === 'NY') {
+    const nyc: Record<string, string> = {
+      '061': 'New York County',
+      '047': 'Kings County',
+      '081': 'Queens County',
+      '005': 'Bronx County',
+      '085': 'Richmond County',
+    }
+    if (nyc[co]) return `${nyc[co]} ${st}`
+  }
+  return `${geo.city} County ${st}`
+}
+
 export async function fetchFred(geo: GeoResult, zip: string): Promise<PartialRow[]> {
-  const key = process.env.FRED_API_KEY!
+  const key = process.env.FRED_API_KEY
   const results: PartialRow[] = []
+  if (!key) return results
 
   try {
-    const countyQuery = `${geo.city} county ${geo.state}`
+    const countyQuery = countyLabelForFredSearch(geo)
 
     // Fire all 3 FRED searches concurrently
     const [unemploySeries, laborForceSeries, employedSeries, gdpSeries] = await Promise.all([
@@ -107,7 +125,7 @@ export async function fetchHud(geo: GeoResult, zip: string): Promise<PartialRow[
     } catch { /* fall through */ }
   }
 
-  // Fallback: Census ACS B25031 — median gross rent by bedrooms
+  // Fallback: Census ACS B25031 - median gross rent by bedrooms
   try {
     const key = process.env.CENSUS_API_KEY
     const vars = 'B25031_001E,B25031_002E,B25031_003E,B25031_004E,B25031_005E,B25031_006E'
@@ -210,7 +228,7 @@ export async function fetchCensus(zip: string, geo: GeoResult): Promise<PartialR
 }
 
 // ── BUILDING PERMITS (Census BPS) ─────────────────────────────────────────────
-// Census Building Permits Survey — county level annual CSV
+// Census Building Permits Survey - county level annual CSV
 // URL: https://www2.census.gov/econ/bps/County/co{YEAR}a.txt
 export async function fetchPermits(geo: GeoResult, zip: string): Promise<PartialRow[]> {
   const results: PartialRow[] = []

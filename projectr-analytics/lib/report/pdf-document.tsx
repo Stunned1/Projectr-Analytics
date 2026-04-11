@@ -1,0 +1,695 @@
+import React from 'react'
+import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/renderer'
+import type { CycleAnalysis } from '@/lib/cycle/types'
+import type {
+  ClientReportPayload,
+  GeminiBriefResult,
+  MetroBenchmark,
+  SignalIndicator,
+} from './types'
+import type { MarketDossierGemini } from './gemini-market-dossier'
+import { BarChartPdf, SparklinePdf } from './pdf-charts'
+import { CycleSignalTilesPdf, CycleWheelPdf } from './pdf-cycle-visual'
+import { PdfTrendArrow, trendKindToVariant, signalIndicatorToVariant } from './pdf-trend-arrow'
+import type { ZoriSeriesSource } from './fetch-zori-series'
+import { METHODOLOGY_PDF_ROWS } from '@/lib/metric-definitions'
+
+/** A4 content width (595.28pt − 40pt padding × 2). Fixed pt width fixes @react-pdf Text wrap. */
+const PDF_CONTENT_WIDTH_PT = 515
+
+const accent = '#D76B3D'
+const ink = '#1a1a1a'
+const muted = '#666666'
+
+const styles = StyleSheet.create({
+  page: {
+    paddingTop: 36,
+    paddingHorizontal: 40,
+    paddingBottom: 40,
+    fontFamily: 'Helvetica',
+    fontSize: 9,
+    color: ink,
+    backgroundColor: '#ffffff',
+  },
+  headerBand: {
+    backgroundColor: '#0a0a0a',
+    paddingVertical: 14,
+    paddingHorizontal: 40,
+    marginHorizontal: -40,
+    marginTop: -36,
+    marginBottom: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  brand: { color: '#ffffff', fontSize: 11, letterSpacing: 2, fontFamily: 'Helvetica', fontWeight: 'bold' },
+  meta: { color: '#9ca3af', fontSize: 8, textAlign: 'right' },
+  h1: {
+    fontSize: 22,
+    fontFamily: 'Helvetica',
+    fontWeight: 'bold',
+    color: ink,
+    marginBottom: 10,
+    lineHeight: 1.3,
+    /** Numeric pt - percentage width on Text often resolves wrong in @react-pdf and clips to one line. */
+    width: PDF_CONTENT_WIDTH_PT,
+  },
+  narrative: {
+    fontSize: 10,
+    lineHeight: 1.45,
+    color: '#333',
+    marginBottom: 10,
+    width: PDF_CONTENT_WIDTH_PT,
+  },
+  body: {
+    width: PDF_CONTENT_WIDTH_PT,
+    alignSelf: 'flex-start',
+  },
+  signalRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 6 },
+  signalCard: {
+    width: '47%',
+    borderWidth: 1,
+    borderColor: '#e5e5e5',
+    borderRadius: 4,
+    padding: 8,
+    marginBottom: 8,
+    marginRight: '3%',
+  },
+  signalTitle: { fontFamily: 'Helvetica', fontWeight: 'bold', fontSize: 8, color: accent, marginBottom: 4 },
+  signalArrow: { fontSize: 14, fontFamily: 'Helvetica', fontWeight: 'bold', marginBottom: 2 },
+  signalLine: { fontSize: 8, color: '#444', lineHeight: 1.35 },
+  confidence: {
+    marginTop: 10,
+    padding: 10,
+    backgroundColor: '#fafafa',
+    borderLeftWidth: 3,
+    borderLeftColor: accent,
+    fontSize: 9,
+    fontFamily: 'Helvetica',
+    fontWeight: 'bold',
+    width: PDF_CONTENT_WIDTH_PT,
+  },
+  sectionTitle: {
+    fontSize: 11,
+    fontFamily: 'Helvetica',
+    fontWeight: 'bold',
+    color: ink,
+    marginTop: 16,
+    marginBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e5e5',
+    paddingBottom: 4,
+  },
+  tableRow: { flexDirection: 'row', borderBottomWidth: 0.5, borderBottomColor: '#eee', paddingVertical: 5 },
+  th: { fontFamily: 'Helvetica', fontWeight: 'bold', fontSize: 8, color: '#555' },
+  td: { fontSize: 8, color: ink },
+  foot: { marginTop: 12, fontSize: 7, color: muted, lineHeight: 1.35 },
+  methTitle: {
+    fontSize: 9,
+    fontFamily: 'Helvetica',
+    fontWeight: 'bold',
+    color: ink,
+    marginTop: 12,
+    marginBottom: 6,
+  },
+  methHeaderRow: { flexDirection: 'row', borderBottomWidth: 0.5, borderBottomColor: '#ddd', paddingBottom: 3, marginBottom: 2 },
+  methRow: { flexDirection: 'row', paddingVertical: 3 },
+  methColMetric: { width: '18%', fontSize: 6.5, fontFamily: 'Helvetica', fontWeight: 'bold', color: '#444' },
+  methColDef: { width: '57%', fontSize: 6.5, color: '#555', lineHeight: 1.35, paddingRight: 6 },
+  methColSrc: { width: '25%', fontSize: 6.5, color: muted, lineHeight: 1.35 },
+  dossierKicker: {
+    fontSize: 8,
+    color: accent,
+    fontFamily: 'Helvetica',
+    fontWeight: 'bold',
+    letterSpacing: 1.2,
+    marginBottom: 6,
+  },
+  dossierIntro: {
+    fontSize: 8,
+    lineHeight: 1.45,
+    color: '#444',
+    marginBottom: 10,
+    padding: 10,
+    backgroundColor: '#f8f6f4',
+    borderLeftWidth: 3,
+    borderLeftColor: accent,
+    width: PDF_CONTENT_WIDTH_PT,
+  },
+  dossierCard: {
+    width: '48%',
+    borderWidth: 1,
+    borderColor: '#e8e0d8',
+    borderRadius: 5,
+    padding: 9,
+    marginBottom: 8,
+    marginRight: '2%',
+    backgroundColor: '#fdfcfa',
+    minHeight: 72,
+  },
+  dossierCardFull: {
+    width: PDF_CONTENT_WIDTH_PT,
+    borderWidth: 1,
+    borderColor: '#e8e0d8',
+    borderRadius: 5,
+    padding: 10,
+    marginBottom: 10,
+    backgroundColor: '#fdfcfa',
+  },
+  dossierCardTitle: {
+    fontSize: 9,
+    fontFamily: 'Helvetica',
+    fontWeight: 'bold',
+    color: accent,
+    marginBottom: 5,
+  },
+  dossierCardBody: { fontSize: 8, lineHeight: 1.45, color: '#333', width: '100%' },
+  dossierListTitle: {
+    fontSize: 9,
+    fontFamily: 'Helvetica',
+    fontWeight: 'bold',
+    color: ink,
+    marginBottom: 5,
+    marginTop: 4,
+  },
+  dossierBullet: { fontSize: 8, color: '#333', marginBottom: 4, paddingLeft: 8, lineHeight: 1.4, width: '100%' },
+  dossierLimitations: {
+    marginTop: 10,
+    padding: 9,
+    backgroundColor: '#fafafa',
+    borderWidth: 1,
+    borderColor: '#e5e5e5',
+    borderRadius: 4,
+    fontSize: 7.5,
+    color: '#555',
+    lineHeight: 1.45,
+    width: PDF_CONTENT_WIDTH_PT,
+  },
+})
+
+function fmtMoney(n: number | null | undefined) {
+  if (n == null || !Number.isFinite(n)) return '-'
+  return '$' + Math.round(n).toLocaleString('en-US')
+}
+
+/**
+ * Multiple shorter Text nodes wrap/page-break more reliably than one long @react-pdf Text
+ * (percentage width + single block often clips mid-line at the page margin).
+ */
+function narrativeTextBlocks(raw: string): string[] {
+  const t = raw
+    .replace(/\r\n/g, '\n')
+    .replace(/\u2019/g, "'")
+    .replace(/[\u2028\u2029\u00a0]/g, ' ')
+    .trim()
+  if (!t) return []
+
+  const out: string[] = []
+  for (const para of t.split(/\n+/).map((p) => p.trim()).filter(Boolean)) {
+    if (para.length <= 300) {
+      out.push(para)
+      continue
+    }
+    const sentences = para.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean)
+    if (sentences.length > 1) out.push(...sentences)
+    else out.push(para)
+  }
+  return out.length > 0 ? out : [t]
+}
+
+export interface SiteCompareRow {
+  label: string
+  zip: string
+  zori: number | null
+  momentum: number | null
+  signalLine: string
+  cyclePhase: string | null
+}
+
+export interface MarketReportPdfInput {
+  payload: ClientReportPayload
+  brief: GeminiBriefResult
+  dossier: MarketDossierGemini
+  signals: SignalIndicator[]
+  cycleAnalysis: CycleAnalysis | null
+  zoriSeries: { date: string; value: number }[]
+  zoriSeriesSource: ZoriSeriesSource
+  trendsSeries: { date: string; value: number }[]
+  metro: MetroBenchmark | null
+  logoDataUri: string | null
+  siteRows: SiteCompareRow[] | null
+}
+
+export function MarketReportDocument(props: MarketReportPdfInput) {
+  const {
+    payload,
+    brief,
+    dossier,
+    signals,
+    cycleAnalysis,
+    zoriSeries,
+    zoriSeriesSource,
+    trendsSeries,
+    metro,
+    logoDataUri,
+    siteRows,
+  } = props
+  const dateStr = new Date(payload.generatedAt).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  })
+
+  const metroZori = metro?.avg_zori ?? null
+  const metroZhvi = metro?.avg_zhvi ?? null
+  const metroVac = metro?.avg_vacancy_rate ?? null
+  const metroUnemp = metro?.avg_unemployment_rate ?? null
+  const metroMig = metro?.avg_migration_movers ?? null
+
+  const tableRows: {
+    label: string
+    sub: string
+    bench: string
+    signalKey?: 'rent' | 'vacancy' | 'permits' | 'employment'
+  }[] = [
+    {
+      label: 'Median rent (ZORI index)',
+      sub: fmtMoney(payload.zillow.zori),
+      bench: fmtMoney(metroZori),
+      signalKey: 'rent',
+    },
+    {
+      label: 'Vacancy rate',
+      sub: payload.census.vacancy_rate != null ? `${payload.census.vacancy_rate.toFixed(1)}%` : '-',
+      bench: metroVac != null ? `${metroVac.toFixed(1)}% avg` : '-',
+      signalKey: 'vacancy',
+    },
+    {
+      label: 'Permits (county BPS, 2021–23 units)',
+      sub: payload.permits.total_units_2021_2023 != null ? String(Math.round(payload.permits.total_units_2021_2023)) : '-',
+      bench: 'County scope',
+      signalKey: 'permits',
+    },
+    {
+      label: 'Median home value (ZHVI)',
+      sub: fmtMoney(payload.zillow.zhvi),
+      bench: fmtMoney(metroZhvi),
+    },
+    {
+      label: 'Employment (local)',
+      sub:
+        payload.employment.employment_rate != null
+          ? `${payload.employment.employment_rate.toFixed(1)}% employed (est.)`
+          : payload.employment.unemployment_rate != null
+            ? `${payload.employment.unemployment_rate.toFixed(1)}% unemployment`
+            : '-',
+      bench:
+        metroUnemp != null
+          ? `${metroUnemp.toFixed(1)}% unempl. (avg)`
+          : '-',
+      signalKey: 'employment',
+    },
+    {
+      label: 'Migration / mobility (ACS)',
+      sub:
+        payload.census.migration_movers != null
+          ? `${Math.round(payload.census.migration_movers).toLocaleString()} movers (diff. state)`
+          : '-',
+      bench:
+        metroMig != null
+          ? `${metroMig.toLocaleString()} movers (avg / ZIP)`
+          : '-',
+    },
+  ]
+
+  const permitBars = payload.permits.by_year.map((y) => ({ label: y.year, value: y.units }))
+
+  const trends12 = [...trendsSeries]
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(-12)
+
+  return (
+    <Document title={`Scout Brief - ${payload.marketLabel}`} author="Scout">
+      {/* Page 1 - Brief */}
+      <Page size="A4" style={styles.page}>
+        <View style={styles.headerBand}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>SCOUT</Text>}
+          </View>
+          <View>
+            <Text style={styles.meta}>Market Report</Text>
+            <Text style={styles.meta}>{dateStr}</Text>
+          </View>
+        </View>
+
+        <View style={styles.body}>
+          <Text style={{ fontSize: 9, color: muted, marginBottom: 4 }} wrap>
+            {payload.marketLabel}
+          </Text>
+          <Text style={styles.h1} wrap hyphenationCallback={(word) => [word]}>
+            {brief.cycleHeadline}
+          </Text>
+          {narrativeTextBlocks(brief.narrative).map((block, i) => (
+            <Text
+              key={i}
+              style={[styles.narrative, ...(i > 0 ? [{ marginTop: 6 }] : [])]}
+              wrap
+              hyphenationCallback={(word) => [word]}
+            >
+              {block}
+            </Text>
+          ))}
+
+          {cycleAnalysis ? (
+            <>
+              <Text style={[styles.sectionTitle, { marginTop: 8 }]}>Cycle map</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 8, width: '100%' }}>
+                <CycleWheelPdf cycle={cycleAnalysis} />
+                <View style={{ flex: 1, minWidth: 120, paddingTop: 4, marginLeft: 14 }}>
+                  <Text
+                    style={{ fontSize: 8, color: ink, fontFamily: 'Helvetica', fontWeight: 'bold', width: '100%' }}
+                    wrap
+                    hyphenationCallback={(word) => [word]}
+                  >
+                    {cycleAnalysis.cycleStage} {cycleAnalysis.cyclePosition}
+                  </Text>
+                  <Text
+                    style={{ fontSize: 7, color: muted, marginTop: 4, lineHeight: 1.35, width: '100%' }}
+                    wrap
+                    hyphenationCallback={(word) => [word]}
+                  >
+                    Dot color reflects confidence; stroke indicates trajectory hint. Quadrants: Recovery (upper-left),
+                    Expansion (upper-right), Hypersupply (lower-right), Recession (lower-left).
+                  </Text>
+                </View>
+              </View>
+              <Text style={[styles.sectionTitle, { marginTop: 4 }]}>Signals</Text>
+              <CycleSignalTilesPdf cycle={cycleAnalysis} />
+            </>
+          ) : (
+            <View style={styles.signalRow}>
+              {signals.map((s) => (
+                <View key={s.id} style={styles.signalCard}>
+                  <Text style={styles.signalTitle}>{s.label}</Text>
+                  <View style={{ height: 14, marginBottom: 2, justifyContent: 'center' }}>
+                    <PdfTrendArrow variant={signalIndicatorToVariant(s)} color={accent} />
+                  </View>
+                  <Text style={styles.signalLine} wrap>
+                    {s.line}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+          <Text style={styles.confidence} wrap hyphenationCallback={(word) => [word]}>
+            Confidence - {brief.confidenceLine}
+          </Text>
+
+          <Text style={styles.methTitle}>Methodology & definitions</Text>
+          <Text style={{ fontSize: 6.5, color: muted, marginBottom: 6, width: PDF_CONTENT_WIDTH_PT }} wrap>
+            Key metrics below are documented for client deliverables. Cycle position uses four directional signals (rent,
+            vacancy, permits, employment); momentum blends labor, rent level, and permit volume vs. a ZIP comparison set.
+          </Text>
+          <View style={styles.methHeaderRow}>
+            <Text style={styles.methColMetric}>Metric</Text>
+            <Text style={styles.methColDef}>Definition</Text>
+            <Text style={styles.methColSrc}>Source</Text>
+          </View>
+          {METHODOLOGY_PDF_ROWS.map((row) => (
+            <View key={row.metric} style={styles.methRow}>
+              <Text style={styles.methColMetric}>{row.metric}</Text>
+              <Text style={styles.methColDef} wrap hyphenationCallback={(word) => [word]}>
+                {row.definition}
+              </Text>
+              <Text style={styles.methColSrc} wrap hyphenationCallback={(word) => [word]}>
+                {row.source}
+              </Text>
+            </View>
+          ))}
+
+          {cycleAnalysis && (
+            <Text style={[styles.foot, { marginBottom: 6, width: PDF_CONTENT_WIDTH_PT }]} wrap hyphenationCallback={(word) => [word]}>
+              Analytical cycle classifier: {cycleAnalysis.signalsAgreement}/4 signals agree · data quality{' '}
+              {cycleAnalysis.dataQuality}
+              {cycleAnalysis.transitional ? ' · transitional / mixed read' : ''}.
+            </Text>
+          )}
+
+          <Text style={[styles.foot, { width: PDF_CONTENT_WIDTH_PT }]} wrap hyphenationCallback={(word) => [word]}>
+            Scout · Data: Zillow Research (ZORI/ZHVI), Census ACS & BPS, FRED, Google Trends.
+            {zoriSeriesSource === 'zillow_monthly'
+              ? ' ZORI trend uses monthly index values from ingested Zillow Research data.'
+              : ' ZORI trend is modeled from latest index and YoY until the zillow_zori_monthly table is populated (npm run ingest:zillow).'}
+          </Text>
+        </View>
+      </Page>
+
+      {/* Dossier p1 - Gemini whole-market narrative */}
+      <Page size="A4" style={styles.page}>
+        <View style={styles.headerBand}>
+          {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>SCOUT</Text>}
+          <View>
+            <Text style={styles.meta}>Market intelligence dossier</Text>
+            <Text style={styles.meta}>{payload.marketLabel}</Text>
+          </View>
+        </View>
+        <Text style={styles.dossierKicker}>AI-GENERATED · FULL MARKET CONTEXT</Text>
+        <Text style={styles.dossierIntro} wrap hyphenationCallback={(word) => [word]}>
+          {dossier.geographyContext}
+        </Text>
+        <Text style={styles.sectionTitle}>Executive summary (dossier)</Text>
+        {narrativeTextBlocks(dossier.executiveSummary).map((block, i) => (
+          <Text
+            key={`d-exec-${i}`}
+            style={[styles.narrative, { marginBottom: 6 }]}
+            wrap
+            hyphenationCallback={(word) => [word]}
+          >
+            {block}
+          </Text>
+        ))}
+        <Text style={styles.sectionTitle}>Thematic deep dive</Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', width: PDF_CONTENT_WIDTH_PT }}>
+          <View style={styles.dossierCard}>
+            <Text style={styles.dossierCardTitle}>{dossier.demandAndDemographics.title}</Text>
+            <Text style={styles.dossierCardBody} wrap hyphenationCallback={(word) => [word]}>
+              {dossier.demandAndDemographics.body}
+            </Text>
+          </View>
+          <View style={styles.dossierCard}>
+            <Text style={styles.dossierCardTitle}>{dossier.supplyAndConstruction.title}</Text>
+            <Text style={styles.dossierCardBody} wrap hyphenationCallback={(word) => [word]}>
+              {dossier.supplyAndConstruction.body}
+            </Text>
+          </View>
+          <View style={styles.dossierCard}>
+            <Text style={styles.dossierCardTitle}>{dossier.pricingAndCapitalMarkets.title}</Text>
+            <Text style={styles.dossierCardBody} wrap hyphenationCallback={(word) => [word]}>
+              {dossier.pricingAndCapitalMarkets.body}
+            </Text>
+          </View>
+          <View style={styles.dossierCard}>
+            <Text style={styles.dossierCardTitle}>{dossier.laborAndMacro.title}</Text>
+            <Text style={styles.dossierCardBody} wrap hyphenationCallback={(word) => [word]}>
+              {dossier.laborAndMacro.body}
+            </Text>
+          </View>
+        </View>
+      </Page>
+
+      {/* Dossier p2 - peer read, risks, opportunities, scenarios */}
+      <Page size="A4" style={styles.page}>
+        <View style={styles.headerBand}>
+          {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>SCOUT</Text>}
+          <Text style={styles.meta}>Dossier (continued) · {payload.marketLabel}</Text>
+        </View>
+        <Text style={styles.sectionTitle}>Peer & benchmark read</Text>
+        {narrativeTextBlocks(dossier.peerAndBenchmarkRead).map((block, i) => (
+          <Text
+            key={`d-peer-${i}`}
+            style={[styles.narrative, { marginBottom: 6 }]}
+            wrap
+            hyphenationCallback={(word) => [word]}
+          >
+            {block}
+          </Text>
+        ))}
+        <View style={{ flexDirection: 'row', width: PDF_CONTENT_WIDTH_PT, marginTop: 6 }}>
+          <View style={{ width: '49%', paddingRight: 6 }}>
+            <Text style={styles.dossierListTitle}>Key risks</Text>
+            {dossier.risks.map((r, i) => (
+              <Text key={`r-${i}`} style={styles.dossierBullet} wrap hyphenationCallback={(word) => [word]}>
+                • {r}
+              </Text>
+            ))}
+          </View>
+          <View style={{ width: '49%', paddingLeft: 6 }}>
+            <Text style={styles.dossierListTitle}>Opportunities</Text>
+            {dossier.opportunities.map((r, i) => (
+              <Text key={`o-${i}`} style={styles.dossierBullet} wrap hyphenationCallback={(word) => [word]}>
+                • {r}
+              </Text>
+            ))}
+          </View>
+        </View>
+        <Text style={styles.dossierListTitle}>Underwriting scenarios</Text>
+        {dossier.scenarios.map((s, i) => (
+          <Text key={`s-${i}`} style={styles.dossierBullet} wrap hyphenationCallback={(word) => [word]}>
+            {i + 1}. {s}
+          </Text>
+        ))}
+      </Page>
+
+      {/* Dossier p3 - monitoring & limitations (keeps p2 from overflowing) */}
+      <Page size="A4" style={styles.page}>
+        <View style={styles.headerBand}>
+          {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>SCOUT</Text>}
+          <Text style={styles.meta}>Dossier (continued) · {payload.marketLabel}</Text>
+        </View>
+        <Text style={styles.dossierListTitle}>Monitoring checklist</Text>
+        {dossier.monitoringChecklist.map((s, i) => (
+          <Text key={`m-${i}`} style={styles.dossierBullet} wrap hyphenationCallback={(word) => [word]}>
+            □ {s}
+          </Text>
+        ))}
+        <Text style={[styles.sectionTitle, { marginTop: 12 }]}>Data limitations</Text>
+        <Text style={styles.dossierLimitations} wrap hyphenationCallback={(word) => [word]}>
+          {dossier.limitations}
+        </Text>
+        <Text style={[styles.foot, { marginTop: 10 }]} wrap hyphenationCallback={(word) => [word]}>
+          Dossier narrative is model-generated from the same cached metrics as the charts in this PDF; validate material
+          decisions against primary sources (Zillow Research, Census, FRED).
+        </Text>
+      </Page>
+
+      {/* Data page 1 - table + rent & permits charts */}
+      <Page size="A4" style={styles.page}>
+        <View style={styles.headerBand}>
+          {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>SCOUT</Text>}
+          <Text style={styles.meta}>Market data · {payload.marketLabel}</Text>
+        </View>
+
+        <Text style={styles.sectionTitle}>Key metrics vs. metro benchmark</Text>
+        <View style={{ flexDirection: 'row', paddingBottom: 4 }}>
+          <Text style={[styles.th, { width: '38%' }]}>Metric</Text>
+          <Text style={[styles.th, { width: '22%' }]}>Submarket</Text>
+          <Text style={[styles.th, { width: '10%' }]}>Signal</Text>
+          <Text style={[styles.th, { width: '30%' }]}>Metro peer avg</Text>
+        </View>
+        {tableRows.map((r) => (
+          <View key={r.label} style={[styles.tableRow, { flexDirection: 'row', alignItems: 'flex-start' }]}>
+            <Text style={[styles.td, { width: '38%' }]} wrap hyphenationCallback={(word) => [word]}>
+              {r.label}
+            </Text>
+            <Text
+              style={[styles.td, { width: '22%', fontFamily: 'Helvetica', fontWeight: 'bold' }]}
+              wrap
+              hyphenationCallback={(word) => [word]}
+            >
+              {r.sub}
+            </Text>
+            <View style={{ width: '10%', alignItems: 'center', justifyContent: 'flex-start', paddingTop: 2, minHeight: 14 }}>
+              {r.signalKey && cycleAnalysis ? (
+                <PdfTrendArrow
+                  variant={trendKindToVariant(r.signalKey, cycleAnalysis.signals[r.signalKey].score)}
+                  color={ink}
+                />
+              ) : (
+                <Text style={[styles.td, { textAlign: 'center' }]}>-</Text>
+              )}
+            </View>
+            <Text style={[styles.td, { width: '30%', color: muted }]} wrap hyphenationCallback={(word) => [word]}>
+              {r.bench}
+            </Text>
+          </View>
+        ))}
+        {metro && (
+          <Text style={[styles.foot, { marginTop: 6 }]}>
+            Metro peer column: ZORI/ZHVI are simple means across {metro.zip_count} Zillow-tracked ZIPs in the same metro.
+            Vacancy, unemployment, and migration benchmarks are simple means across peer ZIPs that have those rows in
+            cache (ACS / FRED) - many peers may be missing data until cold-loaded.
+          </Text>
+        )}
+
+        <Text style={styles.sectionTitle}>
+          Rent trajectory (ZORI - {zoriSeriesSource === 'zillow_monthly' ? 'monthly, Zillow Research' : 'modeled from latest + YoY'})
+        </Text>
+        <SparklinePdf data={zoriSeries} width={PDF_CONTENT_WIDTH_PT} height={68} />
+
+        <Text style={styles.sectionTitle}>Permit acceleration (Census BPS, county)</Text>
+        <BarChartPdf bars={permitBars} width={PDF_CONTENT_WIDTH_PT} height={108} />
+      </Page>
+
+      {/* Data page 2 - trends + data footnotes (avoids chart stack overflow) */}
+      <Page size="A4" style={styles.page}>
+        <View style={styles.headerBand}>
+          {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>SCOUT</Text>}
+          <Text style={styles.meta}>Market data (continued) · {payload.marketLabel}</Text>
+        </View>
+
+        <Text style={styles.sectionTitle}>Search sentiment (Google Trends)</Text>
+        <Text style={{ fontSize: 7, color: muted, marginBottom: 4, width: PDF_CONTENT_WIDTH_PT }} wrap>
+          {payload.trends.keyword_scope}
+        </Text>
+        <SparklinePdf data={trends12} width={PDF_CONTENT_WIDTH_PT} height={68} color="#64748b" />
+
+        <Text style={[styles.foot, { marginTop: 14, width: PDF_CONTENT_WIDTH_PT }]} wrap hyphenationCallback={(word) => [word]}>
+          FRED uses the first ZIP&apos;s county; the employment row prefers a computed employment rate when labor-force
+          series match, otherwise latest unemployment. Vacancy, migration, and BPS permits need Census ACS/BPS rows in
+          Supabase for this area (cold-load at least one ZIP via the map). County BPS counts are identical for all ZIPs in
+          the same county - the chart uses one anchor ZIP&apos;s yearly series.
+        </Text>
+      </Page>
+
+      {/* Site comparison */}
+      {siteRows && siteRows.length >= 2 && (
+        <Page size="A4" style={styles.page}>
+          <View style={styles.headerBand}>
+            {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>SCOUT</Text>}
+            <Text style={styles.meta}>Site comparison</Text>
+          </View>
+
+          <Text style={styles.sectionTitle}>Ranked by momentum score</Text>
+          <View style={{ flexDirection: 'row', paddingBottom: 4 }}>
+            <Text style={[styles.th, { width: '7%' }]}>#</Text>
+            <Text style={[styles.th, { width: '18%' }]}>Site</Text>
+            <Text style={[styles.th, { width: '12%' }]}>ZIP</Text>
+            <Text style={[styles.th, { width: '12%' }]}>ZORI</Text>
+            <Text style={[styles.th, { width: '10%' }]}>Mom.</Text>
+            <Text style={[styles.th, { width: '18%' }]}>Cycle</Text>
+            <Text style={[styles.th, { width: '23%' }]}>Read</Text>
+          </View>
+          {[...siteRows].sort((a, b) => (b.momentum ?? -1) - (a.momentum ?? -1)).map((r, i) => (
+            <View key={r.label + r.zip} style={[styles.tableRow, { flexDirection: 'row', alignItems: 'flex-start' }]}>
+              <Text style={[styles.td, { width: '7%' }]} wrap={false}>
+                {i + 1}
+              </Text>
+              <Text style={[styles.td, { width: '18%' }]} wrap hyphenationCallback={(word) => [word]}>
+                {r.label}
+              </Text>
+              <Text style={[styles.td, { width: '12%' }]} wrap={false}>
+                {r.zip}
+              </Text>
+              <Text style={[styles.td, { width: '12%' }]} wrap={false}>
+                {fmtMoney(r.zori)}
+              </Text>
+              <Text style={[styles.td, { width: '10%' }]} wrap={false}>
+                {r.momentum != null ? String(r.momentum) : '-'}
+              </Text>
+              <Text style={[styles.td, { width: '18%', fontSize: 7 }]} wrap hyphenationCallback={(word) => [word]}>
+                {r.cyclePhase ?? '-'}
+              </Text>
+              <Text style={[styles.td, { width: '23%', fontSize: 7 }]} wrap hyphenationCallback={(word) => [word]}>
+                {r.signalLine}
+              </Text>
+            </View>
+          ))}
+
+          <Text style={styles.foot}>
+            Momentum score from /api/momentum; cycle phase from the same cached inputs as the ZIP classifier (no extra API calls).
+          </Text>
+        </Page>
+      )}
+    </Document>
+  )
+}
