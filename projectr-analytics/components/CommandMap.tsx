@@ -394,6 +394,8 @@ interface CommandMapProps {
   agentFlyTo?: { lat: number; lng: number } | null
   /** Fired when toggles or agent overrides change — used for PDF export layer legend. */
   onLayersChange?: (snapshot: LayerState & { choroplethMetric: 'zori' | 'zhvi' }) => void
+  /** Fired when user manually toggles a layer — clears agent override for that key */
+  onClearAgentOverride?: (key: string) => void
 }
 
 function CommandMap({
@@ -411,6 +413,7 @@ function CommandMap({
   agentTilt,
   agentFlyTo,
   onLayersChange,
+  onClearAgentOverride,
 }: CommandMapProps) {
   const perfDebug = process.env.NEXT_PUBLIC_PERF_DEBUG === '1'
 
@@ -1340,7 +1343,9 @@ function CommandMap({
 
   const handleToggle = useCallback((key: keyof LayerState) => {
     setLayers((prev) => ({ ...prev, [key]: !prev[key] }))
-  }, [])
+    // Clear agent override for this key so user toggle takes effect
+    onClearAgentOverride?.(key)
+  }, [onClearAgentOverride])
 
   return (
     <div className="relative w-full h-full">

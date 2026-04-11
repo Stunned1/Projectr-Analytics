@@ -988,6 +988,11 @@ export default function Home() {
           agentTilt={agentTilt}
           agentFlyTo={agentFlyTo}
           onLayersChange={handleMapLayersChange}
+          onClearAgentOverride={(key) => setAgentLayerOverrides((prev) => {
+            const next = { ...prev }
+            delete next[key]
+            return next
+          })}
         />
 
         {/* Floating stats bubble */}
