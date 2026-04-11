@@ -49,7 +49,7 @@ function SiteLabelInput({
         if (t !== label) void updateLabel(siteId, t)
       }}
       className="h-6 rounded border border-sidebar-border bg-sidebar-accent/40 px-1.5 text-[11px] font-medium text-sidebar-foreground placeholder:text-muted-foreground focus-visible:border-primary"
-      title="Site name — shown in PDF and map"
+      title="Site name - shown in PDF and map"
       aria-label="Site name"
     />
   )
@@ -198,7 +198,7 @@ export default function ShortlistPanel({ onOpenSite }: { onOpenSite: (site: Site
                         cycleBadgeClass(s.cycleStage)
                       )}
                     >
-                      {s.cycleStage ?? '—'} {s.cyclePosition ?? ''}
+                      {s.cycleStage ?? '-'} {s.cyclePosition ?? ''}
                     </Badge>
                   )}
                   {s.momentumScore != null && (

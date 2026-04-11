@@ -32,7 +32,7 @@ async function geocodeViaGoogle(
   const status = typeof data?.status === 'string' ? data.status : ''
   const googleDetail =
     typeof data?.error_message === 'string' && data.error_message.length > 0
-      ? ` — ${data.error_message}`
+      ? ` - ${data.error_message}`
       : ''
 
   if (!location || typeof location.lat !== 'number' || typeof location.lng !== 'number') {

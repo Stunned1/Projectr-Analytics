@@ -6,7 +6,7 @@ import { PdfTrendArrow, trendKindToVariant, type TrendSignalKind } from '@/lib/r
 
 function tileSignalLine(s: string | null | undefined): string {
   const t = sanitizeCycleSignalText(s)
-  return t.length > 0 ? t : '—'
+  return t.length > 0 ? t : '-'
 }
 
 function normalizeSignalScore(raw: unknown): -1 | 0 | 1 {
@@ -34,7 +34,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
-  /** Explicit width — flex:1 tiles often collapse text width to 0 in @react-pdf row layouts. */
+  /** Explicit width - flex:1 tiles often collapse text width to 0 in @react-pdf row layouts. */
   tile: {
     width: '23.5%',
     borderRadius: 4,

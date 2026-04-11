@@ -76,7 +76,7 @@ interface AgentChatProps {
   isOpen: boolean
   onToggle: () => void
   hasStatsBar?: boolean
-  /** `docked` — no floating FAB; parent renders the open button (e.g. sidebar). */
+  /** `docked` - no floating FAB; parent renders the open button (e.g. sidebar). */
   variant?: 'floating' | 'docked'
   /** Prefer over onToggle for explicit close (×). */
   onClose?: () => void
@@ -216,7 +216,7 @@ export default function AgentChat({
       if (data.error || !data.sites?.length) {
         setMessages((prev) => [...prev.slice(0, -1), {
           role: 'agent',
-          text: `Analysis complete — no qualifying sites found. ${data.error ?? ''}`,
+          text: `Analysis complete - no qualifying sites found. ${data.error ?? ''}`,
         }])
         if (!isOpen) onNotifyWhileClosed?.()
         return

@@ -1,6 +1,6 @@
 /**
  * Borough / city search only hits `/api/aggregate`, which reads `projectr_master_data`.
- * That table is populated by `/api/market` cold starts — without a prior ZIP load, ACS + BPS are empty.
+ * That table is populated by `/api/market` cold starts - without a prior ZIP load, ACS + BPS are empty.
  * This helper mirrors the market cold fetch for ZIPs that lack cache so aggregates and PDFs populate.
  */
 

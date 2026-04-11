@@ -1,5 +1,5 @@
 /**
- * OSM Amenity Points — for HeatmapLayer visualization
+ * OSM Amenity Points - for HeatmapLayer visualization
  * Returns lat/lng points for restaurants, shops, schools, transit, parks etc.
  * Each point has a weight based on amenity type (higher = more significant)
  * Used to show activity/walkability density within a ZIP
@@ -8,9 +8,9 @@ import { type NextRequest, NextResponse } from 'next/server'
 
 export const dynamic = 'force-dynamic'
 
-// Amenity weights — higher = more significant for real estate
+// Amenity weights - higher = more significant for real estate
 const AMENITY_WEIGHTS: Record<string, number> = {
-  // Transit (highest — directly impacts property value)
+  // Transit (highest - directly impacts property value)
   subway_entrance: 10, train_station: 10, bus_station: 8,
   // Commercial activity
   supermarket: 7, marketplace: 7,

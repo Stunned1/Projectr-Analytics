@@ -88,7 +88,7 @@ export function computeCycleSignals(inputs: CycleRawInputs): ComputedCycleFeatur
     rent = {
       score: 0,
       direction: 'Insufficient rent trend data',
-      value: '—',
+      value: '-',
       source: 'Unavailable',
     }
   }
@@ -99,8 +99,8 @@ export function computeCycleSignals(inputs: CycleRawInputs): ComputedCycleFeatur
     vacancy = {
       score: 0,
       direction: 'Vacancy data unavailable',
-      value: '—',
-      source: 'ACS — not cached',
+      value: '-',
+      source: 'ACS - not cached',
     }
   } else {
     const s = vacancyPct < 6.5 ? 1 : vacancyPct > 10.5 ? -1 : 0
@@ -148,8 +148,8 @@ export function computeCycleSignals(inputs: CycleRawInputs): ComputedCycleFeatur
     permits = {
       score: 0,
       direction: 'Insufficient permit history',
-      value: '—',
-      source: 'Census BPS — not cached',
+      value: '-',
+      source: 'Census BPS - not cached',
     }
   }
 
@@ -175,7 +175,7 @@ export function computeCycleSignals(inputs: CycleRawInputs): ComputedCycleFeatur
     const s = unempDelta6m < -0.15 ? 1 : unempDelta6m > 0.2 ? -1 : 0
     employment = {
       score: clampScore(s),
-      direction: 'Limited history — coarse labor read',
+      direction: 'Limited history - coarse labor read',
       value: `${unempDelta6m >= 0 ? '+' : ''}${unempDelta6m.toFixed(2)} pp (partial window)`,
       source: 'FRED county unemployment (partial series)',
     }
@@ -183,8 +183,8 @@ export function computeCycleSignals(inputs: CycleRawInputs): ComputedCycleFeatur
     employment = {
       score: 0,
       direction: 'Unemployment series unavailable',
-      value: '—',
-      source: 'FRED — not cached',
+      value: '-',
+      source: 'FRED - not cached',
     }
   }
 

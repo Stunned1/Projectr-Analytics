@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import { GEMINI_NO_EM_DASH_RULE } from '@/lib/gemini-text-rules'
 import type { LocationColumnSuggestion, UploadRawRow } from './types'
 
 function isLikelyZip(text: string): boolean {
@@ -119,6 +120,7 @@ async function geminiLocationColumnSuggestion(
     'Return ONLY valid JSON with this exact shape:',
     '{"suggestedLocationColumn":"string|null","confidence":0.0,"reasoning":"string"}',
     'If no column appears usable for geocoding, return null for suggestedLocationColumn.',
+    GEMINI_NO_EM_DASH_RULE,
     `Columns: ${JSON.stringify(columns)}`,
     `SampleRows: ${JSON.stringify(sampleRows.slice(0, 12))}`,
   ].join('\n')

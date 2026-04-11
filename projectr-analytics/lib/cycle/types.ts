@@ -32,7 +32,7 @@ export interface CycleAnalysis {
   narrative: string
   /** Human-readable confidence line for UI/PDF */
   confidenceLine: string
-  /** True when agreement is 2/4 — transitional market */
+  /** True when agreement is 2/4 - transitional market */
   transitional: boolean
 }
 

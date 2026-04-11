@@ -2,6 +2,7 @@
  * Shared Gemini JSON generation for case-study briefs (JSON API + PDF export).
  */
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import { GEMINI_NO_EM_DASH_RULE } from '@/lib/gemini-text-rules'
 
 export interface CaseBriefSitePayload {
   address: string
@@ -18,7 +19,7 @@ The user ran a geospatial case study in the dashboard; you receive their origina
 
 Return ONLY valid JSON (no markdown) matching this shape:
 {
-  "title": "Case study brief — [short topic]",
+  "title": "Case study brief - [short topic]",
   "headline": "One-line outcome (e.g. Top 5 sites ranked for …)",
   "marketLine": "Geography + submarket context in 1–2 sentences.",
   "executiveSummary": "4–6 sentences: restate the mandate, summarize how the spatial model ranked sites (FAR headroom, permit momentum, rent growth), what ties #1–#5 together, and how an IC should use the list.",
@@ -41,7 +42,7 @@ Return ONLY valid JSON (no markdown) matching this shape:
       "rank": 1,
       "address": "exact from input",
       "scoreRationale": "4–6 sentences: integrate model score, FAR utilization, air rights, zone, ZORI growth, permit momentum; compare briefly to peers in the list.",
-      "watchItems": "Diligence flags: entitlements, infrastructure, comps, lease-up — or \"None flagged\"."
+      "watchItems": "Diligence flags: entitlements, infrastructure, comps, lease-up - or \"None flagged\"."
     }
   ],
   "risksAndMitigations": [
@@ -58,7 +59,8 @@ Rules:
 - sites: one object per ranked site in input order; ranks 1..n; watchItems required string (can be brief).
 - risksAndMitigations: 3–5 pairs; recommendedNextSteps: 4–6 strings; keyFindings: 3–5 objects (title + body required); stats: 0–3 label/value pairs per finding drawn from site data (omit stats if none apply).
 - Use only facts supported by the JSON context; if a metric is null, say unavailable rather than inventing.
-- Tone: institutional IC memo — dense but readable; no fluff.`
+- Tone: institutional IC memo - dense but readable; no fluff.
+- ${GEMINI_NO_EM_DASH_RULE}`
 
 export function buildCaseBriefUserPayload(input: {
   caseStudy: string
@@ -81,23 +83,23 @@ export function buildCaseBriefUserPayload(input: {
 
   return `
 ORIGINAL CASE STUDY (user):
-${caseStudy || '(not captured — infer from sites and context only)'}
+${caseStudy || '(not captured - infer from sites and context only)'}
 
 AGENT OPENING SUMMARY:
-${agentSummary || '—'}
+${agentSummary || '-'}
 
 AGENT INSIGHT LINE:
-${insight || '—'}
+${insight || '-'}
 
 MAP / MARKET CONTEXT:
-- Label: ${ctx.label ?? '—'}
-- ZIP: ${ctx.zip ?? '—'}
-- ZORI (display): ${ctx.zori != null ? '$' + Number(ctx.zori).toLocaleString() : '—'}
-- ZHVI: ${ctx.zhvi != null ? '$' + Number(ctx.zhvi).toLocaleString() : '—'}
-- ZORI YoY %: ${ctx.zoriGrowth ?? '—'}
-- Vacancy %: ${ctx.vacancyRate ?? '—'}
+- Label: ${ctx.label ?? '-'}
+- ZIP: ${ctx.zip ?? '-'}
+- ZORI (display): ${ctx.zori != null ? '$' + Number(ctx.zori).toLocaleString() : '-'}
+- ZHVI: ${ctx.zhvi != null ? '$' + Number(ctx.zhvi).toLocaleString() : '-'}
+- ZORI YoY %: ${ctx.zoriGrowth ?? '-'}
+- Vacancy %: ${ctx.vacancyRate ?? '-'}
 
-RANKED SITES (authoritative — cite these addresses):
+RANKED SITES (authoritative - cite these addresses):
 ${JSON.stringify(sitesBlock, null, 2)}
 `
 }

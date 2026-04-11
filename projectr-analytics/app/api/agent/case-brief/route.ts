@@ -1,5 +1,5 @@
 /**
- * Structured case-study brief after spatial analysis — Gemini JSON for optional in-app use.
+ * Structured case-study brief after spatial analysis - Gemini JSON for optional in-app use.
  */
 import { type NextRequest, NextResponse } from 'next/server'
 import { generateCaseBriefJson, type CaseBriefSitePayload } from '@/lib/report/case-brief-shared'

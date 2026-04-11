@@ -3,6 +3,7 @@
  * Separate from the short cycle headline JSON in `gemini-brief.ts`.
  */
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import { GEMINI_NO_EM_DASH_RULE } from '@/lib/gemini-text-rules'
 import { stripGeminiStringWrappers } from '@/lib/sanitize-gemini-string'
 import type { ClientReportPayload, GeminiBriefResult, MetroBenchmark, SignalIndicator } from './types'
 import type { CycleAnalysis } from '@/lib/cycle/types'
@@ -123,7 +124,7 @@ const DOSSIER_JSON_INSTRUCTION = `Return ONLY valid JSON (no markdown). All stri
 
 {
   "geographyContext": "1-2 sentences: clarify whether this is a single ZIP, a city aggregate, or borough-style geography and what that implies for interpreting metrics.",
-  "executiveSummary": "4-6 dense sentences: mandate-style overview for an IC — tie rent, vacancy, permits, labor, and (if present) cycle position; cite specific numbers from context only.",
+  "executiveSummary": "4-6 dense sentences: mandate-style overview for an IC - tie rent, vacancy, permits, labor, and (if present) cycle position; cite specific numbers from context only.",
   "demandAndDemographics": { "title": "Demand & demographics", "body": "3-5 sentences on population, income, rent burden proxies, migration if present, and demand read." },
   "supplyAndConstruction": { "title": "Supply & construction", "body": "3-5 sentences on permit pipeline / BPS units, supply risk, construction cycle vs. demand." },
   "pricingAndCapitalMarkets": { "title": "Pricing & capital", "body": "3-5 sentences on ZORI/ZHVI levels and growth, spread vs metro peers if benchmarks exist, investor takeaway." },
@@ -137,9 +138,10 @@ const DOSSIER_JSON_INSTRUCTION = `Return ONLY valid JSON (no markdown). All stri
 }
 
 Rules:
-- Use ONLY numbers and facts present in CONTEXT JSON; if a field is null or missing, say unavailable — do not invent.
+- Use ONLY numbers and facts present in CONTEXT JSON; if a field is null or missing, say unavailable - do not invent.
 - Tone: institutional real estate memo, U.S. English.
-- This is the MARKET BRIEF dossier (whole submarket), not a parcel case study.`
+- This is the MARKET BRIEF dossier (whole submarket), not a parcel case study.
+- ${GEMINI_NO_EM_DASH_RULE}`
 
 export async function generateMarketDossierWithGemini(input: {
   payload: ClientReportPayload
@@ -189,7 +191,7 @@ export async function generateMarketDossierWithGemini(input: {
     peerAndBenchmarkRead:
       input.metro && input.metro.zip_count > 0
         ? `Metro peer sample covers ${input.metro.zip_count} Zillow-tracked ZIPs in the same metro. Average ZORI ${input.metro.avg_zori != null ? '$' + Math.round(input.metro.avg_zori).toLocaleString() : 'n/a'} vs. submarket above.`
-        : 'Metro peer averages were unavailable — cold-load peer ZIPs or check metro linkage in zip_metro_lookup.',
+        : 'Metro peer averages were unavailable - cold-load peer ZIPs or check metro linkage in zip_metro_lookup.',
     risks: [
       'Data sparsity in peer ZIPs can skew benchmark columns.',
       'County-level BPS permits apply uniformly to all ZIPs in the county.',

@@ -74,9 +74,9 @@ async function fetchMomentumScores(zips: string[], origin: string): Promise<Map<
 
 function signalLineForScore(score: number | null): string {
   if (score == null) return 'Insufficient cached series for momentum.'
-  if (score >= 67) return 'Heating — relative strength vs. comparison set.'
-  if (score >= 34) return 'Balanced — mixed cross-sectional drivers.'
-  return 'Cooling — softer relative momentum vs. peers.'
+  if (score >= 67) return 'Heating - relative strength vs. comparison set.'
+  if (score >= 34) return 'Balanced - mixed cross-sectional drivers.'
+  return 'Cooling - softer relative momentum vs. peers.'
 }
 
 async function buildSiteRows(
@@ -92,7 +92,7 @@ async function buildSiteRows(
     const zip =
       (await resolveZctaFromCoordinates(p.lat, p.lng, { googleApiKey: googleKey })) ??
       (await resolveZctaFromCoordinates(p.lat, p.lng, {}))
-    resolved.push({ label: p.label, zip: zip ?? '—' })
+    resolved.push({ label: p.label, zip: zip ?? '-' })
   }
 
   const zips = resolved.map((r) => r.zip).filter((z) => /^\d{5}$/.test(z))

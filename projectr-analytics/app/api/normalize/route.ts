@@ -1,11 +1,12 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import { GEMINI_NO_EM_DASH_RULE } from '@/lib/gemini-text-rules'
 import { supabase } from '@/lib/supabase'
 import type { VisualBucket } from '@/lib/supabase'
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
 
-// Simple in-memory triage cache — keyed by CSV preview hash
+// Simple in-memory triage cache - keyed by CSV preview hash
 // Avoids re-calling Gemini for the same file structure
 const triageCache = new Map<string, { bucket: string; visual_bucket: VisualBucket; metric_name: string; geo_column: string | null; value_column: string | null; date_column: string | null; reasoning: string }>()
 
@@ -34,7 +35,9 @@ Return this exact JSON shape:
   "value_column": "column name containing the primary numeric value, or null",
   "date_column": "column name containing dates, or null",
   "reasoning": "one sentence explanation"
-}`
+}
+
+${GEMINI_NO_EM_DASH_RULE}`
 
 export async function POST(request: NextRequest) {
   try {

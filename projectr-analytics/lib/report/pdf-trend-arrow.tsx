@@ -46,7 +46,7 @@ const SW = 2
 const M = 1.2
 
 /**
- * Stroke-only trend marks — PDF Standard Helvetica has no U+2191–U+2193; Unicode renders as junk (",", etc.).
+ * Stroke-only trend marks - PDF Standard Helvetica has no U+2191–U+2193; Unicode renders as junk (",", etc.).
  */
 export function PdfTrendArrow({ variant, color }: { variant: TrendArrowVariant; color: string }) {
   if (variant === 'up') {

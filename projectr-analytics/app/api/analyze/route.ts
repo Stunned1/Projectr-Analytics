@@ -74,7 +74,7 @@ export async function POST(request: NextRequest) {
     }
     const borocode = borocodes[borough] ?? '1'
 
-    // 1. Fetch PLUTO parcels — residential/mixed zones, underutilized
+    // 1. Fetch PLUTO parcels - residential/mixed zones, underutilized
     const zoneFilter = RESIDENTIAL_ZONES.map((z) => `starts_with(zonedist1,'${z}')`).join(' OR ')
     const url = `${PLUTO_URL}?$limit=3000&borocode=${borocode}&$where=(${zoneFilter}) AND lotarea>${minLotArea} AND builtfar IS NOT NULL AND residfar>0&$select=address,latitude,longitude,assesstot,builtfar,residfar,commfar,facilfar,lotarea,bldgarea,zonedist1,landuse,yearbuilt,unitsres,numfloors&$order=lotarea DESC`
 
@@ -118,7 +118,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No qualifying parcels found', sites: [] })
     }
 
-    // 3. Get permit momentum — count NB+A1 permits near each parcel
+    // 3. Get permit momentum - count NB+A1 permits near each parcel
     const { data: permits } = await supabase
       .from('nyc_permits')
       .select('lat, lng, job_type')
@@ -143,16 +143,16 @@ export async function POST(request: NextRequest) {
     const maxAirRights = Math.max(...parcels.map((p) => p.air_rights_sqft))
 
     const scored: ScoredSite[] = parcels.map((p) => {
-      // FAR score — normalized air rights (0–100)
+      // FAR score - normalized air rights (0–100)
       const farScore = maxAirRights > 0 ? (p.air_rights_sqft / maxAirRights) * 100 : 0
 
-      // Momentum score — count permits within 0.005° (~500m)
+      // Momentum score - count permits within 0.005° (~500m)
       const nearbyPermits = permitPoints.filter(
         (pt) => Math.abs(pt.lat - p.lat) < 0.005 && Math.abs(pt.lng - p.lng) < 0.005
       ).length
       const momentumScore = Math.min(nearbyPermits * 10, 100)
 
-      // ZORI score — use borough average (all parcels same market)
+      // ZORI score - use borough average (all parcels same market)
       const zoriScore = Math.min(Math.max(avgZoriGrowth * 10, 0), 100)
 
       const score = farScore * 0.4 + momentumScore * 0.3 + zoriScore * 0.3
@@ -170,7 +170,7 @@ export async function POST(request: NextRequest) {
       }
     })
 
-    // 6. Sort and return top N — deduplicate by proximity (no two sites within 200m)
+    // 6. Sort and return top N - deduplicate by proximity (no two sites within 200m)
     scored.sort((a, b) => b.score - a.score)
 
     const topSites: ScoredSite[] = []

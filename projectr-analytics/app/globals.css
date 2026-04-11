@@ -134,7 +134,7 @@ body {
   }
 
   /**
-   * Native scrollbars (Firefox + WebKit) — graphite track + primary hover, app-wide in dark mode.
+   * Native scrollbars (Firefox + WebKit) - graphite track + primary hover, app-wide in dark mode.
    * Use `.scrollbar-none` on elements that should stay chromeless (e.g. horizontal stats pill).
    */
   html.dark * {

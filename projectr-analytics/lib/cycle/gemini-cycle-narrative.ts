@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import { GEMINI_NO_EM_DASH_RULE } from '@/lib/gemini-text-rules'
 import { sanitizeCycleSignalText, stripGeminiStringWrappers } from '@/lib/sanitize-gemini-string'
 import type { CycleAnalysis } from './types'
 
@@ -36,20 +37,22 @@ export async function generateCycleNarrative(
 
 Market: ${marketLabel}
 ZIP (anchor): ${partial.zip}
-Cycle position: ${partial.cycleStage} ${partial.cyclePosition} — this classification is LOCKED; do not contradict or re-label it.
+Cycle position: ${partial.cycleStage} ${partial.cyclePosition} - this classification is LOCKED; do not contradict or re-label it.
 Confidence: ${partial.confidence}% (${partial.signalsAgreement}/4 signals agree)
 Data quality: ${partial.dataQuality}${partial.transitional ? ' · transitional / mixed read' : ''}
 
-Rent signal: ${rentDir} — ${rentVal}
-Vacancy signal: ${vacDir} — ${vacVal}
-Permit signal: ${permDir} — ${permVal}
-Employment signal: ${empDir} — ${empVal}
+Rent signal: ${rentDir} - ${rentVal}
+Vacancy signal: ${vacDir} - ${vacVal}
+Permit signal: ${permDir} - ${permVal}
+Employment signal: ${empDir} - ${empVal}
 
 Deterministic summary line (for tone only): ${sanitizeCycleSignalText(partial.confidenceLine)}
 
-Write exactly 2–3 sentences. Reference specific numbers or percentages from the four signal lines whenever they contain quantitative detail. End with one forward-looking implication for a developer or investor (supply, rents, risk, or timing). Sound like a human analyst — not a list.
+Write exactly 2–3 sentences. Reference specific numbers or percentages from the four signal lines whenever they contain quantitative detail. End with one forward-looking implication for a developer or investor (supply, rents, risk, or timing). Sound like a human analyst - not a list.
 
-No bullet points, no JSON, no markdown. Do not use vague filler such as "nuanced picture," "presents opportunities," "robust outlook," or "landscape."`
+No bullet points, no JSON, no markdown. Do not use vague filler such as "nuanced picture," "presents opportunities," "robust outlook," or "landscape."
+
+${GEMINI_NO_EM_DASH_RULE}`
 
   try {
     const genAI = new GoogleGenerativeAI(key)

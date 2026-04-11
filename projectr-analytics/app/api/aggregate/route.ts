@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
 
     if (!zips.length) return NextResponse.json({ error: 'No ZIPs provided' }, { status: 400 })
 
-    // Cold-fill Census ACS + BPS (and FRED/HUD) when this area was never loaded via /api/market — otherwise
+    // Cold-fill Census ACS + BPS (and FRED/HUD) when this area was never loaded via /api/market - otherwise
     // borough/city PDF metrics (vacancy, permits, migration) stay empty.
     await ensureAreaMasterDataCached(zips)
 
@@ -123,7 +123,7 @@ export async function POST(request: NextRequest) {
     const avgZoriGrowth = avg(snaps.map((s) => s.zori_growth_12m))
     const avgZhviGrowth = avg(snaps.map((s) => s.zhvi_growth_12m))
 
-    // 4. Aggregate Census data — vacancy: prefer summed units (true area rate); if unit rows
+    // 4. Aggregate Census data - vacancy: prefer summed units (true area rate); if unit rows
     //    are missing from cache (common until ZIPs are cold-loaded), fall back to weighted Vacancy_Rate.
     let vacancyRate: number | null = null
     const zipsWithUnitBreakdown = zips.filter((z) => {

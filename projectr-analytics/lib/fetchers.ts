@@ -125,7 +125,7 @@ export async function fetchHud(geo: GeoResult, zip: string): Promise<PartialRow[
     } catch { /* fall through */ }
   }
 
-  // Fallback: Census ACS B25031 — median gross rent by bedrooms
+  // Fallback: Census ACS B25031 - median gross rent by bedrooms
   try {
     const key = process.env.CENSUS_API_KEY
     const vars = 'B25031_001E,B25031_002E,B25031_003E,B25031_004E,B25031_005E,B25031_006E'
@@ -228,7 +228,7 @@ export async function fetchCensus(zip: string, geo: GeoResult): Promise<PartialR
 }
 
 // ── BUILDING PERMITS (Census BPS) ─────────────────────────────────────────────
-// Census Building Permits Survey — county level annual CSV
+// Census Building Permits Survey - county level annual CSV
 // URL: https://www2.census.gov/econ/bps/County/co{YEAR}a.txt
 export async function fetchPermits(geo: GeoResult, zip: string): Promise<PartialRow[]> {
   const results: PartialRow[] = []

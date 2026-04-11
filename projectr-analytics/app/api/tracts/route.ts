@@ -1,6 +1,6 @@
 /**
  * Census Tract boundaries + ACS data (rent, income, vacancy)
- * Better than block groups — larger, more meaningful, better data coverage
+ * Better than block groups - larger, more meaningful, better data coverage
  * Used for sub-ZIP choropleth showing rent/income variation across neighborhoods
  */
 import { type NextRequest, NextResponse } from 'next/server'

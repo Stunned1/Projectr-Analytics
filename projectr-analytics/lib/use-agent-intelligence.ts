@@ -151,7 +151,7 @@ export function useAgentIntelligence(
             ...prev.slice(0, -1),
             {
               role: 'agent',
-              text: `Analysis complete — no qualifying sites found. ${data.error ?? ''}`,
+              text: `Analysis complete - no qualifying sites found. ${data.error ?? ''}`,
             },
           ])
           maybeNotify()
