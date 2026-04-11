@@ -52,8 +52,14 @@ interface AggregateData {
   zip_count: number
   total_population: number | null
   zillow: { avg_zori: number | null; avg_zhvi: number | null; zori_growth_12m: number | null; zhvi_growth_12m: number | null }
-  housing: { total_units: number | null; vacancy_rate: number | null; median_income: number | null; median_rent: number | null }
-  permits: { total_units: number | null; total_value: number | null }
+  housing: {
+    total_units: number | null
+    vacancy_rate: number | null
+    median_income: number | null
+    median_rent: number | null
+    migration_movers?: number | null
+  }
+  permits: { total_units: number | null; total_value: number | null; by_year?: { year: string; units: number }[] }
   metro_velocity: { region_name: string; doz_pending_latest: number | null; price_cut_pct_latest: number | null; inventory_latest: number | null } | null
   fred: Array<{ metric_name: string; metric_value: number; time_period: string | null }>
 }

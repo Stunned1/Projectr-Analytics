@@ -257,7 +257,10 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
         <SparklinePdf data={trends12} width={480} height={72} color="#64748b" />
 
         <Text style={styles.foot}>
-          FRED unemployment series shown in employment row when employment rate is computed from stored observations.
+          FRED uses the first ZIP&apos;s county; the employment row prefers a computed employment rate when labor-force
+          series match, otherwise latest unemployment. Vacancy, migration, and BPS permits need Census ACS/BPS rows in
+          Supabase for this area (cold-load at least one ZIP via the map). County BPS counts are identical for all ZIPs in
+          the same county — the chart uses one anchor ZIP&apos;s yearly series.
         </Text>
       </Page>
 

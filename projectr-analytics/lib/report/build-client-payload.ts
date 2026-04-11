@@ -74,8 +74,13 @@ export interface AggregateShape {
     vacancy_rate: number | null
     median_income: number | null
     median_rent: number | null
+    migration_movers?: number | null
   }
-  permits: { total_units: number | null; total_value: number | null }
+  permits: {
+    total_units: number | null
+    total_value: number | null
+    by_year?: { year: string; units: number }[]
+  }
   fred: Array<{ metric_name: string; metric_value: number; time_period: string | null }>
 }
 
@@ -161,10 +166,12 @@ export function buildClientReportPayloadFromAggregate(args: {
   const first = cityZips?.find((z) => z.lat && z.lng)
   const primaryZip = cityZips?.[0]?.zip ?? null
 
-  const byYear: { year: string; units: number }[] =
-    aggregate.permits.total_units != null && aggregate.permits.total_units > 0
-      ? [{ year: '2021–23 Σ', units: Math.round(aggregate.permits.total_units) }]
-      : []
+  const permitYears =
+    aggregate.permits.by_year && aggregate.permits.by_year.length > 0
+      ? aggregate.permits.by_year
+      : aggregate.permits.total_units != null && aggregate.permits.total_units > 0
+        ? [{ year: '2021–23 Σ', units: Math.round(aggregate.permits.total_units) }]
+        : []
 
   return {
     marketLabel: aggregate.label,
@@ -184,12 +191,12 @@ export function buildClientReportPayloadFromAggregate(args: {
       median_income: aggregate.housing.median_income,
       total_population: aggregate.total_population,
       median_gross_rent_acs: aggregate.housing.median_rent,
-      migration_movers: null,
+      migration_movers: aggregate.housing.migration_movers ?? null,
       population_growth_3yr: null,
     },
     permits: {
       total_units_2021_2023: aggregate.permits.total_units,
-      by_year: byYear.length ? byYear : [],
+      by_year: permitYears,
     },
     employment: {
       unemployment_rate: latestFredMetric(fredRows, 'Unemployment_Rate'),

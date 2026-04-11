@@ -15,6 +15,7 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { geocodeZip } from '@/lib/geocoder'
 import { fetchFred } from '@/lib/fetchers'
+import { ensureAreaMasterDataCached } from '@/lib/ensure-zip-cache'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,22 +40,67 @@ export async function POST(request: NextRequest) {
 
     if (!zips.length) return NextResponse.json({ error: 'No ZIPs provided' }, { status: 400 })
 
+    // Cold-fill Census ACS + BPS (and FRED/HUD) when this area was never loaded via /api/market — otherwise
+    // borough/city PDF metrics (vacancy, permits, migration) stay empty.
+    await ensureAreaMasterDataCached(zips)
+
     // 1. Pull Zillow snapshots for all ZIPs
     const { data: snapshots } = await supabase
       .from('zillow_zip_snapshot')
       .select('zip, zori_latest, zhvi_latest, zori_growth_12m, zhvi_growth_12m, zhvf_growth_1yr')
       .in('zip', zips)
 
-    // 2. Pull cached Census/HUD data from projectr_master_data
+    // 2. Pull cached Census/HUD data from projectr_master_data (include time_period for multi-year BPS)
     const { data: cachedRows } = await supabase
       .from('projectr_master_data')
-      .select('submarket_id, metric_name, metric_value, data_source')
+      .select('submarket_id, metric_name, metric_value, data_source, time_period')
       .in('submarket_id', zips)
       .in('data_source', ['Census ACS', 'HUD', 'Census BPS'])
 
-    // Group cached rows by metric
+    type Cached = {
+      submarket_id: string
+      metric_name: string
+      metric_value: number
+      data_source: string
+      time_period: string | null
+    }
+    const rows = (cachedRows ?? []) as Cached[]
+
+    // Census BPS is county-level: same counts are stored per ZIP in the county. Build yearly series from
+    // one anchor ZIP only; do not fold Permit_* into metricsByZip (multiple years would overwrite).
+    const bpsUnitRows = rows.filter(
+      (r) => r.data_source === 'Census BPS' && r.metric_name === 'Permit_Units' && r.time_period
+    )
+    const anchorZipForBps = zips.find((z) => bpsUnitRows.some((r) => r.submarket_id === z))
+    const permitsByYear: { year: string; units: number }[] =
+      anchorZipForBps != null
+        ? bpsUnitRows
+            .filter((r) => r.submarket_id === anchorZipForBps)
+            .sort((a, b) => (a.time_period ?? '').localeCompare(b.time_period ?? ''))
+            .map((r) => ({
+              year: (r.time_period ?? '').slice(0, 4),
+              units: Math.round(r.metric_value),
+            }))
+        : []
+
+    const bpsValueRows = rows.filter(
+      (r) => r.data_source === 'Census BPS' && r.metric_name === 'Permit_Value_USD' && r.time_period
+    )
+    let totalPermitValue: number | null = null
+    if (anchorZipForBps && bpsValueRows.length > 0) {
+      const v = bpsValueRows
+        .filter((r) => r.submarket_id === anchorZipForBps)
+        .reduce((s, r) => s + r.metric_value, 0)
+      totalPermitValue = v > 0 ? Math.round(v) : null
+    }
+
+    const totalPermitUnits =
+      permitsByYear.length > 0 ? permitsByYear.reduce((s, y) => s + y.units, 0) : null
+
+    // Group ACS / HUD tabular metrics (single row per name per ZIP)
     const metricsByZip: Record<string, Record<string, number>> = {}
-    for (const row of cachedRows ?? []) {
+    for (const row of rows) {
+      if (row.data_source === 'Census BPS') continue
       if (!metricsByZip[row.submarket_id]) metricsByZip[row.submarket_id] = {}
       metricsByZip[row.submarket_id][row.metric_name] = row.metric_value
     }
@@ -129,8 +175,7 @@ export async function POST(request: NextRequest) {
       weight: metricsByZip[z]?.['Total_Population'] ?? 1,
     })))
 
-    const totalPermitUnits = zips.reduce((s, z) => s + (metricsByZip[z]?.['Permit_Units'] ?? 0), 0)
-    const totalPermitValue = zips.reduce((s, z) => s + (metricsByZip[z]?.['Permit_Value_USD'] ?? 0), 0)
+    const migrationMovers = zips.reduce((s, z) => s + (metricsByZip[z]?.['Moved_From_Different_State'] ?? 0), 0)
 
     // 5. Pull metro velocity for the first ZIP's metro
     const { data: lookup } = await supabase
@@ -178,10 +223,12 @@ export async function POST(request: NextRequest) {
         vacancy_rate: vacancyRate,
         median_income: avgIncome,
         median_rent: avgRent,
+        migration_movers: migrationMovers > 0 ? migrationMovers : null,
       },
       permits: {
-        total_units: totalPermitUnits || null,
-        total_value: totalPermitValue || null,
+        total_units: totalPermitUnits,
+        total_value: totalPermitValue,
+        by_year: permitsByYear,
       },
       metro_velocity: metroVelocity,
       fred: fredData,
