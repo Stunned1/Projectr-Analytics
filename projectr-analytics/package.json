@@ -11,6 +11,7 @@
     "populate:centroids": "tsx scripts/populate-centroids.ts"
   },
   "dependencies": {
+    "@deck.gl/aggregation-layers": "^9.2.11",
     "@deck.gl/google-maps": "^9.2.11",
     "@deck.gl/layers": "^9.2.11",
     "@deck.gl/react": "^9.2.11",

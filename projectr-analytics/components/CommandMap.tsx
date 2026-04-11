@@ -4,6 +4,7 @@ import { memo, useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { APIProvider, Map, useMap } from '@vis.gl/react-google-maps'
 import { GoogleMapsOverlay } from '@deck.gl/google-maps'
 import { GeoJsonLayer, ScatterplotLayer, PolygonLayer, ColumnLayer } from '@deck.gl/layers'
+import { HeatmapLayer } from '@deck.gl/aggregation-layers'
 import type { Layer, PickingInfo } from '@deck.gl/core'
 import type { GeoJSON } from 'geojson'
 import { dedupedFetchJson } from '@/lib/request-cache'
@@ -79,6 +80,30 @@ interface BuildingCollection {
   meta?: { count: number; bbox: string }
 }
 
+interface AmenityPoint {
+  position: [number, number]
+  weight: number
+}
+
+type TractProps = {
+  GEOID?: string
+  TRACT?: string
+  median_rent?: number | null
+  median_income?: number | null
+  vacancy_rate?: number | null
+  population?: number | null
+}
+type TractFeature = Feature<Geometry, TractProps>
+type TractCollection = FeatureCollection<Geometry, TractProps>
+
+type FloodProps = {
+  FLD_ZONE?: string
+  label?: string
+  risk?: 'high' | 'moderate' | 'low'
+}
+type FloodFeature = Feature<Geometry, FloodProps>
+type FloodCollection = FeatureCollection<Geometry, FloodProps>
+
 interface LayerState {
   zipBoundary: boolean
   transitStops: boolean
@@ -86,6 +111,9 @@ interface LayerState {
   blockGroups: boolean
   buildings: boolean
   parcels: boolean
+  tracts: boolean
+  amenityHeatmap: boolean
+  floodRisk: boolean
 }
 
 interface MapViewState {
@@ -122,14 +150,17 @@ const DATA_LAYER_REGISTRY = [
   { label: 'ZORI Rent Index', source: 'Zillow Research', visualized: true, layerType: 'GeoJsonLayer (choropleth — multi-ZIP)' },
   { label: 'Transit Stops', source: 'GTFS / OSM', visualized: true, layerType: 'ScatterplotLayer (cyan dots)' },
   { label: 'ZHVI Home Value', source: 'Zillow Research', visualized: true, layerType: 'GeoJsonLayer (choropleth — multi-ZIP)' },
-  { label: 'Block Groups', source: 'Census TIGER + ACS', visualized: true, layerType: 'GeoJsonLayer (sub-ZIP population density)' },
+  { label: 'Census Tracts', source: 'Census TIGER + ACS', visualized: true, layerType: 'GeoJsonLayer (rent/income choropleth)' },
+  { label: 'Amenity Heatmap', source: 'OpenStreetMap', visualized: true, layerType: 'HeatmapLayer (weighted by amenity type)' },
+  { label: 'Flood Risk Zones', source: 'FEMA NFHL', visualized: true, layerType: 'GeoJsonLayer (red = high risk)' },
   { label: 'OSM Buildings', source: 'OpenStreetMap', visualized: true, layerType: 'PolygonLayer extruded (3D building footprints)' },
-  { label: 'NYC Parcels (PLUTO)', source: 'NYC Open Data', visualized: true, layerType: 'ColumnLayer (3D columns — height = assessed value/sqft, color = land use)' },
-  { label: 'Vacancy Rate', source: 'Census ACS', visualized: false, layerType: null, note: 'Available in stat cards; no map layer yet' },
+  { label: 'NYC Parcels (PLUTO)', source: 'NYC Open Data', visualized: true, layerType: 'ColumnLayer (3D columns — height = assessed value/sqft)' },
+  { label: 'Block Groups', source: 'Census TIGER + ACS', visualized: true, layerType: 'GeoJsonLayer (population density — replaced by Tracts)' },
+  { label: 'Vacancy Rate', source: 'Census ACS', visualized: false, layerType: null, note: 'Now included in Tracts layer' },
   { label: 'PoP Momentum Score', source: 'Computed', visualized: false, layerType: null, note: 'Computed API exists; no map layer yet' },
   { label: 'Unemployment Rate', source: 'FRED', visualized: false, layerType: null, note: 'County aggregate — sidebar chart only' },
   { label: 'Real GDP', source: 'FRED', visualized: false, layerType: null, note: 'County aggregate — sidebar chart only' },
-  { label: 'Median Household Income', source: 'Census ACS', visualized: false, layerType: null, note: 'Single value per ZIP — stat card only' },
+  { label: 'Median Household Income', source: 'Census ACS', visualized: false, layerType: null, note: 'Now included in Tracts layer' },
   { label: 'FMR by Bedroom', source: 'HUD / Census ACS', visualized: false, layerType: null, note: 'No spatial variation within ZIP' },
   { label: 'Days on Market', source: 'Zillow Metro', visualized: false, layerType: null, note: 'Metro-level — stat card only' },
   { label: 'Google Trends Score', source: 'Google Trends', visualized: false, layerType: null, note: 'City/state sentiment — sidebar sparkline only' },
@@ -299,6 +330,9 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
   const [blockGroupData, setBlockGroupData] = useState<BlockGroupCollection | null>(null)
   const [buildingData, setBuildingData] = useState<BuildingCollection | null>(null)
   const [parcelData, setParcelData] = useState<{ parcels: ParcelPayload[]; stats: { p25_per_sqft: number; p75_per_sqft: number } } | null>(null)
+  const [tractData, setTractData] = useState<TractCollection | null>(null)
+  const [amenityPoints, setAmenityPoints] = useState<AmenityPoint[]>([])
+  const [floodData, setFloodData] = useState<FloodCollection | null>(null)
   const [layers, setLayers] = useState<LayerState>({
     zipBoundary: true,
     transitStops: true,
@@ -306,6 +340,9 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
     blockGroups: false,
     buildings: false,
     parcels: false,
+    tracts: false,
+    amenityHeatmap: false,
+    floodRisk: false,
   })
   const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null)
   const [activeMetric, setActiveMetric] = useState<'zori' | 'zhvi'>('zori')
@@ -367,7 +404,7 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
   // Fetch block groups + parcels when we have geo data
   useEffect(() => {
     if (!marketData?.geo) return
-    const { stateFips, countyFips } = marketData.geo
+    const { lat, lng, stateFips, countyFips } = marketData.geo
 
     // Block groups — need state + county FIPS
     if (stateFips && countyFips && countyFips !== '000') {
@@ -400,6 +437,23 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
         })
         .catch(() => {})
     }
+
+    // Census Tracts with rent/income data
+    if (stateFips && countyFips && countyFips !== '000') {
+      dedupedFetchJson<TractCollection>(`/api/tracts?state=${stateFips}&county=${countyFips}`)
+        .then((d) => { if (d.features) setTractData(d) })
+        .catch(() => {})
+    }
+
+    // OSM Amenity heatmap points
+    dedupedFetchJson<{ points?: AmenityPoint[] }>(`/api/amenities?lat=${lat}&lng=${lng}&radius=0.06`)
+      .then((d) => { if (d.points) setAmenityPoints(d.points) })
+      .catch(() => {})
+
+    // FEMA Flood Risk zones
+    dedupedFetchJson<FloodCollection>(`/api/floodrisk?lat=${lat}&lng=${lng}&radius=0.05`)
+      .then((d) => { if (d.features) setFloodData(d) })
+      .catch(() => {})
   }, [marketData])
 
   const fetchBuildingsForView = useCallback((view: MapViewState) => {
@@ -670,8 +724,113 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
       )
     }
 
+    // Census Tracts — rent/income choropleth (replaces block groups as primary sub-ZIP layer)
+    if (layers.tracts && tractData) {
+      const tractFeatures = tractData.features ?? []
+      const rents = tractFeatures.map((f) => f.properties.median_rent ?? 0).filter((v) => v > 0)
+      const minRent = rents.length ? Math.min(...rents) : 0
+      const maxRent = rents.length ? Math.max(...rents) : 1
+
+      result.push(
+        new GeoJsonLayer({
+          id: 'census-tracts',
+          data: tractData,
+          stroked: true,
+          filled: true,
+          getFillColor: (f: TractFeature) => {
+            const rent = f.properties.median_rent ?? 0
+            if (!rent) return [60, 60, 80, 60]
+            const t = maxRent === minRent ? 0.5 : Math.min(Math.max((rent - minRent) / (maxRent - minRent), 0), 1)
+            // Deep blue (low rent) → teal → gold (high rent)
+            return [
+              Math.round(20 + t * 220),
+              Math.round(80 + t * 120),
+              Math.round(180 - t * 100),
+              160,
+            ]
+          },
+          getLineColor: [255, 255, 255, 80],
+          lineWidthMinPixels: 1,
+          pickable: true,
+          onHover: (info: PickingInfo) => {
+            const f = info.object as TractFeature | undefined
+            if (f) {
+              const rent = f.properties.median_rent
+              const income = f.properties.median_income
+              const vacancy = f.properties.vacancy_rate
+              setTooltip({
+                x: info.x, y: info.y,
+                text: [
+                  rent ? `Rent: $${rent.toLocaleString()}/mo` : null,
+                  income ? `Income: $${income.toLocaleString()}` : null,
+                  vacancy != null ? `Vacancy: ${vacancy}%` : null,
+                ].filter(Boolean).join(' · '),
+              })
+            } else setTooltip(null)
+          },
+        })
+      )
+    }
+
+    // Amenity Heatmap — weighted by amenity type (transit > commercial > retail)
+    if (layers.amenityHeatmap && amenityPoints.length > 0) {
+      result.push(
+        new HeatmapLayer({
+          id: 'amenity-heatmap',
+          data: amenityPoints,
+          getPosition: (d: AmenityPoint) => d.position,
+          getWeight: (d: AmenityPoint) => d.weight,
+          radiusPixels: 40,
+          intensity: 1.5,
+          threshold: 0.05,
+          colorRange: [
+            [0, 20, 40, 0],
+            [0, 60, 100, 100],
+            [0, 150, 180, 160],
+            [100, 220, 200, 200],
+            [220, 255, 180, 220],
+            [255, 255, 120, 240],
+          ],
+        })
+      )
+    }
+
+    // FEMA Flood Risk Zones
+    if (layers.floodRisk && floodData) {
+      result.push(
+        new GeoJsonLayer({
+          id: 'flood-risk',
+          data: floodData,
+          stroked: true,
+          filled: true,
+          getFillColor: (f: FloodFeature) => {
+            const risk = f.properties.risk
+            if (risk === 'high') return [220, 50, 50, 120]
+            if (risk === 'moderate') return [220, 140, 50, 100]
+            return [50, 50, 220, 60]
+          },
+          getLineColor: (f: FloodFeature) => {
+            const risk = f.properties.risk
+            if (risk === 'high') return [255, 80, 80, 200]
+            return [255, 180, 80, 180]
+          },
+          lineWidthMinPixels: 1,
+          pickable: true,
+          onHover: (info: PickingInfo) => {
+            const f = info.object as FloodFeature | undefined
+            if (f) {
+              setTooltip({
+                x: info.x, y: info.y,
+                text: `⚠️ ${f.properties.label ?? f.properties.FLD_ZONE}`,
+              })
+            } else setTooltip(null)
+          },
+        })
+      )
+    }
+
     return result
-  }, [primaryBoundary, neighborBoundaries, transitStops, blockGroupData, buildingData, parcelData, layers, colorScale, primaryMetricValue, activeMetric, zip, setTooltipStable])
+  }, [primaryBoundary, neighborBoundaries, transitStops, blockGroupData, buildingData, parcelData, tractData, amenityPoints, floodData, layers, colorScale, primaryMetricValue, activeMetric, zip, setTooltipStable])
 
   const handleToggle = useCallback((key: keyof LayerState) => {
     setLayers((prev) => ({ ...prev, [key]: !prev[key] }))
@@ -716,6 +875,9 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
           { key: 'blockGroups' as const, label: 'Block Groups' },
           { key: 'buildings' as const, label: '3D Buildings' },
           { key: 'parcels' as const, label: '🏙 NYC Parcels' },
+          { key: 'tracts' as const, label: 'Census Tracts' },
+          { key: 'amenityHeatmap' as const, label: '🔥 Amenity Heatmap' },
+          { key: 'floodRisk' as const, label: '⚠️ Flood Risk' },
         ]).map(({ key, label }) => (
           <label key={key} className="flex items-center gap-2 cursor-pointer mb-1">
             <input type="checkbox" checked={layers[key]} onChange={() => handleToggle(key)} className="accent-blue-500" />
