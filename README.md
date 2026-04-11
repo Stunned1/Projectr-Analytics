@@ -206,7 +206,7 @@ _4.11.2026_
 - **Visible theme refresh** - Dark mode tokens in `app/globals.css` use a cool graphite base, elevated `card`/`popover` surfaces, Projectr orange as `--primary` (plus `--primary-deep` and `bg-gradient-primary` utility); sidebar uses `bg-sidebar` tokens; shell, stats bubble, data panel, map layer stack, agent chat, cycle/memo/upload accents, and shortlist use semantic `primary` / `border` / `muted` classes instead of flat `#0a0a0a` / `#D76B3D` hex everywhere.
 - Left sidebar now collapsible - collapses to 48px icon strip, expands to **200px**; top zone = logo, search, Map/Client CSV nav; scrollable middle = shortlist only; **Active market** card (or collapsed map icon) sits in the **footer** and toggles the right data panel; intelligence terminal opens only from the map-bottom bar (no sidebar AI button).
 - Bottom stats bar replaced with floating pill bubble (bottom-center, glassmorphism) - scrollable stats with dividers; ↗ button opens data panel
-- Right data panel is **360px** with **Analysis** / **Data** tabs - Analysis = momentum, market cycle, PDF brief, executive memo; Data = pricing, velocity, demographics, FRED, trends, transit, shortlist add, **All metrics** (`<details>` flat table), Agentic Normalizer; former **Overview / All Data** split removed.
+- Right data panel is **320px** with **Analysis** / **Data** tabs - Analysis = momentum, market cycle, PDF brief, executive memo; Data = pricing, velocity, demographics, FRED, trends, transit, shortlist add, **All metrics** (`<details>` flat table), Agentic Normalizer; former **Overview / All Data** split removed.
 - Map layer pill **Rent/value fill** (was labeled Rent) toggles the Zillow-sourced ZIP choropleth; **Fill metric** (ZORI / ZHVI) only appears when that layer is on; PDF active-layer line uses the same naming and omits fill metric when the choropleth is off.
 - **Layers UI** - map layer **dots + Layers** button anchor **top-left** of the map (`left-4 top-4`); **sheet** opens to the right of the toggle; up to **five** active dots shown then **+N**; dots turn layers off on click; no `reservedRightPx` offset.
 - **Agent site selection** - spatial-analysis **site detail** moved from a map overlay card into the **right panel** with a **Back** control; `fly_to` with `site` opens the panel; new ZIP/area search clears the selected site.
@@ -223,6 +223,7 @@ _4.11.2026_
 
 _4.12.2026_
 - City and borough search loads Google Trends (keyword from borough name or city query via `/api/trends?city=&state=`); stats bar shows metro name plus keyword scope; panel surfaces Trends errors/empty data before PDF export; aggregate PDF includes Trends when loaded
+- Right data panel width tightened from **360px** to **320px** for more map area (`app/page.tsx`).
 
 ## Known Bugs
 

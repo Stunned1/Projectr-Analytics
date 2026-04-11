@@ -483,7 +483,7 @@ const SIDEBAR_EXPANDED_PX = 200
 /** Agent-selected parcel / site - lives in the right panel, not over the map. */
 function SiteDetailRightPanel({ site, onBack }: { site: AnalysisSite; onBack: () => void }) {
   return (
-    <div className="flex min-h-0 min-w-[360px] flex-1 flex-col overflow-hidden p-4">
+    <div className="flex min-h-0 min-w-[320px] flex-1 flex-col overflow-hidden p-4">
       <div className="mb-4 flex items-start gap-2 border-b border-border/60 pb-3">
         <button
           type="button"
@@ -1317,7 +1317,7 @@ export default function Home() {
       {/* ── Right Data Panel ── */}
       <aside
         className={`z-20 flex min-h-0 flex-shrink-0 flex-col overflow-hidden border-l border-border/80 bg-card transition-all duration-300 ${
-          panelOpen && (result || aggregateData || selectedSite) ? 'w-[360px]' : 'w-0 overflow-hidden border-l-0'
+          panelOpen && (result || aggregateData || selectedSite) ? 'w-[320px]' : 'w-0 overflow-hidden border-l-0'
         }`}
       >
         {panelOpen && selectedSite && (
@@ -1327,7 +1327,7 @@ export default function Home() {
         )}
 
         {!selectedSite && aggregateData && panelOpen && !result && (
-          <div className="flex min-h-0 min-w-[360px] flex-1 flex-col overflow-hidden">
+          <div className="flex min-h-0 min-w-[320px] flex-1 flex-col overflow-hidden">
             <div className="shrink-0 border-b border-border/50 p-4 pb-3">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
@@ -1527,7 +1527,7 @@ export default function Home() {
         )}
 
         {!selectedSite && result && panelOpen && (
-          <div className="flex min-h-0 min-w-[360px] flex-1 flex-col overflow-hidden">
+          <div className="flex min-h-0 min-w-[320px] flex-1 flex-col overflow-hidden">
             <div className="shrink-0 border-b border-border/50 p-4 pb-3">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
