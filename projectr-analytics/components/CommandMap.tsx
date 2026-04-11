@@ -136,18 +136,23 @@ export interface LayerState {
 }
 
 /** Pill colors — reused for collapsed layer “active” dot stack (CommandMap chrome). */
-const LAYER_DOT_INDICATORS: Array<{ key: keyof LayerState; color: string; needsClientMarkers?: boolean }> = [
-  { key: 'zipBoundary', color: '#a1a1aa' },
-  { key: 'transitStops', color: '#38bdf8' },
-  { key: 'rentChoropleth', color: '#a78bfa' },
-  { key: 'parcels', color: '#fbbf24' },
-  { key: 'tracts', color: '#2dd4bf' },
-  { key: 'amenityHeatmap', color: '#facc15' },
-  { key: 'floodRisk', color: '#f87171' },
-  { key: 'nycPermits', color: '#D76B3D' },
-  { key: 'pois', color: '#f59e0b' },
-  { key: 'momentum', color: '#d946ef' },
-  { key: 'clientData', color: '#D76B3D', needsClientMarkers: true },
+const LAYER_DOT_INDICATORS: Array<{
+  key: keyof LayerState
+  color: string
+  label: string
+  needsClientMarkers?: boolean
+}> = [
+  { key: 'zipBoundary', color: '#a1a1aa', label: 'ZIP boundaries' },
+  { key: 'transitStops', color: '#38bdf8', label: 'Transit' },
+  { key: 'rentChoropleth', color: '#a78bfa', label: 'Rent/value fill' },
+  { key: 'parcels', color: '#fbbf24', label: 'Parcels' },
+  { key: 'tracts', color: '#2dd4bf', label: 'Tracts' },
+  { key: 'amenityHeatmap', color: '#facc15', label: 'Amenity' },
+  { key: 'floodRisk', color: '#f87171', label: 'Flood' },
+  { key: 'nycPermits', color: '#D76B3D', label: 'Permits' },
+  { key: 'pois', color: '#f59e0b', label: 'POIs' },
+  { key: 'momentum', color: '#d946ef', label: 'Momentum' },
+  { key: 'clientData', color: '#D76B3D', label: 'Client markers', needsClientMarkers: true },
 ]
 
 interface MapViewState {
@@ -1453,39 +1458,48 @@ function CommandMap({
         </div>
       )}
 
-      {/* Layers: collapsed toggle + active dots (always) + expandable panel */}
+      {/* Layers: `flex-row-reverse` + `w-max` + chrome first in DOM so the stack is pinned to `right` with no phantom width (fixes large gap vs sidebar). */}
       <div
-        className="absolute top-4 z-40 flex flex-col items-end gap-2"
-        style={{ right: reservedRightPx > 0 ? reservedRightPx + 16 : 16 }}
+        className="absolute top-4 z-40 flex w-max max-w-none flex-row-reverse items-start gap-2"
+        style={{ right: reservedRightPx > 0 ? reservedRightPx + 16 : 16, left: 'auto' }}
       >
-        <button
-          type="button"
-          aria-expanded={layerPanelOpen}
-          aria-label={layerPanelOpen ? 'Close layers panel' : 'Open layers panel'}
-          onClick={() => setLayerPanelOpen((o) => !o)}
-          className="flex h-10 w-10 items-center justify-center rounded-lg border border-border/80 bg-card/90 text-muted-foreground shadow-lg shadow-black/40 backdrop-blur-xl transition-colors hover:text-foreground"
-        >
-          <Layers className="h-[18px] w-[18px]" strokeWidth={1.75} />
-        </button>
+        <div className="flex shrink-0 flex-col items-center gap-2">
+          <div className="flex min-h-10 min-w-[2.25rem] flex-col items-center justify-start gap-2 rounded-lg border border-border/80 bg-card/90 p-2 shadow-lg shadow-black/40 backdrop-blur-xl">
+            {LAYER_DOT_INDICATORS.filter(({ key, needsClientMarkers }) => {
+              if (!(effectiveLayers[key] ?? false)) return false
+              if (needsClientMarkers && !uploadedMarkers?.length) return false
+              return true
+            }).map(({ key, color, label }) => (
+              <button
+                key={key}
+                type="button"
+                title={`Turn off ${label}`}
+                aria-label={`Turn off ${label} layer`}
+                onClick={() => handleToggle(key)}
+                className="h-3 w-3 shrink-0 cursor-pointer rounded-full transition-transform hover:scale-125 active:scale-95"
+                style={{ background: color }}
+              />
+            ))}
+          </div>
 
-        <div className="flex min-h-[2.25rem] min-w-[2.25rem] flex-col items-center gap-2 rounded-lg border border-border/80 bg-card/90 p-2 shadow-lg shadow-black/40 backdrop-blur-xl">
-          {LAYER_DOT_INDICATORS.filter(({ key, needsClientMarkers }) => {
-            if (!(effectiveLayers[key] ?? false)) return false
-            if (needsClientMarkers && !uploadedMarkers?.length) return false
-            return true
-          }).map(({ key, color }) => (
-            <button
-              key={key}
-              type="button"
-              title={`${key} on — open panel to change`}
-              onClick={() => setLayerPanelOpen(true)}
-              className="h-3 w-3 shrink-0 cursor-pointer rounded-full transition-transform hover:scale-125"
-              style={{ background: color }}
-            />
-          ))}
+          <button
+            type="button"
+            aria-expanded={layerPanelOpen}
+            aria-label={layerPanelOpen ? 'Close layers panel' : 'Open layers panel'}
+            onClick={() => setLayerPanelOpen((o) => !o)}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-card/90 text-muted-foreground shadow-lg shadow-black/40 backdrop-blur-xl transition-colors hover:text-foreground"
+          >
+            <Layers className="h-[18px] w-[18px]" strokeWidth={1.75} />
+          </button>
         </div>
 
-        {layerPanelOpen && (
+        <div
+          className={`min-w-0 overflow-hidden transition-[max-width,opacity,transform] duration-300 ease-out motion-reduce:transition-none ${
+            layerPanelOpen
+              ? 'max-w-56 shrink-0 translate-x-0 opacity-100'
+              : 'max-w-0 -translate-x-1 opacity-0 pointer-events-none'
+          }`}
+        >
           <div className="flex max-h-[min(70vh,calc(100vh-7rem))] w-56 flex-col gap-0 overflow-y-auto overflow-x-hidden rounded-xl border border-border/90 bg-card/95 shadow-2xl shadow-black/40 backdrop-blur-xl">
 
         {/* Layer pills */}
@@ -1656,7 +1670,7 @@ function CommandMap({
           </div>
         )}
           </div>
-        )}
+        </div>
       </div>
 
     </div>

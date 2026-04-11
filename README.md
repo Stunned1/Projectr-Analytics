@@ -97,6 +97,7 @@ _4.11.2026_
 - `/api/agent` system prompt lists `nycPermits` (not `permits`) so Gemini layer toggles match `CommandMap` layer keys.
 - `npm run warm:demo` — `scripts/warm-demo-zips.ts` warms `/api/market`, `/api/transit`, `/api/trends`, and `/api/cycle` for demo ZIPs 11201, 10001, and 60614; run with dev server up; optional `WARM_BASE_URL` override.
 - Added `/api/pois` — Overture Maps POI endpoint; returns categorized places (coffee, grocery, pharmacy, fitness, schools) + named anchor tenants (Whole Foods, Equinox, SoulCycle, etc.) by lat/lng radius; 7-day cache; nationwide coverage
+- `/api/agent` system prompt reconciled after merge: multi-step `steps` responses for case studies plus a single merged INTELLIGENCE RULES list (rent/value fill, transit+amenity, momentum, `run_analysis` / spatial-analysis triggers).
 
 _4.12.2026_
 - `/api/trends` — optional `city` + `state` (USPS 2-letter) and `anchor_zip` (5 digits) skip ZIP geocoding and build the same keyword/geo flow; JSON adds `geo_note`, `empty_message`, and a soft `error` (HTTP 200) when Google Trends fails or returns no series; `fetchTrends` surfaces errors instead of failing silently
@@ -104,6 +105,7 @@ _4.12.2026_
 **Bug Fixes**
 
 _4.11.2026_
+- Map layers chrome used `flex` inside an absolutely positioned box, so the row stretched across the full map width and left a large empty gap between the layers sheet and the dots/toggle; fixed with `w-max`, `left: auto`, and `flex-row-reverse` so dots/toggle are first in DOM and sit flush to `right`, with the sheet immediately to their left.
 - PDF cycle classifier tiles and Page 2 metrics “Signal” column again use Unicode arrows (↑/↓/→) instead of ASCII `+` / `-` / `~` now that Standard font rendering is verified in `@react-pdf`.
 - PDF brief signal tiles could render as label-only boxes (narrow column + missing string fields); reverted to horizontal signal row, added `wrap` on narrative and tile lines, and hardened sanitizer / score coercion so direction/value/source and table arrows render reliably.
 - PDF `parseCycleAnalysisField` now coerces JSON round-trips (string scores `"1"`, numeric ZIP `10001`, string confidence counts) so client-supplied `cycleAnalysis` is not dropped; signal tiles use fixed column widths (`23.5%`) because `flex:1` rows often give Text zero width in `@react-pdf`; Page 1 headline and body sit in a full-width column with `wrap`, explicit width, and disabled hyphenation to stop mid-sentence clipping.
@@ -191,6 +193,10 @@ _4.11.2026_
 - Left sidebar now collapsible — collapses to 48px icon strip, expands to 200px; search, nav labels, and active market badge hidden when collapsed
 - Bottom stats bar replaced with floating pill bubble (bottom-center, glassmorphism) — scrollable stats with dividers; ↗ button opens data panel
 - Right data panel gains Overview/All Data tab toggle — "All Data" tab shows every metric as a flat table (Zillow, velocity, Census, FRED, transit, trends)
+- Map layer pill **Rent/value fill** (was labeled Rent) toggles the Zillow-sourced ZIP choropleth; **Fill metric** (ZORI / ZHVI) only appears when that layer is on; PDF active-layer line uses the same naming and omits fill metric when the choropleth is off.
+- **Layers UI** — map layers stack top-right clears the 300px data panel when open; **expandable layers panel** sits left (toward map center); **active dots** above **Layers** toggle in a fixed right column; dots **toggle that layer off** on click; panel uses width/opacity/slide transition.
+- **AI agent** — sidebar footer **AI** button opens docked chat beside the nav (red dot when a reply arrived while closed); floating FAB removed from the map on the home page.
+- **3D** — tilt/rotation sliders removed from the map; **3D** pill in the right data panel header toggles 45° perspective (Projectr orange when on); agent `set_tilt` still overrides until cleared.
 
 _4.12.2026_
 - City and borough search loads Google Trends (keyword from borough name or city query via `/api/trends?city=&state=`); stats bar shows metro name plus keyword scope; panel surfaces Trends errors/empty data before PDF export; aggregate PDF includes Trends when loaded
