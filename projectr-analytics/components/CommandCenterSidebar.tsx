@@ -4,7 +4,6 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState, type ReactNode } from 'react'
-import { ClearLocalWorkspaceButton } from '@/components/clear-local-workspace-button'
 import ShortlistPanel from '@/components/ShortlistPanel'
 import { Input } from '@/components/ui/input'
 import type { Site } from '@/lib/sites-store'
@@ -139,14 +138,17 @@ export default function CommandCenterSidebar({
         )}
       >
         {!collapsed && (
-          <Image
-            src="/scout.png"
-            alt="Scout"
-            width={120}
-            height={32}
-            loading="eager"
-            style={{ width: 'auto', height: '28px' }}
-          />
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <Image
+              src="/scout.png"
+              alt=""
+              width={120}
+              height={32}
+              loading="eager"
+              style={{ width: 'auto', height: '28px' }}
+            />
+            <span className="truncate text-base font-semibold tracking-tight text-white">Scout</span>
+          </div>
         )}
         <button
           type="button"
@@ -217,13 +219,6 @@ export default function CommandCenterSidebar({
             <NavLink href="/" icon={<MapIcon />} label="Map" />
             <NavLink href="/upload" icon={<UploadIcon />} label="Client CSV" />
             <NavLink href="/guide" icon={<BookOpen className="h-4 w-4" strokeWidth={1.5} />} label="Guide" />
-          </div>
-        )}
-
-        {!collapsed && (
-          <div className="space-y-1 border-b border-sidebar-border px-2 py-2">
-            <p className="px-1 text-[9px] font-medium tracking-wider text-muted-foreground uppercase">Testing</p>
-            <ClearLocalWorkspaceButton variant="sidebar" />
           </div>
         )}
 

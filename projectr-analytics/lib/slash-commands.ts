@@ -93,7 +93,7 @@ export function clearSlashUsageLines(): string {
     '• `/clear:layers` — turns **off** every map layer and clears the NYC permit-type filter (map view unchanged).',
     '• `/clear:terminal` — **clean canvas**: only the default greeting remains (the command is not echoed); case-brief bundle unchanged.',
     '• `/clear:memory` or `/clear:mem` — **clean canvas**: default greeting only; clears the case-brief bundle; **does not** reload, change market, or clear Client CSV.',
-    '• `/clear:workspace` — same as **Testing → Clear local test data**: confirm, then wipe session keys (upload, pins, chat, pending nav) and **reload** the tab.',
+    '• `/clear:workspace` — **Clear local test data**: confirm, then wipe session keys (upload, pins, chat, pending nav) and **reload** the tab.',
     '• **`/restart`** — asks **Are you sure? y/n**; then send plain **`y`** / **`yes`** or **`n`** / **`no`** (no slash). One-liner **`/restart y`** / **`/restart n`** also works.',
     '• Bare `/clear` is invalid — pick a target. Unknown target → error with hints.',
   ].join('\n')
