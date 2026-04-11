@@ -482,9 +482,12 @@ export default function Home() {
   const [aggregateData, setAggregateData] = useState<AggregateData | null>(null)
   const uploadedMarkers = useClientUploadMarkersStore((s) => s.markers)
   const [agentOpen, setAgentOpen] = useState(false)
+  const [agentUnread, setAgentUnread] = useState(false)
   const [agentLayerOverrides, setAgentLayerOverrides] = useState<Record<string, boolean>>({})
   const [agentMetric, setAgentMetric] = useState<'zori' | 'zhvi' | null>(null)
   const [agentTilt, setAgentTilt] = useState<number | null>(null)
+  /** User 3D pill (45°) when agent has not overridden tilt. */
+  const [map3DEnabled, setMap3DEnabled] = useState(false)
   const [analysisSites, setAnalysisSites] = useState<import('@/components/AgentChat').AnalysisSite[]>([])
   const [agentPermitFilter, setAgentPermitFilter] = useState<string[] | null>(null)
   const [selectedSite, setSelectedSite] = useState<import('@/components/AgentChat').AnalysisSite | null>(null)
@@ -544,7 +547,10 @@ export default function Home() {
         setPanelOpen(true)
         break
       case 'set_tilt':
-        if (action.tilt != null) setAgentTilt(action.tilt)
+        if (action.tilt != null) {
+          setAgentTilt(action.tilt)
+          setMap3DEnabled(false)
+        }
         break
       case 'show_sites':
         if (action.sites) setAnalysisSites(action.sites)
@@ -841,6 +847,20 @@ export default function Home() {
     ? result.metro_velocity.doz_pending_latest < 30 ? 'Active' : 'Moderate'
     : null
 
+  const hasStatsBar = !!(result || aggregateData)
+  const effectiveMapTilt = agentTilt != null ? agentTilt : map3DEnabled ? 45 : 0
+  const map3DActive = effectiveMapTilt > 0
+
+  function handleMap3DToggle() {
+    if (map3DActive) {
+      setMap3DEnabled(false)
+      setAgentTilt(null)
+    } else {
+      setMap3DEnabled(true)
+      setAgentTilt(null)
+    }
+  }
+
   const sidebarActiveMarket =
     result != null
       ? {
@@ -944,6 +964,30 @@ export default function Home() {
           )}
         </nav>
 
+        {/* AI agent — opens docked chat beside sidebar */}
+        <div
+          className={`flex-shrink-0 border-t border-white/8 px-2 py-2 ${sidebarCollapsed ? 'flex justify-center' : 'px-3'}`}
+        >
+          <button
+            type="button"
+            onClick={() => {
+              setAgentOpen(true)
+              setAgentUnread(false)
+            }}
+            className="relative flex h-8 w-8 items-center justify-center rounded-full text-[10px] font-bold text-white shadow-md transition-transform hover:scale-105"
+            style={{ background: '#D76B3D' }}
+            title="Open AI agent"
+          >
+            AI
+            {agentUnread && (
+              <span
+                className="absolute top-0 right-0 h-2 w-2 rounded-full border-2 border-[#0a0a0a]"
+                style={{ background: '#ef4444' }}
+              />
+            )}
+          </button>
+        </div>
+
         {/* Active market badge — hidden when collapsed */}
         {!sidebarCollapsed && (result || cityZips) && (
           <div className="px-3 py-3 border-t border-white/8">
@@ -985,7 +1029,9 @@ export default function Home() {
           agentPermitFilter={agentPermitFilter}
           agentLayerOverrides={agentLayerOverrides}
           agentMetric={agentMetric}
-          agentTilt={agentTilt}
+          mapTilt={effectiveMapTilt}
+          mapHeading={0}
+          reservedRightPx={panelOpen && (result || aggregateData) ? 300 : 0}
           agentFlyTo={agentFlyTo}
           onLayersChange={handleMapLayersChange}
           onClearAgentOverride={(key) => setAgentLayerOverrides((prev) => {
@@ -1097,14 +1143,32 @@ export default function Home() {
           </div>
         )}
 
-        {/* AI Agent Chat */}
-        <AgentChat
-          mapContext={mapContext}
-          onAction={handleAgentAction}
-          isOpen={agentOpen}
-          onToggle={() => setAgentOpen(!agentOpen)}
-          hasStatsBar={!!(result || aggregateData)}
-        />
+        {/* AI Agent Chat — docked near sidebar when open */}
+        {agentOpen && (
+          <div
+            className="pointer-events-none fixed z-50 flex max-h-[min(520px,72vh)] w-[min(360px,calc(100vw-1rem))] justify-start"
+            style={{
+              bottom: hasStatsBar ? '7.25rem' : '2.5rem',
+              left: sidebarCollapsed ? '3.5rem' : '13rem',
+            }}
+          >
+            <div className="pointer-events-auto max-h-full w-full">
+              <AgentChat
+                mapContext={mapContext}
+                onAction={handleAgentAction}
+                isOpen
+                onToggle={() => setAgentOpen(false)}
+                onClose={() => {
+                  setAgentOpen(false)
+                  setAgentUnread(false)
+                }}
+                onNotifyWhileClosed={() => setAgentUnread(true)}
+                hasStatsBar={hasStatsBar}
+                variant="docked"
+              />
+            </div>
+          </div>
+        )}
 
         {/* Site Detail Popup — shown when a site card is clicked in agent chat */}
         {selectedSite && (
@@ -1183,12 +1247,25 @@ export default function Home() {
       >
         {aggregateData && panelOpen && !result && (
           <div className="p-4 min-w-[300px]">
-            <div className="flex items-start justify-between mb-5">
-              <div>
+            <div className="flex items-start justify-between mb-5 gap-2">
+              <div className="min-w-0">
                 <h2 className="text-white font-bold text-base leading-tight">{aggregateData.label}</h2>
                 <p className="text-zinc-500 text-xs mt-0.5">{aggregateData.zip_count} ZIP codes · aggregated</p>
               </div>
-              <button onClick={() => setPanelOpen(false)} className="text-zinc-600 hover:text-white text-xl leading-none mt-0.5">×</button>
+              <div className="flex flex-shrink-0 items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleMap3DToggle}
+                  className="rounded-full border px-3 py-1 text-[10px] font-semibold text-white transition-colors"
+                  style={{
+                    background: map3DActive ? '#D76B3D' : 'rgba(45,51,66,0.95)',
+                    borderColor: map3DActive ? '#D76B3D' : 'rgba(75,85,99,0.9)',
+                  }}
+                >
+                  3D
+                </button>
+                <button type="button" onClick={() => setPanelOpen(false)} className="text-zinc-600 hover:text-white text-xl leading-none">×</button>
+              </div>
             </div>
 
             <MomentumExplainBlock
@@ -1348,12 +1425,25 @@ export default function Home() {
         {result && panelOpen && (
           <div className="p-4 min-w-[300px]">
             {/* Header */}
-            <div className="flex items-start justify-between mb-3">
-              <div>
+            <div className="flex items-start justify-between mb-3 gap-2">
+              <div className="min-w-0">
                 <h2 className="text-white font-bold text-base leading-tight">{result.zillow?.city ?? result.zip}</h2>
                 <p className="text-zinc-500 text-xs mt-0.5">{result.zillow?.metro_name ?? ''} · {result.zip}</p>
               </div>
-              <button onClick={() => setPanelOpen(false)} className="text-zinc-600 hover:text-white text-xl leading-none mt-0.5">×</button>
+              <div className="flex flex-shrink-0 items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleMap3DToggle}
+                  className="rounded-full border px-3 py-1 text-[10px] font-semibold text-white transition-colors"
+                  style={{
+                    background: map3DActive ? '#D76B3D' : 'rgba(45,51,66,0.95)',
+                    borderColor: map3DActive ? '#D76B3D' : 'rgba(75,85,99,0.9)',
+                  }}
+                >
+                  3D
+                </button>
+                <button type="button" onClick={() => setPanelOpen(false)} className="text-zinc-600 hover:text-white text-xl leading-none">×</button>
+              </div>
             </div>
             {/* Tab bar */}
             <div className="flex rounded-lg overflow-hidden border border-white/8 mb-4">

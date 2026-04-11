@@ -73,6 +73,12 @@ interface AgentChatProps {
   isOpen: boolean
   onToggle: () => void
   hasStatsBar?: boolean
+  /** `docked` — no floating FAB; parent renders the open button (e.g. sidebar). */
+  variant?: 'floating' | 'docked'
+  /** Prefer over onToggle for explicit close (×). */
+  onClose?: () => void
+  /** Fired when a new agent message is added while the panel is closed (unread hint). */
+  onNotifyWhileClosed?: () => void
 }
 
 const ACTION_LABELS: Record<string, string> = {
@@ -94,7 +100,16 @@ const SUGGESTIONS = [
   'Highlight transit connectivity',
 ]
 
-export default function AgentChat({ mapContext, onAction, isOpen, onToggle, hasStatsBar }: AgentChatProps) {
+export default function AgentChat({
+  mapContext,
+  onAction,
+  isOpen,
+  onToggle,
+  hasStatsBar,
+  variant = 'floating',
+  onClose,
+  onNotifyWhileClosed,
+}: AgentChatProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'agent',
@@ -145,6 +160,7 @@ export default function AgentChat({ mapContext, onAction, isOpen, onToggle, hasS
           role: 'agent',
           text: `Analysis complete — no qualifying sites found. ${data.error ?? ''}`,
         }])
+        if (!isOpen) onNotifyWhileClosed?.()
         return
       }
 
@@ -165,13 +181,15 @@ export default function AgentChat({ mapContext, onAction, isOpen, onToggle, hasS
       setTimeout(() => {
         onAction({ type: 'show_sites', sites })
       }, 600)
+      if (!isOpen) onNotifyWhileClosed?.()
     } catch {
       setMessages((prev) => [...prev.slice(0, -1), {
         role: 'agent',
         text: 'Analysis failed. Please try again.',
       }])
+      if (!isOpen) onNotifyWhileClosed?.()
     }
-  }, [onAction])
+  }, [onAction, isOpen, onNotifyWhileClosed])
 
   const executeStep = useCallback((step: AgentStep) => {
     setMessages((prev) => {
@@ -221,12 +239,14 @@ export default function AgentChat({ mapContext, onAction, isOpen, onToggle, hasS
 
       if (data.error) {
         setMessages((prev) => [...prev, { role: 'agent', text: 'Something went wrong. Try again.' }])
+        if (!isOpen) onNotifyWhileClosed?.()
         return
       }
 
       // Multi-step sequence
       if (data.steps?.length) {
         setMessages((prev) => [...prev, { role: 'agent', text: data.message, insight: data.insight }])
+        if (!isOpen) onNotifyWhileClosed?.()
         runSequence(data.steps)
         return
       }
@@ -238,6 +258,7 @@ export default function AgentChat({ mapContext, onAction, isOpen, onToggle, hasS
         action: data.action?.type !== 'none' ? data.action : undefined,
         insight: data.insight,
       }])
+      if (!isOpen) onNotifyWhileClosed?.()
 
       if (data.action?.type === 'run_analysis') {
         void runAnalysis(data.action)
@@ -246,16 +267,19 @@ export default function AgentChat({ mapContext, onAction, isOpen, onToggle, hasS
       }
     } catch {
       setMessages((prev) => [...prev, { role: 'agent', text: 'Connection error.' }])
+      if (!isOpen) onNotifyWhileClosed?.()
     } finally {
       setLoading(false)
     }
-  }, [loading, isRunningSequence, mapContext, onAction, runSequence, runAnalysis])
+  }, [loading, isRunningSequence, mapContext, onAction, runSequence, runAnalysis, isOpen, onNotifyWhileClosed])
 
-  const bottomOffset = hasStatsBar ? 'bottom-[76px]' : 'bottom-4'
+  const bottomOffset = hasStatsBar ? 'bottom-[7.25rem]' : 'bottom-10'
 
   if (!isOpen) {
+    if (variant === 'docked') return null
     return (
       <button
+        type="button"
         onClick={onToggle}
         className={`absolute ${bottomOffset} right-4 z-40 w-10 h-10 rounded-full flex items-center justify-center shadow-lg transition-all hover:scale-105`}
         style={{ background: 'linear-gradient(135deg, #D76B3D, #b85a30)' }}
@@ -268,9 +292,14 @@ export default function AgentChat({ mapContext, onAction, isOpen, onToggle, hasS
     )
   }
 
+  const panelPositionClass =
+    variant === 'docked'
+      ? 'relative z-10 w-full max-w-[360px] flex flex-col rounded-2xl overflow-hidden shadow-2xl'
+      : `absolute ${bottomOffset} right-4 z-40 w-[360px] flex flex-col rounded-2xl overflow-hidden shadow-2xl`
+
   return (
     <div
-      className={`absolute ${bottomOffset} right-4 z-40 w-[360px] flex flex-col rounded-2xl overflow-hidden shadow-2xl`}
+      className={panelPositionClass}
       style={{
         background: 'rgba(6, 6, 6, 0.75)',
         backdropFilter: 'blur(20px)',
@@ -280,8 +309,10 @@ export default function AgentChat({ mapContext, onAction, isOpen, onToggle, hasS
     >
       {/* Close button */}
       <button
-        onClick={onToggle}
+        type="button"
+        onClick={() => (onClose ? onClose() : onToggle())}
         className="absolute top-2.5 right-3 z-10 text-zinc-600 hover:text-zinc-300 transition-colors text-lg leading-none w-6 h-6 flex items-center justify-center rounded-md hover:bg-white/5"
+        aria-label="Close AI chat"
       >×</button>
 
       {/* Messages */}
