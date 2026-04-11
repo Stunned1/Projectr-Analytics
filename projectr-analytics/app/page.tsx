@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic'
 import Image from 'next/image'
 import AgenticNormalizer from '@/components/AgenticNormalizer'
 import ExecutiveMemo from '@/components/ExecutiveMemo'
+import AgentChat, { type AgentAction } from '@/components/AgentChat'
 
 const CommandMap = dynamic(() => import('@/components/CommandMap'), { ssr: false })
 
@@ -190,6 +191,10 @@ export default function Home() {
   const [boroughBoundary, setBoroughBoundary] = useState<object | null>(null)
   const [aggregateData, setAggregateData] = useState<AggregateData | null>(null)
   const [uploadedMarkers, setUploadedMarkers] = useState<Array<{ lat: number; lng: number; label: string; value: number | null }> | null>(null)
+  const [agentOpen, setAgentOpen] = useState(false)
+  const [agentLayerOverrides, setAgentLayerOverrides] = useState<Record<string, boolean>>({})
+  const [agentMetric, setAgentMetric] = useState<'zori' | 'zhvi' | null>(null)
+  const [agentTilt, setAgentTilt] = useState<number | null>(null)
   const [transit, setTransit] = useState<TransitData | null>(null)
   const [trends, setTrends] = useState<TrendsData | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -200,6 +205,52 @@ export default function Home() {
     if (result.triage.bucket === 'GEOSPATIAL' && result.marker_points?.length) {
       setUploadedMarkers(result.marker_points)
     }
+  }
+
+  function handleAgentAction(action: AgentAction) {
+    switch (action.type) {
+      case 'toggle_layer':
+        if (action.layer) setAgentLayerOverrides((prev) => ({ ...prev, [action.layer!]: action.value ?? true }))
+        break
+      case 'toggle_layers':
+        if (action.layers) setAgentLayerOverrides((prev) => ({ ...prev, ...action.layers }))
+        break
+      case 'set_metric':
+        if (action.metric) setAgentMetric(action.metric)
+        break
+      case 'search':
+        if (action.query) {
+          setSearchInput(action.query)
+          setTimeout(() => {
+            const form = document.querySelector('form')
+            form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+          }, 100)
+        }
+        break
+      case 'generate_memo':
+        setPanelOpen(true)
+        break
+      case 'set_tilt':
+        if (action.tilt != null) setAgentTilt(action.tilt)
+        break
+    }
+  }
+
+  const mapContext = {
+    label: result ? (result.zillow?.city ?? result.zip) : aggregateData?.label,
+    zip: result?.zip ?? null,
+    layers: agentLayerOverrides,
+    activeMetric: agentMetric ?? 'zori',
+    zori: result?.zillow?.zori_latest ?? aggregateData?.zillow.avg_zori,
+    zhvi: result?.zillow?.zhvi_latest ?? aggregateData?.zillow.avg_zhvi,
+    zoriGrowth: result?.zillow?.zori_growth_12m ?? aggregateData?.zillow.zori_growth_12m,
+    zhviGrowth: result?.zillow?.zhvi_growth_12m ?? aggregateData?.zillow.zhvi_growth_12m,
+    vacancyRate: result?.data.find((r) => r.metric_name === 'Vacancy_Rate')?.metric_value ?? aggregateData?.housing.vacancy_rate,
+    dozPending: result?.metro_velocity?.doz_pending_latest ?? aggregateData?.metro_velocity?.doz_pending_latest,
+    priceCuts: result?.metro_velocity?.price_cut_pct_latest ?? aggregateData?.metro_velocity?.price_cut_pct_latest,
+    inventory: result?.metro_velocity?.inventory_latest ?? aggregateData?.metro_velocity?.inventory_latest,
+    transitStops: transit?.stop_count,
+    population: result?.data.find((r) => r.metric_name === 'Total_Population')?.metric_value ?? aggregateData?.total_population,
   }
 
   async function fetchAggregate(zips: string[], label: string) {
@@ -320,7 +371,7 @@ export default function Home() {
 
         {/* Logo */}
         <div className="px-4 py-4 border-b border-white/8">
-          <Image src="/Projectr_Logo.png" alt="Projectr" width={120} height={32} className="h-8 w-auto object-contain" />
+          <Image src="/Projectr_Logo.png" alt="Projectr" width={120} height={32} loading="eager" style={{ width: 'auto', height: '32px' }} />
         </div>
 
         {/* Search */}
@@ -386,7 +437,7 @@ export default function Home() {
 
       {/* ── Map ── */}
       <div className="flex-1 relative overflow-hidden">
-        <CommandMap zip={result?.zip ?? null} marketData={result} transitData={transit} cityZips={cityZips} boroughBoundary={boroughBoundary} uploadedMarkers={uploadedMarkers} />
+        <CommandMap zip={result?.zip ?? null} marketData={result} transitData={transit} cityZips={cityZips} boroughBoundary={boroughBoundary} uploadedMarkers={uploadedMarkers} agentLayerOverrides={agentLayerOverrides} agentMetric={agentMetric} agentTilt={agentTilt} />
 
         {/* Bottom stats bar */}
         {(result || aggregateData) && (
@@ -416,6 +467,15 @@ export default function Home() {
             </div>
           </div>
         )}
+
+        {/* AI Agent Chat */}
+        <AgentChat
+          mapContext={mapContext}
+          onAction={handleAgentAction}
+          isOpen={agentOpen}
+          onToggle={() => setAgentOpen(!agentOpen)}
+          hasStatsBar={!!(result || aggregateData)}
+        />
       </div>
 
       {/* ── Right Data Panel ── */}

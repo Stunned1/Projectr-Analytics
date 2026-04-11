@@ -276,9 +276,12 @@ interface CommandMapProps {
   cityZips?: Array<{ zip: string; lat: number | null; lng: number | null; zori_latest: number | null; zhvi_latest: number | null; city: string; state: string | null }> | null
   boroughBoundary?: object | null
   uploadedMarkers?: Array<{ lat: number; lng: number; value: number | null; label: string }> | null
+  agentLayerOverrides?: Record<string, boolean>
+  agentMetric?: 'zori' | 'zhvi' | null
+  agentTilt?: number | null
 }
 
-function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, uploadedMarkers }: CommandMapProps) {
+function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, uploadedMarkers, agentLayerOverrides, agentMetric, agentTilt }: CommandMapProps) {
   const perfDebug = process.env.NEXT_PUBLIC_PERF_DEBUG === '1'
 
   const [primaryBoundary, setPrimaryBoundary] = useState<GeoJSON | null>(null)
@@ -484,20 +487,32 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
     }))
   }, [zip, transitData])
 
-  // Build color scale across all loaded ZIPs for the selected metric
+  // Merge agent layer overrides into local layer state
+  const effectiveLayers = useMemo(() => ({
+    ...layers,
+    ...agentLayerOverrides,
+  }), [layers, agentLayerOverrides])
+
+  // Agent can override the active metric
+  const effectiveMetric = agentMetric ?? activeMetric
+
+  // Agent can override tilt
+  useEffect(() => {
+    if (agentTilt != null) setTilt(agentTilt)
+  }, [agentTilt])
   const allMetricValues = useMemo(() => {
-    const primaryValue = activeMetric === 'zhvi'
+    const primaryValue = effectiveMetric === 'zhvi'
       ? marketData?.zillow?.zhvi_latest ?? null
       : marketData?.zillow?.zori_latest ?? null
     const vals: (number | null)[] = [primaryValue]
-    neighborBoundaries.forEach((n) => vals.push(activeMetric === 'zhvi' ? n.zhvi : n.zori))
-    cityBoundaries.forEach((n) => vals.push(activeMetric === 'zhvi' ? n.zhvi : n.zori))
+    neighborBoundaries.forEach((n) => vals.push(effectiveMetric === 'zhvi' ? n.zhvi : n.zori))
+    cityBoundaries.forEach((n) => vals.push(effectiveMetric === 'zhvi' ? n.zhvi : n.zori))
     return vals
-  }, [activeMetric, marketData, neighborBoundaries, cityBoundaries])
+  }, [effectiveMetric, marketData, neighborBoundaries, cityBoundaries])
 
   const colorScale = useMemo(() => buildColorScale(allMetricValues), [allMetricValues])
 
-  const primaryMetricValue = activeMetric === 'zhvi'
+  const primaryMetricValue = effectiveMetric === 'zhvi'
     ? marketData?.zillow?.zhvi_latest ?? null
     : marketData?.zillow?.zori_latest ?? null
 
@@ -505,16 +520,16 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
     const result: Layer[] = []
 
     // City ZIP boundaries (rendered first when in city mode)
-    if (layers.zipBoundary && cityBoundaries.length > 0) {
+    if (effectiveLayers.zipBoundary && cityBoundaries.length > 0) {
       cityBoundaries.forEach((n) => {
-        const metricValue = activeMetric === 'zhvi' ? n.zhvi : n.zori
+        const metricValue = effectiveMetric === 'zhvi' ? n.zhvi : n.zori
         result.push(
           new GeoJsonLayer({
             id: 'city-zip-' + n.zip,
             data: n.geojson,
             stroked: true,
             filled: true,
-            getFillColor: layers.rentChoropleth ? colorScale(metricValue) : [60, 60, 80, 60],
+            getFillColor: effectiveLayers.rentChoropleth ? colorScale(metricValue) : [60, 60, 80, 60],
             getLineColor: [255, 255, 255, 160],
             lineWidthMinPixels: 1,
             pickable: true,
@@ -522,7 +537,7 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
               if (info.object) {
                 setTooltipStable({
                   x: info.x, y: info.y,
-                  text: 'ZIP ' + n.zip + (metricValue ? ` · $${metricValue.toFixed(0)} ${activeMetric.toUpperCase()}` : ''),
+                  text: 'ZIP ' + n.zip + (metricValue ? ` · $${metricValue.toFixed(0)} ${effectiveMetric.toUpperCase()}` : ''),
                 })
               } else setTooltipStable(null)
             },
@@ -548,16 +563,16 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
     }
 
     // Neighbor ZIP boundaries (rendered first, behind primary)
-    if (layers.zipBoundary && neighborBoundaries.length > 0) {
+    if (effectiveLayers.zipBoundary && neighborBoundaries.length > 0) {
       neighborBoundaries.forEach((n) => {
-        const metricValue = activeMetric === 'zhvi' ? n.zhvi : n.zori
+        const metricValue = effectiveMetric === 'zhvi' ? n.zhvi : n.zori
         result.push(
           new GeoJsonLayer({
             id: 'neighbor-' + n.zip,
             data: n.geojson,
             stroked: true,
             filled: true,
-            getFillColor: layers.rentChoropleth ? colorScale(metricValue) : [60, 60, 80, 60],
+            getFillColor: effectiveLayers.rentChoropleth ? colorScale(metricValue) : [60, 60, 80, 60],
             getLineColor: [180, 180, 200, 120],
             lineWidthMinPixels: 1,
             pickable: true,
@@ -565,7 +580,7 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
               if (info.object) {
                 setTooltipStable({
                   x: info.x, y: info.y,
-                  text: 'ZIP ' + n.zip + (metricValue ? ` · $${metricValue.toFixed(0)} ${activeMetric.toUpperCase()}` : ''),
+                  text: 'ZIP ' + n.zip + (metricValue ? ` · $${metricValue.toFixed(0)} ${effectiveMetric.toUpperCase()}` : ''),
                 })
               } else setTooltipStable(null)
             },
@@ -576,14 +591,14 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
 
     // Primary ZIP boundary (on top, brighter outline)
     // When block groups are active, show outline only — block groups provide the color
-    if (layers.zipBoundary && primaryBoundary) {
+    if (effectiveLayers.zipBoundary && primaryBoundary) {
       result.push(
         new GeoJsonLayer({
           id: 'zip-primary',
           data: primaryBoundary,
           stroked: true,
-          filled: !layers.blockGroups, // no fill when block groups are showing
-          getFillColor: layers.rentChoropleth ? colorScale(primaryMetricValue) : [255, 255, 255, 30],
+          filled: !effectiveLayers.blockGroups, // no fill when block groups are showing
+          getFillColor: effectiveLayers.rentChoropleth ? colorScale(primaryMetricValue) : [255, 255, 255, 30],
           getLineColor: [255, 255, 255, 255],
           lineWidthMinPixels: 3,
           pickable: true,
@@ -591,7 +606,7 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
             if (info.object) {
               setTooltipStable({
                 x: info.x, y: info.y,
-                text: 'ZIP ' + zip + (primaryMetricValue ? ` · $${primaryMetricValue.toFixed(0)} ${activeMetric.toUpperCase()}` : ''),
+                text: 'ZIP ' + zip + (primaryMetricValue ? ` · $${primaryMetricValue.toFixed(0)} ${effectiveMetric.toUpperCase()}` : ''),
               })
             } else setTooltipStable(null)
           },
@@ -600,7 +615,7 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
     }
 
     // Transit stops
-    if (layers.transitStops && transitStops.length > 0) {
+    if (effectiveLayers.transitStops && transitStops.length > 0) {
       result.push(
         new ScatterplotLayer({
           id: 'transit-stops',
@@ -619,7 +634,7 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
     }
 
     // Block groups — sub-ZIP population density choropleth
-    if (layers.blockGroups && blockGroupData) {
+    if (effectiveLayers.blockGroups && blockGroupData) {
       const bgFeatures = blockGroupData.features ?? []
       const pops = bgFeatures.map((f) => f.properties.population).filter((p) => p > 0)
       const minPop = pops.length ? Math.min(...pops) : 0
@@ -654,7 +669,7 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
     }
 
     // NYC PLUTO parcels — ColumnLayer (3D columns sized by assessed value per sqft)
-    if (layers.parcels && parcelData?.parcels?.length) {
+    if (effectiveLayers.parcels && parcelData?.parcels?.length) {
       const { p25_per_sqft, p75_per_sqft } = parcelData.stats
       const range = p75_per_sqft - p25_per_sqft || 1
 
@@ -701,7 +716,7 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
     }
 
     // Census Tracts — rent/income choropleth (replaces block groups as primary sub-ZIP layer)
-    if (layers.tracts && tractData) {
+    if (effectiveLayers.tracts && tractData) {
       const tractFeatures = tractData.features ?? []
       const rents = tractFeatures.map((f: TractFeature) => f.properties.median_rent ?? 0).filter((v: number) => v > 0)
       const minRent = rents.length ? Math.min(...rents) : 0
@@ -749,7 +764,7 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
     }
 
     // Amenity Heatmap — weighted by amenity type (transit > commercial > retail)
-    if (layers.amenityHeatmap && amenityPoints.length > 0) {
+    if (effectiveLayers.amenityHeatmap && amenityPoints.length > 0) {
       result.push(
         new HeatmapLayer({
           id: 'amenity-heatmap',
@@ -772,7 +787,7 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
     }
 
     // FEMA Flood Risk Zones
-    if (layers.floodRisk && floodData) {
+    if (effectiveLayers.floodRisk && floodData) {
       result.push(
         new GeoJsonLayer({
           id: 'flood-risk',
@@ -806,7 +821,7 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
     }
 
     // Uploaded client data markers (from Agentic Normalizer) — 3D columns
-    if (layers.clientData && uploadedMarkers?.length) {
+    if (effectiveLayers.clientData && uploadedMarkers?.length) {
       const values = uploadedMarkers.map((d) => d.value ?? 0).filter((v) => v > 0)
       const maxVal = values.length ? Math.max(...values) : 1
       const minVal = values.length ? Math.min(...values) : 0
@@ -838,7 +853,7 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
     }
 
     return result
-  }, [primaryBoundary, neighborBoundaries, cityBoundaries, boroughBoundary, transitStops, blockGroupData, parcelData, tractData, amenityPoints, floodData, layers, colorScale, primaryMetricValue, activeMetric, zip, setTooltipStable, uploadedMarkers])
+  }, [primaryBoundary, neighborBoundaries, cityBoundaries, boroughBoundary, transitStops, blockGroupData, parcelData, tractData, amenityPoints, floodData, effectiveLayers, colorScale, primaryMetricValue, effectiveMetric, zip, setTooltipStable, uploadedMarkers])
 
   const handleToggle = useCallback((key: keyof LayerState) => {
     setLayers((prev) => ({ ...prev, [key]: !prev[key] }))
@@ -852,7 +867,7 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
           defaultCenter={{ lat: 37.2563, lng: -80.4347 }}
           defaultZoom={11}
           colorScheme="DARK"
-          disableDefaultUI={false}
+          disableDefaultUI={true}
           gestureHandling="greedy"
           style={{ width: '100%', height: '100%' }}
         >
@@ -873,80 +888,102 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
       )}
 
       {/* Layer toggles */}
-      <div className="absolute top-4 right-4 z-40 bg-zinc-900/90 border border-zinc-700 rounded-lg p-3 w-52">
-        <p className="text-zinc-400 text-xs uppercase tracking-widest mb-2">Layers</p>
-        {([
-          { key: 'zipBoundary' as const, label: 'ZIP Boundaries' },
-          { key: 'transitStops' as const, label: 'Transit Stops' },
-          { key: 'rentChoropleth' as const, label: 'Rent Choropleth' },
-          { key: 'blockGroups' as const, label: 'Block Groups' },
-          { key: 'parcels' as const, label: '🏙 NYC Parcels', zipOnly: true },
-          { key: 'tracts' as const, label: 'Census Tracts' },
-          { key: 'amenityHeatmap' as const, label: '🔥 Amenity Heatmap' },
-          { key: 'floodRisk' as const, label: '⚠️ Flood Risk' },
-          { key: 'clientData' as const, label: '📍 Client Data', showWhen: !!uploadedMarkers?.length },
-        ]).filter(({ zipOnly, showWhen }) => {
-          if (showWhen === false) return false
-          if (zipOnly) return (!cityZips?.length) || parcelData !== null
-          return true
-        }).map(({ key, label }) => (
-          <label key={key} className="flex items-center gap-2 cursor-pointer mb-1">
-            <input type="checkbox" checked={layers[key]} onChange={() => handleToggle(key)} className="accent-orange-500" />
-            <span className="text-zinc-300 text-xs">{label}</span>
-          </label>
-        ))}
-        <div className="mt-3 border-t border-zinc-700 pt-2">
-          <p className="text-zinc-400 text-xs mb-1">Choropleth Metric</p>
-          <select
-            value={activeMetric}
-            onChange={(e) => setActiveMetric(e.target.value as 'zori' | 'zhvi')}
-            className="w-full bg-zinc-800 text-zinc-300 text-xs rounded px-2 py-1 border border-zinc-700"
-          >
-            <option value="zori">Rent (ZORI)</option>
-            <option value="zhvi">Home Value (ZHVI)</option>
-          </select>
+      <div className="absolute top-4 right-4 z-40 w-56 flex flex-col gap-0 bg-black/70 backdrop-blur-md border border-white/10 rounded-xl overflow-hidden shadow-xl">
+
+        {/* Layer pills */}
+        <div className="px-3 pt-3 pb-2">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-500 mb-2">Layers</p>
+          <div className="flex flex-wrap gap-1.5">
+            {([
+              { key: 'zipBoundary' as const, label: 'ZIP', color: '#a1a1aa' },
+              { key: 'transitStops' as const, label: 'Transit', color: '#38bdf8' },
+              { key: 'rentChoropleth' as const, label: 'Rent', color: '#a78bfa' },
+              { key: 'blockGroups' as const, label: 'Blocks', color: '#34d399' },
+              { key: 'parcels' as const, label: 'Parcels', color: '#fbbf24', zipOnly: true },
+              { key: 'tracts' as const, label: 'Tracts', color: '#2dd4bf' },
+              { key: 'amenityHeatmap' as const, label: 'Amenity', color: '#facc15' },
+              { key: 'floodRisk' as const, label: 'Flood', color: '#f87171' },
+              { key: 'clientData' as const, label: 'Client', color: '#D76B3D', showWhen: !!uploadedMarkers?.length },
+            ]).filter(({ zipOnly, showWhen }) => {
+              if (showWhen === false) return false
+              if (zipOnly) return (!cityZips?.length) || parcelData !== null
+              return true
+            }).map(({ key, label, color }) => {
+              const active = effectiveLayers[key] ?? false
+              return (
+                <button
+                  key={key}
+                  onClick={() => handleToggle(key)}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium transition-all"
+                  style={{
+                    background: active ? `${color}18` : 'rgba(255,255,255,0.04)',
+                    border: `1px solid ${active ? color : 'rgba(255,255,255,0.08)'}`,
+                    color: active ? '#fff' : '#71717a',
+                  }}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: active ? color : '#52525b' }} />
+                  {label}
+                </button>
+              )
+            })}
+          </div>
         </div>
-        {neighborBoundaries.length > 0 && (
-          <p className="text-zinc-600 text-xs mt-2">{neighborBoundaries.length} metro ZIPs loaded</p>
-        )}
-        <div className="mt-3 border-t border-zinc-700 pt-2">
-          <p className="text-zinc-400 text-xs mb-2">Map Tilt</p>
-          <input
-            type="range" min={0} max={67.5} step={1} value={tilt}
+
+        <div className="h-px bg-white/6 mx-3" />
+
+        {/* Metric */}
+        <div className="px-3 py-2">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-500 mb-1.5">Metric</p>
+          <div className="flex rounded-lg overflow-hidden border border-white/8">
+            {(['zori', 'zhvi'] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setActiveMetric(m)}
+                className={`flex-1 py-1.5 text-[10px] font-medium transition-all ${
+                  activeMetric === m ? 'bg-[#D76B3D]/20 text-[#D76B3D]' : 'text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                {m === 'zori' ? 'Rent' : 'Value'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="h-px bg-white/6 mx-3" />
+
+        {/* Tilt & Rotation */}
+        <div className="px-3 py-2">
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-500">Tilt</p>
+            <span className="text-[10px] text-zinc-600 font-mono">{tilt}°</span>
+          </div>
+          <input type="range" min={0} max={67.5} step={1} value={tilt}
             onChange={(e) => setTilt(Number(e.target.value))}
-            className="w-full accent-blue-500"
+            className="w-full h-1 rounded-full appearance-none bg-white/10 accent-[#D76B3D] cursor-pointer"
           />
-          <div className="flex justify-between text-zinc-600 text-xs mt-0.5">
-            <span>0°</span><span>{tilt}°</span><span>67.5°</span>
+          <div className="flex items-center justify-between mt-2 mb-1">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-500">Rotation</p>
+            <span className="text-[10px] text-zinc-600 font-mono">{heading}°</span>
           </div>
-          <p className="text-zinc-400 text-xs mt-2 mb-1">Rotation</p>
-          <input
-            type="range" min={0} max={360} step={1} value={heading}
+          <input type="range" min={0} max={360} step={1} value={heading}
             onChange={(e) => setHeading(Number(e.target.value))}
-            className="w-full accent-blue-500"
+            className="w-full h-1 rounded-full appearance-none bg-white/10 accent-[#D76B3D] cursor-pointer"
           />
-          <div className="flex justify-between text-zinc-600 text-xs mt-0.5">
-            <span>N</span><span>{heading}°</span>
-            <button onClick={() => { setTilt(0); setHeading(0) }} className="text-zinc-500 hover:text-white text-xs">Reset</button>
-          </div>
+          <button
+            onClick={() => { setTilt(0); setHeading(0) }}
+            className="mt-2 w-full text-[10px] text-zinc-600 hover:text-zinc-300 transition-colors py-1 rounded border border-white/6 hover:border-white/12"
+          >
+            Reset View
+          </button>
         </div>
+
+        {neighborBoundaries.length > 0 && (
+          <div className="px-3 pb-2">
+            <p className="text-[10px] text-zinc-600">{neighborBoundaries.length} nearby ZIPs</p>
+          </div>
+        )}
       </div>
 
-      {/* Dev sidebar */}
-      <div className="absolute top-4 left-4 z-40 bg-zinc-900/90 border border-zinc-700 rounded-lg p-3 w-64 max-h-[calc(100%-2rem)] overflow-y-auto">
-        <p className="text-zinc-400 text-xs uppercase tracking-widest mb-2">Data Layer Status</p>
-        {DATA_LAYER_REGISTRY.map((item) => (
-          <div key={item.label} className="mb-2 border-b border-zinc-800 pb-2 last:border-0">
-            <div className="flex items-center gap-2">
-              <span className={'w-2 h-2 rounded-full flex-shrink-0 ' + (item.visualized ? 'bg-green-500' : 'bg-zinc-600')} />
-              <span className="text-zinc-200 text-xs font-medium">{item.label}</span>
-            </div>
-            <p className="text-zinc-500 text-xs ml-4">{item.source}</p>
-            {item.layerType && <p className="text-blue-400 text-xs ml-4">{item.layerType}</p>}
-            {item.note && <p className="text-yellow-600 text-xs ml-4">{item.note}</p>}
-          </div>
-        ))}
-      </div>
     </div>
   )
 }
