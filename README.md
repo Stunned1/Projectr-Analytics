@@ -79,6 +79,12 @@ _4.9.2026_
 - Added `/api/city` — resolves city name to all ZIP codes with Zillow data; supports "City, ST" format with zippopotam fallback for smaller markets
 
 _4.11.2026_
+- `/api/city` — `state` query param accepts full state names (e.g. New Jersey) or USPS codes; normalized via `lib/us-state-abbr.ts` and matched with `.eq` on `zip_metro_lookup.state`; unrecognized states return 400 with a clear message
+- `POST /api/agent/case-brief` — Gemini 2.5 Flash returns structured JSON for a case-study brief (optional JSON clients)
+- `POST /api/agent/case-brief/pdf` — same payload as case-brief; runs Gemini then renders `@react-pdf/renderer` `CaseBriefPdfDocument` and returns `application/pdf` with `Content-Disposition: attachment` (shared prompt/builder in `lib/report/case-brief-shared.ts`); PDF header uses `public/Projectr_Logo.png` when present, includes market snapshot from `mapContext`, composite score chart and site metrics table from raw sites, paginated per-site narratives with FAR bars, and expanded brief sections (findings, thesis, risks/mitigations, next steps, assumptions).
+- Docked AI chat stays mounted when the sidebar panel closes (`AgentChat` receives `isOpen={agentOpen}` and a `hidden` wrapper) so the transcript survives close/reopen; `sessionStorage` key `projectr-agent-chat-v1` persists messages and the case-brief bundle for the same browser tab/session.
+
+_4.11.2026_
 - Added `/api/borough` — resolves NYC borough name to all ZIPs + Census TIGER county boundary + Zillow aggregates
 - Added `/api/aggregate` — POST endpoint that computes weighted-average stats (rent, income, vacancy, FRED, metro velocity) across a list of ZIPs for city/borough mode
 - Added `/api/agent` — Gemini 2.5 Flash AI agent endpoint; returns structured JSON with `message`, `action`, and `insight` fields for map control
@@ -88,6 +94,7 @@ _4.11.2026_
 - Fixed `/api/agent` 500 error caused by corrupted template literal dollar-sign formatting in `contextStr`
 - ZIP geocoding now falls back to Census TigerWeb 2020 ZCTA internal points instead of a synthetic `1 Main St` address match; successful lookups upsert into Supabase `zip_geocode_cache` (365-day refresh) so cold starts reuse coordinates
 - Multi-page **market brief PDF** — `POST /api/report/pdf` builds a designed analyst document with `@react-pdf/renderer` (cycle headline + Gemini narrative, four signal tiles, metrics vs metro, ZORI trend from `zillow_zori_monthly` when populated else modeled fallback, BPS bars, Trends line, Static Maps snapshot with ZIP polyline + pins, optional site comparison when 2+ client pins); city/borough exports average monthly ZORI across listed ZIPs when ≥2 peers
+- Market brief PDF **Gemini dossier** (`lib/report/gemini-market-dossier.ts`) — after page 1, two additional structured pages for the whole submarket (ZIP, city aggregate, or borough): geography framing, long executive summary, four themed deep-dive cards, peer/benchmark narrative, risks vs opportunities, underwriting scenarios, monitoring checklist, and limitations; fed by full report JSON, cycle classifier, metro benchmark, and signals (separate from the short cycle-headline pass in `gemini-brief.ts`).
 - Added `GET /api/metro-benchmark` — metro peer average ZORI/ZHVI from `zip_metro_lookup` + `zillow_zip_snapshot`; also returns peer simple means for ACS vacancy, ACS migration (movers / ZIP), and latest FRED unemployment per peer ZIP when `projectr_master_data` has rows (PDF “Metro peer avg” column)
 - `next.config.js` lists `@react-pdf/*` in `serverExternalPackages` for reliable server PDF rendering
 - Added `GET /api/cycle` — deterministic market-cycle classifier using only cached Supabase data (ZORI 3-month slope when `zillow_zori_monthly` has enough months else snapshot YoY, ACS vacancy level, county BPS permit YoY and acceleration, FRED unemployment ~6-month change); returns position, stage, confidence, four scored signals with transparent `source` strings, data-quality flag, and Gemini narrative; PDF `POST /api/report/pdf` uses client-supplied `cycleAnalysis` or recomputes from `primaryZip`; site comparison adds a cycle column via the same classifier (`skipGemini` for peers); PDF page 1 adds `lib/report/pdf-cycle-visual.tsx` (200×200pt quadrant wheel with dot + trajectory stroke, then four horizontal tiles with green/gray/red backgrounds and Unicode trend arrows).
@@ -96,7 +103,8 @@ _4.11.2026_
 - `/api/agent` system prompt lists `nycPermits` (not `permits`) so Gemini layer toggles match `CommandMap` layer keys.
 - `npm run warm:demo` — `scripts/warm-demo-zips.ts` warms `/api/market`, `/api/transit`, `/api/trends`, and `/api/cycle` for demo ZIPs 11201, 10001, and 60614; run with dev server up; optional `WARM_BASE_URL` override.
 - Added `/api/pois` — Overture Maps POI endpoint; returns categorized places (coffee, grocery, pharmacy, fitness, schools) + named anchor tenants (Whole Foods, Equinox, SoulCycle, etc.) by lat/lng radius; 7-day cache; nationwide coverage
-- `/api/agent` system prompt reconciled after merge: multi-step `steps` responses for case studies plus a single merged INTELLIGENCE RULES list (rent/value fill, transit+amenity, momentum, `run_analysis` / spatial-analysis triggers).
+- `/api/agent` system prompt: multi-step `steps` for case studies; `permits` vs `nycPermits` vocabulary aligned; explicit post-`run_analysis` client behavior (auto-off parcels/permits, pins); infer geography from the brief (no Manhattan default); NYC-only `run_analysis` boundary called out.
+- `/api/agent` prompt adds MODE A (exploration / “what to visualize” → single `action`, no `steps`, no `run_analysis`) vs MODE B (full case study) vs MODE C (follow-up when `hasRankedSites`); agent `contextStr` includes ranked-site pin state from the map page.
 
 _4.12.2026_
 - `/api/trends` — optional `city` + `state` (USPS 2-letter) and `anchor_zip` (5 digits) skip ZIP geocoding and build the same keyword/geo flow; JSON adds `geo_note`, `empty_message`, and a soft `error` (HTTP 200) when Google Trends fails or returns no series; `fetchTrends` surfaces errors instead of failing silently
@@ -104,6 +112,8 @@ _4.12.2026_
 **Bug Fixes**
 
 _4.11.2026_
+- Agent layer JSON uses `permits` but `CommandMap` state uses `nycPermits`; overrides never cleared the permits layer after analysis — `lib/agent-map-layers.ts` normalizes keys in `page.tsx`, context denormalizes for Gemini, `CommandMap` treats `permits` as an alias; post-`run_analysis` flow clears agent permit filter; `/api/agent` prompt documents auto hide of parcels/permits after crunch and generic case-study parsing (NYC `run_analysis` only).
+- After `run_analysis`, `AgentChat` only cleared parcels and permits, so census **tracts** (and **block groups**) stayed on when Gemini had turned them on for demographics; cleanup now sets `tracts` and `blockGroups` off before `show_sites`, and the agent system prompt documents the same.
 - Agent `fly_to` from analysis cards: fixed camera animation failing or zooming out endlessly (React Strict Mode + per-frame `setCenter`/`setZoom`); `FlyToController` now uses `moveCamera`, linear eased zoom, and `[lat, lng]` effect deps.
 - Map layers chrome used `flex` inside an absolutely positioned box, so the row stretched across the full map width and left a large empty gap between the layers sheet and the dots/toggle; fixed with `w-max`, `left: auto`, and `flex-row-reverse` so dots/toggle are first in DOM and sit flush to `right`, with the sheet immediately to their left.
 - PDF cycle classifier tiles and Page 2 metrics “Signal” column again use Unicode arrows (↑/↓/→) instead of ASCII `+` / `-` / `~` now that Standard font rendering is verified in `@react-pdf`.
@@ -140,6 +150,7 @@ _4.11.2026_
 - AI agent layer overrides wired to map — `agentLayerOverrides` and `agentMetric` props merge into effective layer/metric state
 - Default layer preset: rent choropleth and transit on; ZIP outline, client pins, permits, tracts, blocks, amenities, flood, and parcels off until the analyst enables them (matches `MapLayersSnapshot` defaults on the home page).
 - Case-study analysis site cards (`fly_to`): map camera eases ~1.6s via `moveCamera` (center + zoom + preserved tilt/heading); effect keys on lat/lng only and avoids Strict Mode skip / runaway zoom from the prior `setCenter`+`setZoom` loop.
+- Case brief PDF (`CaseBriefPdfDocument`): key findings as bordered cards with accent stripe, index, optional stat pills; Gemini schema asks for structured `keyFindings` objects (legacy string bullets still normalize); dedicated page with paired charts — composite score + air rights (horizontal M sqft), FAR % + permit counts, optional ZORI YoY bars when all site values are non-negative and vary; market signal tiles get a light tinted panel; `HorizontalBarChartPdf` + `formatValue` in `lib/report/pdf-charts.tsx`.
 
 _4.8.2026_
 - Google Maps + deck.gl map with `GoogleMapsOverlay` (interleaved vector mode)
@@ -199,7 +210,9 @@ _4.11.2026_
 - **Layers UI** — map layer **dots + Layers** button anchor **top-left** of the map (`left-4 top-4`); **sheet** opens to the right of the toggle; up to **five** active dots shown then **+N**; dots turn layers off on click; no `reservedRightPx` offset.
 - **Agent site selection** — spatial-analysis **site detail** moved from a map overlay card into the **right panel** with a **Back** control; `fly_to` with `site` opens the panel; new ZIP/area search clears the selected site.
 - **Shortlist analyst note** — always-visible note field replaced by a **pencil** control per row; click opens an inline input (blur saves, Esc cancels).
-- **AI agent (integrated terminal)** — sidebar **AI** button expands the map-bottom **AgentTerminal** (DM Mono via `next/font`); collapsed 32px bar shows last status + chevron; compact (~200px) / expanded panel, maximize, click-outside to collapse; agent text streams line-by-line; actions log as emerald `→` lines; insights in a highlighted block; same `/api/agent` + `AgentAction` pipeline via `useAgentIntelligence` and `lib/agent-types.ts`; red dot when output arrived while collapsed; floating stats pill shifts up with terminal height.
+- **AI agent (integrated terminal)** — sidebar **AI** button expands the map-bottom **AgentTerminal** (DM Mono via `next/font`); collapsed 32px bar shows last status + chevron; compact (~200px) / expanded panel, maximize, click-outside to collapse; agent text streams line-by-line; actions log as emerald `→` lines; insights in a highlighted block; same `/api/agent` + `AgentAction` pipeline via `useAgentIntelligence` and `lib/agent-types.ts`; **sessionStorage** (`projectr-agent-chat-v1`) restores messages and case-study bundle across reloads; red dot when output arrived while collapsed; floating stats pill shifts up with terminal height.
+- **Case brief PDF** — after ranked sites appear in the terminal, **Download case brief (PDF)** calls `/api/agent/case-brief/pdf` (Gemini + `@react-pdf`); browser downloads `Projectr-Case-Brief-{market}.pdf` with structured sections aligned to the market PDF.
+- **City search** — non-ZIP queries accept full state names (`Newark, New Jersey`) or abbreviations (`Newark, NJ`); map sidebar placeholder still prompts **Enter** to submit.
 - **3D** — tilt/rotation sliders removed from the map; **3D** pill in the right data panel header toggles 45° perspective (Projectr orange when on); agent `set_tilt` still overrides until cleared.
 - Sidebar market search — removed **Analyze Market** button; **Enter** submits; small spinner in the field while the request runs (map page + `/upload` sidebar).
 

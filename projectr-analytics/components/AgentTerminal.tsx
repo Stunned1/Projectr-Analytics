@@ -117,17 +117,28 @@ export default function AgentTerminal({
 
   const shouldNotifyWhileClosed = useCallback(() => size === 'collapsed', [size])
 
-  const { messages, input, setInput, loading, isRunningSequence, sendMessage } = useAgentIntelligence(
-    mapContext,
-    onAction,
-    {
-      shouldNotifyWhileClosed,
-      onNotifyWhileClosed: () => {
-        setUnread(true)
-        onUnreadChange?.(true)
-      },
-    }
-  )
+  const {
+    messages,
+    input,
+    setInput,
+    loading,
+    isRunningSequence,
+    sendMessage,
+    generateCaseBrief,
+    briefLoading,
+    briefError,
+  } = useAgentIntelligence(mapContext, onAction, {
+    shouldNotifyWhileClosed,
+    onNotifyWhileClosed: () => {
+      setUnread(true)
+      onUnreadChange?.(true)
+    },
+  })
+
+  const showCaseBriefCta = useMemo(() => {
+    const latest = [...messages].reverse().find((m) => m.analysisSites?.length)
+    return Boolean(latest?.analysisSites?.length) && !isRunningSequence && !loading
+  }, [messages, isRunningSequence, loading])
 
   useEffect(() => {
     if (expandSignal !== lastExpandSignal.current) {
@@ -327,6 +338,20 @@ export default function AgentTerminal({
                   {s}
                 </button>
               ))}
+            </div>
+          )}
+
+          {showCaseBriefCta && (
+            <div className="shrink-0 border-t border-zinc-800/80 px-2 py-1.5">
+              <button
+                type="button"
+                onClick={() => void generateCaseBrief()}
+                disabled={briefLoading}
+                className="w-full rounded border border-primary/45 bg-primary/15 px-2 py-1.5 text-[10px] font-semibold text-primary transition-colors hover:bg-primary/25 disabled:opacity-45"
+              >
+                {briefLoading ? 'Building PDF…' : 'Download case brief (PDF)'}
+              </button>
+              {briefError && <p className="mt-1 text-[9px] text-red-400/90">{briefError}</p>}
             </div>
           )}
 

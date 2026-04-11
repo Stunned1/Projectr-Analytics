@@ -25,6 +25,12 @@ import { CycleExplainCard } from '@/components/CycleExplainCard'
 import type { MetricKey } from '@/lib/metric-definitions'
 import { metricKeyFromDataRow, sparklineMetricKey } from '@/lib/metric-definitions'
 import { cn } from '@/lib/utils'
+import {
+  denormalizeAgentLayersForContext,
+  normalizeAgentLayerKey,
+  normalizeAgentLayersRecord,
+} from '@/lib/agent-map-layers'
+import { normalizeUsStateToAbbr } from '@/lib/us-state-abbr'
 
 const CommandMap = dynamic(() => import('@/components/CommandMap'), { ssr: false })
 
@@ -599,12 +605,18 @@ export default function Home() {
 
   function handleAgentAction(action: AgentAction) {
     switch (action.type) {
-      case 'toggle_layer':
-        if (action.layer) setAgentLayerOverrides((prev) => ({ ...prev, [action.layer!]: action.value ?? true }))
+      case 'toggle_layer': {
+        if (!action.layer) break
+        const key = normalizeAgentLayerKey(action.layer)
+        setAgentLayerOverrides((prev) => ({ ...prev, [key]: action.value ?? true }))
         break
-      case 'toggle_layers':
-        if (action.layers) setAgentLayerOverrides((prev) => ({ ...prev, ...action.layers }))
+      }
+      case 'toggle_layers': {
+        const patch = action.layers
+        if (!patch) break
+        setAgentLayerOverrides((prev) => ({ ...prev, ...normalizeAgentLayersRecord(patch) }))
         break
+      }
       case 'set_metric':
         if (action.metric) setAgentMetric(action.metric)
         break
@@ -631,7 +643,8 @@ export default function Home() {
         if (action.sites) setAnalysisSites(action.sites)
         break
       case 'set_permit_filter':
-        if (action.types) setAgentPermitFilter(action.types)
+        if (action.types === undefined) break
+        setAgentPermitFilter(action.types.length > 0 ? action.types : null)
         break
       case 'fly_to':
         if (action.lat != null && action.lng != null) {
@@ -648,7 +661,9 @@ export default function Home() {
   const mapContext = {
     label: result ? (result.zillow?.city ?? result.zip) : aggregateData?.label,
     zip: result?.zip ?? null,
-    layers: agentLayerOverrides,
+    hasRankedSites: analysisSites.length > 0,
+    rankedSiteCount: analysisSites.length,
+    layers: denormalizeAgentLayersForContext(agentLayerOverrides),
     activeMetric: agentMetric ?? 'zori',
     zori: result?.zillow?.zori_latest ?? aggregateData?.zillow.avg_zori,
     zhvi: result?.zillow?.zhvi_latest ?? aggregateData?.zillow.avg_zhvi,
@@ -842,15 +857,24 @@ export default function Home() {
           setError('Failed to fetch borough data')
         }
       } else {
-        const parts = trimmed.split(',').map((s) => s.trim())
+        const parts = trimmed.split(',').map((s) => s.trim()).filter(Boolean)
         const cityName = parts[0]
-        const stateAbbr = parts[1] ?? ''
+        const stateRaw = parts.slice(1).join(', ').trim()
+        const stateForApi = stateRaw ? normalizeUsStateToAbbr(stateRaw) : null
+        if (stateRaw && !stateForApi) {
+          setError(`Could not parse state "${stateRaw}". Try a full name (e.g. New Jersey) or USPS code (NJ).`)
+          return
+        }
         try {
-          const url = `/api/city?city=${encodeURIComponent(cityName)}${stateAbbr ? `&state=${stateAbbr}` : ''}`
+          const url = `/api/city?city=${encodeURIComponent(cityName)}${stateForApi ? `&state=${encodeURIComponent(stateForApi)}` : ''}`
           const res = await fetch(url)
           const data = await res.json()
           if (data.error || !data.zips?.length) {
-            setError(`No data found for "${trimmed}". Try "City, ST" format.`)
+            setError(
+              typeof data.error === 'string' && data.error
+                ? data.error
+                : `No data found for "${trimmed}". Try "City, State" or "City, ST" (e.g. Newark, New Jersey).`
+            )
             return
           }
           setCityZips(data.zips)
@@ -859,12 +883,14 @@ export default function Home() {
           setTrends(null)
           setPanelOpen(true)
           const st =
-            (stateAbbr || data.zips[0]?.state || '')
+            (stateForApi || data.zips[0]?.state || '')
               .toString()
               .trim()
               .toUpperCase()
               .slice(0, 2) || ''
-          fetchAggregate(data.zips.map((z: CityZip) => z.zip), `${cityName}${stateAbbr ? ', ' + stateAbbr : ''}`)
+          const aggregateLabel =
+            stateRaw ? `${cityName}, ${stateRaw}` : stateForApi ? `${cityName}, ${stateForApi}` : cityName
+          fetchAggregate(data.zips.map((z: CityZip) => z.zip), aggregateLabel)
           void fetchTrendsForMultiZipArea(data.zips, { cityForKeyword: cityName, state: st })
           // Fetch transit for the centroid ZIP
           const centroidZipCity = data.zips.find((z: CityZip) => z.lat && z.lng)?.zip
