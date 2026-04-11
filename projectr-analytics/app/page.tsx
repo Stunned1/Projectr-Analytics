@@ -478,7 +478,7 @@ const ChevronRight = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentC
 const CollapseIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4"><polyline points="15 18 9 12 15 6" /></svg>
 const ExpandIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4"><polyline points="9 18 15 12 9 6" /></svg>
 
-const SIDEBAR_EXPANDED_PX = 240
+const SIDEBAR_EXPANDED_PX = 200
 
 /** Agent-selected parcel / site — lives in the right panel, not over the map. */
 function SiteDetailRightPanel({ site, onBack }: { site: AnalysisSite; onBack: () => void }) {
