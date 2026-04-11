@@ -111,7 +111,7 @@ ${context}`
     const win = window.open('', '_blank')
     if (!win) return
     win.document.write(`
-      <html><head><title>Executive Memo - ${marketLabel}</title>
+      <html><head><title>Quick Summary - ${marketLabel}</title>
       <style>
         body { font-family: Georgia, serif; max-width: 700px; margin: 60px auto; color: #111; line-height: 1.7; }
         h1 { font-size: 18px; font-weight: bold; margin-bottom: 4px; }
@@ -146,7 +146,7 @@ ${context}`
           ) : (
             <>
               <span>✦</span>
-              Generate Executive Memo
+              Generate Quick Summary
             </>
           )}
         </button>
@@ -159,7 +159,7 @@ ${context}`
       {memo && (
         <div className="rounded-xl border border-border/80 bg-muted/20 p-4">
           <div className="mb-3 flex items-center justify-between">
-            <p className="text-[10px] font-semibold tracking-widest text-primary uppercase">Executive Memo</p>
+            <p className="text-[10px] font-semibold tracking-widest text-primary uppercase">Quick Summary</p>
             <div className="flex gap-2">
               <button
                 onClick={() => setMemo(null)}

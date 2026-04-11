@@ -1,5 +1,5 @@
 /**
- * Structured market intelligence for the market brief PDF (ZIP / city / borough).
+ * Structured market intelligence for the Market Report PDF (ZIP / city / borough).
  * Separate from the short cycle headline JSON in `gemini-brief.ts`.
  */
 import { GoogleGenerativeAI } from '@google/generative-ai'
@@ -140,7 +140,7 @@ const DOSSIER_JSON_INSTRUCTION = `Return ONLY valid JSON (no markdown). All stri
 Rules:
 - Use ONLY numbers and facts present in CONTEXT JSON; if a field is null or missing, say unavailable - do not invent.
 - Tone: institutional real estate memo, U.S. English.
-- This is the MARKET BRIEF dossier (whole submarket), not a parcel case study.
+- This is the Market Report dossier (whole submarket), not a parcel case study.
 - ${GEMINI_NO_EM_DASH_RULE}`
 
 export async function generateMarketDossierWithGemini(input: {

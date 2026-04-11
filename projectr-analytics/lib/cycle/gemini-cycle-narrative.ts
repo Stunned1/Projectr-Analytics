@@ -33,7 +33,7 @@ export async function generateCycleNarrative(
   const empDir = sanitizeCycleSignalText(partial.signals.employment.direction)
   const empVal = sanitizeCycleSignalText(partial.signals.employment.value)
 
-  const prompt = `You are a real estate analyst writing a one-paragraph market brief for a consulting client.
+  const prompt = `You are a real estate analyst writing a one-paragraph Market Report for a consulting client.
 
 Market: ${marketLabel}
 ZIP (anchor): ${partial.zip}

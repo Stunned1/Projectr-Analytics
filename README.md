@@ -20,7 +20,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY
 NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
 NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID   # must be a Vector map ID
 GEMINI_API_KEY
-GOOGLE_MAPS_STATIC_KEY           # optional; Static Maps API for PDF brief (falls back to NEXT_PUBLIC_GOOGLE_MAPS_API_KEY)
+GOOGLE_MAPS_STATIC_KEY           # optional; unused by current PDF exports (reserved if static map returns)
 HUD_API_TOKEN                    # optional, falls back to Census ACS rent data
 TRANSITLAND_API_KEY=             # free at transit.land/sign-up (Developer API, 10k queries/month)
 ```
@@ -105,6 +105,7 @@ _4.11.2026_
 - Added `/api/pois` - Overture Maps POI endpoint; returns categorized places (coffee, grocery, pharmacy, fitness, schools) + named anchor tenants (Whole Foods, Equinox, SoulCycle, etc.) by lat/lng radius; 7-day cache; nationwide coverage
 - `/api/agent` system prompt: multi-step `steps` for case studies; `permits` vs `nycPermits` vocabulary aligned; explicit post-`run_analysis` client behavior (auto-off parcels/permits, pins); infer geography from the brief (no Manhattan default); NYC-only `run_analysis` boundary called out.
 - `/api/agent` prompt adds MODE A (exploration / “what to visualize” → single `action`, no `steps`, no `run_analysis`) vs MODE B (full case study) vs MODE C (follow-up when `hasRankedSites`); agent `contextStr` includes ranked-site pin state from the map page.
+- **Market brief PDF** (`POST /api/report/pdf`) - removed the final Static Maps snapshot page and deleted `lib/report/static-map.ts` plus `lib/report/boundary-encode.ts`; split Gemini dossier wrap-up (monitoring checklist, limitations) and the chart section (ZORI + BPS vs Google Trends + footnotes) onto separate A4 pages; metrics methodology rows, benchmark table, and site-comparison columns use wrapping text and relaxed row `wrap` rules to reduce clipping and overflow.
 
 _4.12.2026_
 - `/api/trends` - optional `city` + `state` (USPS 2-letter) and `anchor_zip` (5 digits) skip ZIP geocoding and build the same keyword/geo flow; JSON adds `geo_note`, `empty_message`, and a soft `error` (HTTP 200) when Google Trends fails or returns no series; `fetchTrends` surfaces errors instead of failing silently
@@ -219,6 +220,7 @@ _4.11.2026_
 - Collapsed intelligence terminal bar always shows **Click to Expand:** plus the latest agent response line (truncated); first expanded view before any user message uses a full-sentence input placeholder instead of a lone `_` cursor.
 - Intelligence terminal: each narrative line split from the agent reply (newline or sentence chunks) is prefixed with the muted **·** bullet, not only the first line.
 - Command center sidebar nav: active route uses **primary (orange) text only**; removed active background fill, left border stripe, and collapsed icon tile tint.
+- Sidebar **Saved** (formerly Shortlist): collapsible header **Saved (n)**; data panel uses **Save Site** / **Saved** and **Save** / **Area saved** for aggregates; map pin tooltip **Saved ·**; sync error copy and Market Report hint text updated; `/guide` onboarding and feature docs use **Saved & PDF**.
 - **City search** - non-ZIP queries accept full state names (`Newark, New Jersey`) or abbreviations (`Newark, NJ`); map sidebar placeholder still prompts **Enter** to submit.
 - **3D** - tilt/rotation sliders removed from the map; **3D** toggle stacks under the **Layers** control (top-left on the map, same chrome as the layer button) and sets 45° perspective when on; agent `set_tilt` still overrides until cleared.
 - Sidebar market search - removed **Analyze Market** button; **Enter** submits; small spinner in the field while the request runs (map page + `/upload` sidebar).

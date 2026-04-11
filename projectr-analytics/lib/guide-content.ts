@@ -25,7 +25,7 @@ FOR NEW USERS new users onboarding orientation quick command center product feat
 Load a market sidebar ZIP city state Austin borough NYC Enter map data panel Analysis Data tabs
 cycle momentum PDF brief memo tables trends exports Layers map layer control top-left choropleth
 transit tracts permits CSV Upload pins Intelligence terminal bottom agent natural language shortcuts
-CSV Upload sidebar upload geocoded spreadsheets Client layer map pins Shortlist areas comparison market brief PDF exported
+CSV Upload sidebar upload geocoded spreadsheets Client layer map pins Saved areas comparison Market Report PDF exported
 `.trim()
 
 export const Documentation_FEATURES: DocumentationFeatureBlock[] = [
@@ -48,10 +48,10 @@ geography (for example borough-level behavior in NYC).`,
   {
     id: 'feature-data-panel',
     title: 'Right data panel',
-    body: `Analysis: Market cycle explanation, momentum vs peers, downloadable market brief PDF, and an AI-generated executive memo.
-Data: Pricing, demographics, metro velocity, economic indicators, Google Trends, transit counts, shortlist
-actions, and the full metrics table where exposed.`,
-    searchAliases: 'Analysis Data tabs classifier listings inventory velocity Gemini executive memo',
+    body: `Analysis: Market cycle explanation, momentum vs peers, downloadable Market Report PDF, and an AI-generated Quick Summary.
+Data: Pricing, demographics, metro velocity, economic indicators, Google Trends, transit counts,
+Saved list actions, and the full metrics table where exposed.`,
+    searchAliases: 'Analysis Data tabs classifier listings inventory velocity Gemini Quick Summary Saved shortlist',
   },
   {
     id: 'feature-terminal',
@@ -69,10 +69,10 @@ appear as map pins when the Client layer is on. Pins can persist for your sessio
   },
   {
     id: 'feature-shortlist-pdf',
-    title: 'Shortlist & PDF',
-    body: `Save ZIPs or whole city/borough areas to the shortlist with optional notes and comparison checkboxes. When two
-or more sites are selected for comparison, the market brief PDF can include a comparison layout.`,
-    searchAliases: 'saved sites comparison checkboxes notes aggregate borough',
+    title: 'Saved & PDF',
+    body: `Use Save Site for a ZIP or Save for a whole city/borough area to add them to Saved, with optional notes and comparison checkboxes. When two
+or more sites are selected for comparison, the Market Report PDF can include a comparison layout.`,
+    searchAliases: 'saved sites shortlist comparison checkboxes notes aggregate borough',
   },
   {
     id: 'feature-map-view',

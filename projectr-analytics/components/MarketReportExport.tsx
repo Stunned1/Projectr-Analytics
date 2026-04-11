@@ -124,13 +124,13 @@ export default function MarketReportExport({
             Building PDF…
           </>
         ) : (
-          <>Download market brief (PDF)</>
+          <>Download Market Report (PDF)</>
         )}
       </button>
       {error && <p className="text-red-400 text-[10px]">{error}</p>}
       <p className="text-zinc-600 text-[9px] leading-relaxed">
-        Multi-page analyst brief: cycle headline, signals, metrics vs metro, charts, static map, and site comparison
-        when 2+ shortlist sites are checked for compare or 2+ uploaded CSV pins are on the map.
+        Multi-page analyst brief: cycle headline, signals, metrics vs metro, charts, and site comparison
+        when 2+ saved sites are checked for compare or 2+ uploaded CSV pins are on the map.
       </p>
     </div>
   )

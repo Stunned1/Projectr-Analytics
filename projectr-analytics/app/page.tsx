@@ -142,7 +142,7 @@ interface MarketData {
   } | null
 }
 
-/** Human-facing site name for shortlist / PDF (ZIP stays the data key only). */
+/** Human-facing site name for Saved / PDF (ZIP stays the data key only). */
 function defaultHumanSiteLabel(market: MarketData): string {
   const g = market.geo
   if (g?.city?.trim()) {
@@ -292,7 +292,7 @@ function ShortlistToggleButton({
       disabled={pending}
       className="mt-3 mb-4 w-full py-2 rounded-lg text-xs font-semibold border transition-colors disabled:opacity-50 bg-white/8 hover:bg-white/12 border-white/15 text-white"
     >
-      {pending ? 'Saving…' : hasZip ? '✓ On shortlist - tap to remove' : '+ Add to shortlist'}
+      {pending ? 'Saving…' : hasZip ? '✓ Saved - tap to remove' : 'Save Site'}
     </button>
   )
 }
@@ -372,7 +372,7 @@ function AggregateShortlistToggle({
         disabled={pending || !q}
         className="mt-3 w-full py-2 rounded-lg text-xs font-semibold border transition-colors disabled:opacity-50 bg-white/8 hover:bg-white/12 border-white/15 text-white"
       >
-        {pending ? 'Saving…' : hasArea ? '✓ Area on shortlist - tap to remove' : '+ Add area to shortlist'}
+        {pending ? 'Saving…' : hasArea ? '✓ Area saved - tap to remove' : 'Save'}
       </button>
       {localError && <p className="text-[9px] text-red-400 mt-1.5 px-0.5">{localError}</p>}
     </div>
@@ -1174,7 +1174,7 @@ export default function Home() {
               />
             )}
 
-            <PanelSection title="Market brief (PDF)">
+            <PanelSection title="Market Report (PDF)">
               <MarketReportExport
                 mapLayersSnapshot={mapLayersSnapshot}
                 uploadedMarkers={uploadedMarkers}
@@ -1186,7 +1186,7 @@ export default function Home() {
                 cycleAnalysis={cycleData}
               />
             </PanelSection>
-            <PanelSection title="Executive Memo">
+            <PanelSection title="Quick Summary">
               <ExecutiveMemo
                 marketLabel={aggregateData.label}
                 cycle={cycleData}
@@ -1356,7 +1356,7 @@ export default function Home() {
               <CycleExplainCard marketLabel={result.zillow?.city ?? result.zip} cycle={cycleData} />
             )}
 
-            <PanelSection title="Market brief (PDF)">
+            <PanelSection title="Market Report (PDF)">
               <MarketReportExport
                 mapLayersSnapshot={mapLayersSnapshot}
                 uploadedMarkers={uploadedMarkers}
@@ -1368,7 +1368,7 @@ export default function Home() {
                 cycleAnalysis={cycleData}
               />
             </PanelSection>
-            <PanelSection title="Executive Memo">
+            <PanelSection title="Quick Summary">
               <ExecutiveMemo
                 marketLabel={result.zillow?.city ?? result.zip}
                 cycle={cycleData}

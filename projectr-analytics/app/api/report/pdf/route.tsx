@@ -10,8 +10,6 @@ import { resolveZoriSeriesForReport } from '@/lib/report/fetch-zori-series'
 import { generateBriefWithGemini } from '@/lib/report/gemini-brief'
 import { generateMarketDossierWithGemini } from '@/lib/report/gemini-market-dossier'
 import { parseCycleAnalysisField } from '@/lib/report/validate-cycle'
-import { encodeZipBoundaryPolyline } from '@/lib/report/boundary-encode'
-import { fetchStaticMapPng } from '@/lib/report/static-map'
 import { MarketReportDocument, type SiteCompareRow } from '@/lib/report/pdf-document'
 import { loadProjectrLogoDataUri } from '@/lib/report/load-projectr-logo'
 import type { CycleAnalysis } from '@/lib/cycle/types'
@@ -199,23 +197,6 @@ export async function POST(request: NextRequest) {
       trendsSeries,
     })
 
-    let encodedPath: string | null = null
-    if (payload.primaryZip && /^\d{5}$/.test(payload.primaryZip)) {
-      encodedPath = await encodeZipBoundaryPolyline(payload.primaryZip)
-    }
-
-    const geo = payload.geo
-    const mapImageDataUri =
-      geo != null
-        ? await fetchStaticMapPng({
-            centerLat: geo.lat,
-            centerLng: geo.lng,
-            zoom: 13,
-            encodedPath,
-            pins: payload.pins,
-          })
-        : null
-
     const logoDataUri = loadProjectrLogoDataUri()
 
     const doc = (
@@ -229,7 +210,6 @@ export async function POST(request: NextRequest) {
         zoriSeriesSource={zoriSeriesSource}
         trendsSeries={trendsSeries}
         metro={metro}
-        mapImageDataUri={mapImageDataUri}
         logoDataUri={logoDataUri}
         siteRows={siteRows && siteRows.length >= 2 ? siteRows : null}
       />

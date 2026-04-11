@@ -104,7 +104,6 @@ const styles = StyleSheet.create({
   th: { fontFamily: 'Helvetica', fontWeight: 'bold', fontSize: 8, color: '#555' },
   td: { fontSize: 8, color: ink },
   foot: { marginTop: 12, fontSize: 7, color: muted, lineHeight: 1.35 },
-  mapBox: { marginTop: 8, borderWidth: 1, borderColor: '#ddd' },
   methTitle: {
     fontSize: 9,
     fontFamily: 'Helvetica',
@@ -237,7 +236,6 @@ export interface MarketReportPdfInput {
   zoriSeriesSource: ZoriSeriesSource
   trendsSeries: { date: string; value: number }[]
   metro: MetroBenchmark | null
-  mapImageDataUri: string | null
   logoDataUri: string | null
   siteRows: SiteCompareRow[] | null
 }
@@ -253,7 +251,6 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
     zoriSeriesSource,
     trendsSeries,
     metro,
-    mapImageDataUri,
     logoDataUri,
     siteRows,
   } = props
@@ -340,7 +337,7 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
             {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>PROJECTR</Text>}
           </View>
           <View>
-            <Text style={styles.meta}>Market brief</Text>
+            <Text style={styles.meta}>Market Report</Text>
             <Text style={styles.meta}>{dateStr}</Text>
           </View>
         </View>
@@ -419,14 +416,12 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
             <Text style={styles.methColSrc}>Source</Text>
           </View>
           {METHODOLOGY_PDF_ROWS.map((row) => (
-            <View key={row.metric} style={styles.methRow} wrap={false}>
-              <Text style={styles.methColMetric} wrap={false}>
-                {row.metric}
-              </Text>
-              <Text style={styles.methColDef} wrap>
+            <View key={row.metric} style={styles.methRow}>
+              <Text style={styles.methColMetric}>{row.metric}</Text>
+              <Text style={styles.methColDef} wrap hyphenationCallback={(word) => [word]}>
                 {row.definition}
               </Text>
-              <Text style={styles.methColSrc} wrap>
+              <Text style={styles.methColSrc} wrap hyphenationCallback={(word) => [word]}>
                 {row.source}
               </Text>
             </View>
@@ -543,6 +538,14 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
             {i + 1}. {s}
           </Text>
         ))}
+      </Page>
+
+      {/* Dossier p3 - monitoring & limitations (keeps p2 from overflowing) */}
+      <Page size="A4" style={styles.page}>
+        <View style={styles.headerBand}>
+          {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>PROJECTR</Text>}
+          <Text style={styles.meta}>Dossier (continued) · {payload.marketLabel}</Text>
+        </View>
         <Text style={styles.dossierListTitle}>Monitoring checklist</Text>
         {dossier.monitoringChecklist.map((s, i) => (
           <Text key={`m-${i}`} style={styles.dossierBullet} wrap hyphenationCallback={(word) => [word]}>
@@ -553,13 +556,13 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
         <Text style={styles.dossierLimitations} wrap hyphenationCallback={(word) => [word]}>
           {dossier.limitations}
         </Text>
-        <Text style={[styles.foot, { marginTop: 10 }]} wrap>
+        <Text style={[styles.foot, { marginTop: 10 }]} wrap hyphenationCallback={(word) => [word]}>
           Dossier narrative is model-generated from the same cached metrics as the charts in this PDF; validate material
           decisions against primary sources (Zillow Research, Census, FRED).
         </Text>
       </Page>
 
-      {/* Data page - charts & benchmark table */}
+      {/* Data page 1 - table + rent & permits charts */}
       <Page size="A4" style={styles.page}>
         <View style={styles.headerBand}>
           {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>PROJECTR</Text>}
@@ -574,14 +577,18 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
           <Text style={[styles.th, { width: '30%' }]}>Metro peer avg</Text>
         </View>
         {tableRows.map((r) => (
-          <View key={r.label} style={[styles.tableRow, { flexDirection: 'row', alignItems: 'center' }]} wrap={false}>
-            <Text style={[styles.td, { width: '38%' }]} wrap={false}>
+          <View key={r.label} style={[styles.tableRow, { flexDirection: 'row', alignItems: 'flex-start' }]}>
+            <Text style={[styles.td, { width: '38%' }]} wrap hyphenationCallback={(word) => [word]}>
               {r.label}
             </Text>
-            <Text style={[styles.td, { width: '22%', fontFamily: 'Helvetica', fontWeight: 'bold' }]} wrap={false}>
+            <Text
+              style={[styles.td, { width: '22%', fontFamily: 'Helvetica', fontWeight: 'bold' }]}
+              wrap
+              hyphenationCallback={(word) => [word]}
+            >
               {r.sub}
             </Text>
-            <View style={{ width: '10%', alignItems: 'center', justifyContent: 'center', minHeight: 14 }}>
+            <View style={{ width: '10%', alignItems: 'center', justifyContent: 'flex-start', paddingTop: 2, minHeight: 14 }}>
               {r.signalKey && cycleAnalysis ? (
                 <PdfTrendArrow
                   variant={trendKindToVariant(r.signalKey, cycleAnalysis.signals[r.signalKey].score)}
@@ -591,7 +598,7 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
                 <Text style={[styles.td, { textAlign: 'center' }]}>-</Text>
               )}
             </View>
-            <Text style={[styles.td, { width: '30%', color: muted }]} wrap={false}>
+            <Text style={[styles.td, { width: '30%', color: muted }]} wrap hyphenationCallback={(word) => [word]}>
               {r.bench}
             </Text>
           </View>
@@ -607,16 +614,26 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
         <Text style={styles.sectionTitle}>
           Rent trajectory (ZORI - {zoriSeriesSource === 'zillow_monthly' ? 'monthly, Zillow Research' : 'modeled from latest + YoY'})
         </Text>
-        <SparklinePdf data={zoriSeries} width={480} height={72} />
+        <SparklinePdf data={zoriSeries} width={PDF_CONTENT_WIDTH_PT} height={68} />
 
         <Text style={styles.sectionTitle}>Permit acceleration (Census BPS, county)</Text>
-        <BarChartPdf bars={permitBars} width={480} height={118} />
+        <BarChartPdf bars={permitBars} width={PDF_CONTENT_WIDTH_PT} height={108} />
+      </Page>
+
+      {/* Data page 2 - trends + data footnotes (avoids chart stack overflow) */}
+      <Page size="A4" style={styles.page}>
+        <View style={styles.headerBand}>
+          {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>PROJECTR</Text>}
+          <Text style={styles.meta}>Market data (continued) · {payload.marketLabel}</Text>
+        </View>
 
         <Text style={styles.sectionTitle}>Search sentiment (Google Trends)</Text>
-        <Text style={{ fontSize: 7, color: muted, marginBottom: 4 }}>{payload.trends.keyword_scope}</Text>
-        <SparklinePdf data={trends12} width={480} height={72} color="#64748b" />
+        <Text style={{ fontSize: 7, color: muted, marginBottom: 4, width: PDF_CONTENT_WIDTH_PT }} wrap>
+          {payload.trends.keyword_scope}
+        </Text>
+        <SparklinePdf data={trends12} width={PDF_CONTENT_WIDTH_PT} height={68} color="#64748b" />
 
-        <Text style={styles.foot}>
+        <Text style={[styles.foot, { marginTop: 14, width: PDF_CONTENT_WIDTH_PT }]} wrap hyphenationCallback={(word) => [word]}>
           FRED uses the first ZIP&apos;s county; the employment row prefers a computed employment rate when labor-force
           series match, otherwise latest unemployment. Vacancy, migration, and BPS permits need Census ACS/BPS rows in
           Supabase for this area (cold-load at least one ZIP via the map). County BPS counts are identical for all ZIPs in
@@ -624,57 +641,7 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
         </Text>
       </Page>
 
-      {/* Page 3 - Map */}
-      <Page size="A4" style={styles.page}>
-        <View style={styles.headerBand}>
-          {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>PROJECTR</Text>}
-          <Text style={styles.meta}>Map snapshot · {payload.marketLabel}</Text>
-        </View>
-
-        {mapImageDataUri ? (
-          <View style={{ width: 515, height: 420, position: 'relative' }}>
-            <View style={styles.mapBox}>
-              <Image src={mapImageDataUri} style={{ width: 515, height: 420 }} />
-            </View>
-            {cycleAnalysis && (
-              <View
-                style={{
-                  position: 'absolute',
-                  right: 8,
-                  bottom: 8,
-                  backgroundColor: 'rgba(255,255,255,0.94)',
-                  paddingVertical: 6,
-                  paddingHorizontal: 8,
-                  borderWidth: 1,
-                  borderColor: '#ddd',
-                  borderRadius: 3,
-                  maxWidth: 220,
-                }}
-              >
-                <Text style={{ fontSize: 9, fontFamily: 'Helvetica', fontWeight: 'bold', color: ink }}>
-                  {cycleAnalysis.cycleStage} {cycleAnalysis.cyclePosition}
-                </Text>
-                <Text style={{ fontSize: 7, color: muted, marginTop: 2 }}>
-                  {cycleAnalysis.confidence}% confidence · {cycleAnalysis.dataQuality} data
-                </Text>
-              </View>
-            )}
-          </View>
-        ) : (
-          <View style={[styles.mapBox, { height: 420, justifyContent: 'center', alignItems: 'center', padding: 16 }]}>
-            <Text style={{ color: muted, textAlign: 'center', fontSize: 9 }} wrap>
-              Static map unavailable (check Google Static Maps API key). Boundary and client markers would appear here
-              when the key is configured.
-            </Text>
-          </View>
-        )}
-
-        <Text style={{ fontSize: 8, color: muted, marginTop: 10, lineHeight: 1.45 }} wrap>
-          Orange outline: primary submarket boundary · orange markers: client sites · dark basemap (Google Static Maps).
-        </Text>
-      </Page>
-
-      {/* Page 4 - Site comparison */}
+      {/* Site comparison */}
       {siteRows && siteRows.length >= 2 && (
         <Page size="A4" style={styles.page}>
           <View style={styles.headerBand}>
@@ -693,14 +660,28 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
             <Text style={[styles.th, { width: '23%' }]}>Read</Text>
           </View>
           {[...siteRows].sort((a, b) => (b.momentum ?? -1) - (a.momentum ?? -1)).map((r, i) => (
-            <View key={r.label + r.zip} style={styles.tableRow} wrap={false}>
-              <Text style={[styles.td, { width: '7%' }]}>{i + 1}</Text>
-              <Text style={[styles.td, { width: '18%' }]}>{r.label}</Text>
-              <Text style={[styles.td, { width: '12%' }]}>{r.zip}</Text>
-              <Text style={[styles.td, { width: '12%' }]}>{fmtMoney(r.zori)}</Text>
-              <Text style={[styles.td, { width: '10%' }]}>{r.momentum != null ? String(r.momentum) : '-'}</Text>
-              <Text style={[styles.td, { width: '18%', fontSize: 7 }]}>{r.cyclePhase ?? '-'}</Text>
-              <Text style={[styles.td, { width: '23%', fontSize: 7 }]}>{r.signalLine}</Text>
+            <View key={r.label + r.zip} style={[styles.tableRow, { flexDirection: 'row', alignItems: 'flex-start' }]}>
+              <Text style={[styles.td, { width: '7%' }]} wrap={false}>
+                {i + 1}
+              </Text>
+              <Text style={[styles.td, { width: '18%' }]} wrap hyphenationCallback={(word) => [word]}>
+                {r.label}
+              </Text>
+              <Text style={[styles.td, { width: '12%' }]} wrap={false}>
+                {r.zip}
+              </Text>
+              <Text style={[styles.td, { width: '12%' }]} wrap={false}>
+                {fmtMoney(r.zori)}
+              </Text>
+              <Text style={[styles.td, { width: '10%' }]} wrap={false}>
+                {r.momentum != null ? String(r.momentum) : '-'}
+              </Text>
+              <Text style={[styles.td, { width: '18%', fontSize: 7 }]} wrap hyphenationCallback={(word) => [word]}>
+                {r.cyclePhase ?? '-'}
+              </Text>
+              <Text style={[styles.td, { width: '23%', fontSize: 7 }]} wrap hyphenationCallback={(word) => [word]}>
+                {r.signalLine}
+              </Text>
             </View>
           ))}
 

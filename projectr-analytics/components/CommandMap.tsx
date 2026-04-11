@@ -1372,7 +1372,7 @@ function CommandMap({
               setTooltipStable({
                 x: info.x,
                 y: info.y,
-                text: `Shortlist · ${d.label || d.marketLabel}`,
+                text: `Saved · ${d.label || d.marketLabel}`,
               })
             } else setTooltipStable(null)
           },

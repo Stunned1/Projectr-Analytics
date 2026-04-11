@@ -144,7 +144,7 @@ export const useSitesStore = create<SitesStore>((set, get) => ({
       const sites = rows.map(rowToSite).filter((s): s is Site => s != null)
       set({ sites, loading: false, syncError: null })
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Could not load shortlist'
+      const msg = e instanceof Error ? e.message : 'Could not load saved sites'
       set({ sites: [], loading: false, syncError: msg })
     }
   },

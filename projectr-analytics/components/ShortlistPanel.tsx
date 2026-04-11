@@ -129,7 +129,7 @@ export default function ShortlistPanel({ onOpenSite }: { onOpenSite: (site: Site
           className="h-auto w-full justify-between px-2 py-1.5 text-left font-normal hover:bg-sidebar-accent"
         >
           <span className="text-[10px] font-semibold tracking-wider text-sidebar-foreground/90 uppercase">
-            Shortlist ({sites.length})
+            Saved ({sites.length})
           </span>
           <span className="text-[10px] text-muted-foreground">{panelOpen ? '▾' : '▸'}</span>
         </Button>
@@ -145,7 +145,7 @@ export default function ShortlistPanel({ onOpenSite }: { onOpenSite: (site: Site
             {loading && <p className="px-1 text-[10px] text-zinc-500">Loading…</p>}
             {!loading && sites.length === 0 && (
               <p className="px-1 text-[9px] leading-snug text-zinc-600">
-                Add sites from the data panel; names default to the place (ZIP is only the data key).
+                Save sites from the data panel; names default to the place (ZIP is only the data key).
               </p>
             )}
             {sites.map((s: Site) => (

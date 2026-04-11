@@ -412,9 +412,9 @@ export default function DocumentationPage() {
                               <em className="text-foreground/95">Client</em> layer on the map to see pins.
                             </li>
                             <li>
-                              <span className="font-semibold text-primary">Shortlist &amp; PDF: </span>
-                              Save ZIPs or areas from the sidebar shortlist; check two or more for comparison in the
-                              market brief PDF when exported.
+                              <span className="font-semibold text-primary">Saved &amp; PDF: </span>
+                              Save ZIPs or areas from <strong className="font-medium text-foreground">Saved</strong> in
+                              the sidebar; check two or more for comparison in the Market Report PDF when exported.
                             </li>
                           </ol>
                         </div>
