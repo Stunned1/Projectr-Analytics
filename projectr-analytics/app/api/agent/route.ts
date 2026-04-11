@@ -42,7 +42,7 @@ INTELLIGENCE RULES:
 - If user mentions "parcels" or "property values" → toggle parcels (NYC only)
 - If user says "show everything" or "full analysis" → toggle all relevant layers on
 
-RESPONSE FORMAT — always return valid JSON:
+RESPONSE FORMAT — CRITICAL: You MUST respond with ONLY valid JSON. No prose, no markdown, no explanation outside the JSON. Return exactly this structure:
 {
   "message": "1-2 sentence direct response",
   "action": { ...single action object... },
@@ -78,20 +78,33 @@ MARKET DATA:
     const model = genAI.getGenerativeModel({
       model: 'gemini-2.5-flash',
       systemInstruction: SYSTEM_PROMPT,
+      generationConfig: {
+        responseMimeType: 'application/json',
+      },
     })
 
     const result = await model.generateContent(`${contextStr}\nUSER: ${message}`)
     const raw = result.response.text().trim()
 
-    // Parse JSON response
+    // Parse JSON response — try multiple extraction strategies
     let parsed: { message: string; action: { type: string; [key: string]: unknown }; insight?: string | null }
     try {
-      // Strip markdown code blocks if present
+      // Strategy 1: direct parse
       const cleaned = raw.replace(/^```json\n?/, '').replace(/\n?```$/, '').trim()
       parsed = JSON.parse(cleaned)
     } catch {
-      // Fallback: treat as plain text with no action
-      parsed = { message: raw.slice(0, 500), action: { type: 'none' }, insight: null }
+      try {
+        // Strategy 2: extract JSON object from text
+        const match = raw.match(/\{[\s\S]*\}/)
+        if (match) {
+          parsed = JSON.parse(match[0])
+        } else {
+          throw new Error('no JSON found')
+        }
+      } catch {
+        // Strategy 3: treat as plain text, extract action if mentioned
+        parsed = { message: raw.replace(/\{[\s\S]*\}/g, '').trim().slice(0, 300), action: { type: 'none' }, insight: null }
+      }
     }
 
     return NextResponse.json(parsed)

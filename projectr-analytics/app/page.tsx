@@ -403,9 +403,7 @@ export default function Home() {
         {/* Nav */}
         <nav className="flex-1 px-2 py-3 flex flex-col gap-0.5">
           <NavItem icon={<MapIcon />} label="Map" active={activeNav === 'map'} onClick={() => setActiveNav('map')} />
-          <NavItem icon={<AnalyticsIcon />} label="Analytics" active={activeNav === 'analytics'} onClick={() => { setActiveNav('analytics'); setPanelOpen(true) }} />
-          <NavItem icon={<AgentIcon />} label="AI Agent" active={activeNav === 'agent'} onClick={() => setActiveNav('agent')} />
-          <NavItem icon={<ReportsIcon />} label="Reports" active={activeNav === 'reports'} onClick={() => setActiveNav('reports')} />
+          <NavItem icon={<ReportsIcon />} label="Case Studies" active={activeNav === 'reports'} onClick={() => setActiveNav('reports')} />
         </nav>
 
         {/* Active market badge */}

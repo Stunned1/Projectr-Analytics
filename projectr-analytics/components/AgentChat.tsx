@@ -139,59 +139,53 @@ export default function AgentChat({ mapContext, onAction, isOpen, onToggle, hasS
     <div
       className={`absolute ${bottomOffset} right-4 z-40 w-[340px] flex flex-col rounded-2xl overflow-hidden shadow-2xl`}
       style={{
-        background: 'rgba(10, 10, 10, 0.82)',
-        backdropFilter: 'blur(24px)',
-        WebkitBackdropFilter: 'blur(24px)',
-        border: '1px solid rgba(255,255,255,0.08)',
+        background: 'rgba(6, 6, 6, 0.2)',
+        backdropFilter: 'blur(0px)',
+        WebkitBackdropFilter: 'blur(2px)',
+        border: '1px solid rgba(255,255,255,0.07)',
       }}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-        <div className="flex items-center gap-2.5">
-          <div className="w-2 h-2 rounded-full bg-[#D76B3D]" style={{ boxShadow: '0 0 6px #D76B3D' }} />
-          <span className="text-white text-sm font-semibold tracking-tight">Projectr AI Agent</span>
-        </div>
-        <button onClick={onToggle} className="text-zinc-600 hover:text-zinc-300 transition-colors text-lg leading-none w-6 h-6 flex items-center justify-center rounded-md hover:bg-white/5">×</button>
-      </div>
+      {/* Close button — no header, just a floating × in the corner */}
+      <button
+        onClick={onToggle}
+        className="absolute top-2.5 right-3 z-10 text-zinc-600 hover:text-zinc-300 transition-colors text-lg leading-none w-6 h-6 flex items-center justify-center rounded-md hover:bg-white/5"
+      >×</button>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 max-h-64 scrollbar-thin">
+      <div className="flex-1 overflow-y-auto px-4 pt-8 pb-3 space-y-3 max-h-64">
         {messages.map((msg, i) => (
           <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-            <div
-              className="max-w-[88%] rounded-xl px-3.5 py-2.5 text-[13px] leading-relaxed"
-              style={msg.role === 'user' ? {
-                background: 'rgba(215, 107, 61, 0.15)',
-                border: '1px solid rgba(215, 107, 61, 0.25)',
-                color: '#fff',
-              } : {
-                background: 'rgba(255,255,255,0.05)',
-                border: '1px solid rgba(255,255,255,0.07)',
-                color: '#d4d4d8',
-              }}
-            >
-              {msg.text}
-            </div>
+            {msg.role === 'user' ? (
+              <div
+                className="max-w-[88%] rounded-xl px-3.5 py-2.5 text-[13px] leading-relaxed text-white"
+                style={{
+                  background: 'rgba(215, 107, 61, 0.18)',
+                  border: '1px solid rgba(215, 107, 61, 0.28)',
+                }}
+              >
+                {msg.text}
+              </div>
+            ) : (
+              <p className="max-w-[95%] text-[13px] leading-relaxed text-zinc-300 px-0.5">
+                {msg.text}
+              </p>
+            )}
             {msg.action && (
-              <p className="text-[10px] text-[#D76B3D]/70 mt-0.5 px-1">{ACTION_LABELS[msg.action.type]}</p>
+              <p className="text-[10px] text-[#D76B3D]/60 mt-0.5 px-0.5">{ACTION_LABELS[msg.action.type]}</p>
             )}
             {msg.insight && (
               <div className="mt-1 max-w-[88%] px-3 py-1.5 rounded-lg text-[11px] text-[#D76B3D]"
-                style={{ background: 'rgba(215,107,61,0.08)', border: '1px solid rgba(215,107,61,0.15)' }}>
+                style={{ background: 'rgba(215,107,61,0.07)', border: '1px solid rgba(215,107,61,0.12)' }}>
                 {msg.insight}
               </div>
             )}
           </div>
         ))}
         {loading && (
-          <div className="flex items-start">
-            <div className="rounded-xl px-3.5 py-2.5" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.07)' }}>
-              <div className="flex gap-1 items-center h-4">
-                {[0, 150, 300].map((d) => (
-                  <div key={d} className="w-1 h-1 rounded-full bg-zinc-500 animate-bounce" style={{ animationDelay: `${d}ms` }} />
-                ))}
-              </div>
-            </div>
+          <div className="flex items-center gap-1 px-0.5 py-1">
+            {[0, 150, 300].map((d) => (
+              <div key={d} className="w-1 h-1 rounded-full bg-zinc-600 animate-bounce" style={{ animationDelay: `${d}ms` }} />
+            ))}
           </div>
         )}
         <div ref={bottomRef} />
@@ -205,7 +199,7 @@ export default function AgentChat({ mapContext, onAction, isOpen, onToggle, hasS
               key={s}
               onClick={() => sendMessage(s)}
               className="text-[11px] text-zinc-400 px-3 py-1 rounded-full transition-all hover:text-white"
-              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}
+              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}
             >
               {s}
             </button>
@@ -215,9 +209,10 @@ export default function AgentChat({ mapContext, onAction, isOpen, onToggle, hasS
 
       {/* Input */}
       <div className="px-3 pb-3 pt-1">
-        <form onSubmit={(e) => { e.preventDefault(); sendMessage(input) }}
+        <form
+          onSubmit={(e) => { e.preventDefault(); sendMessage(input) }}
           className="flex gap-2 items-center rounded-xl px-3 py-2"
-          style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}
+          style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}
         >
           <input
             ref={inputRef}
@@ -231,7 +226,7 @@ export default function AgentChat({ mapContext, onAction, isOpen, onToggle, hasS
             type="submit"
             disabled={loading || !input.trim()}
             className="w-7 h-7 rounded-lg flex items-center justify-center transition-all disabled:opacity-30 flex-shrink-0"
-            style={{ background: input.trim() ? 'linear-gradient(135deg, #D76B3D, #b85a30)' : 'rgba(255,255,255,0.06)' }}
+            style={{ background: input.trim() ? 'linear-gradient(135deg, #D76B3D, #b85a30)' : 'rgba(255,255,255,0.05)' }}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2} className="w-3.5 h-3.5">
               <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
