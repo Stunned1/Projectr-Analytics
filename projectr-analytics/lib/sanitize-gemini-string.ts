@@ -29,9 +29,12 @@ export function stripGeminiStringWrappers(s: string): string {
 /**
  * Signal `direction` / `value` / `source` sometimes pick up JSON artifacts after round-trips
  * (e.g. literal \", doubled quotes) or model echo. Use wherever cycle tiles render.
+ * Missing or non-string values return '' (callers should show '—' in PDF if needed).
  */
-export function sanitizeCycleSignalText(s: string): string {
-  let t = s.trim()
+export function sanitizeCycleSignalText(s: string | null | undefined): string {
+  if (s == null) return ''
+  const raw = typeof s === 'string' ? s : String(s)
+  let t = raw.trim()
   for (let pass = 0; pass < 3; pass++) {
     t = t.replace(/\\"/g, '"')
     t = stripGeminiStringWrappers(t)

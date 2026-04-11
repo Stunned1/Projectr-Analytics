@@ -7,10 +7,13 @@ import type {
   MetroBenchmark,
   SignalIndicator,
 } from './types'
-import { formatActiveLayersList } from './layer-labels'
 import { BarChartPdf, SparklinePdf } from './pdf-charts'
 import { CycleSignalTilesPdf, CycleWheelPdf } from './pdf-cycle-visual'
+import { PdfTrendArrow, trendKindToVariant, signalIndicatorToVariant } from './pdf-trend-arrow'
 import type { ZoriSeriesSource } from './fetch-zori-series'
+
+/** A4 content width (595.28pt − 40pt padding × 2). Fixed pt width fixes @react-pdf Text wrap. */
+const PDF_CONTENT_WIDTH_PT = 515
 
 const accent = '#D76B3D'
 const ink = '#1a1a1a'
@@ -39,8 +42,27 @@ const styles = StyleSheet.create({
   },
   brand: { color: '#ffffff', fontSize: 11, letterSpacing: 2, fontFamily: 'Helvetica', fontWeight: 'bold' },
   meta: { color: '#9ca3af', fontSize: 8, textAlign: 'right' },
-  h1: { fontSize: 22, fontFamily: 'Helvetica', fontWeight: 'bold', color: ink, marginBottom: 10, lineHeight: 1.15 },
-  narrative: { fontSize: 10, lineHeight: 1.45, color: '#333', marginBottom: 14 },
+  h1: {
+    fontSize: 22,
+    fontFamily: 'Helvetica',
+    fontWeight: 'bold',
+    color: ink,
+    marginBottom: 10,
+    lineHeight: 1.3,
+    /** Numeric pt — percentage width on Text often resolves wrong in @react-pdf and clips to one line. */
+    width: PDF_CONTENT_WIDTH_PT,
+  },
+  narrative: {
+    fontSize: 10,
+    lineHeight: 1.45,
+    color: '#333',
+    marginBottom: 10,
+    width: PDF_CONTENT_WIDTH_PT,
+  },
+  body: {
+    width: PDF_CONTENT_WIDTH_PT,
+    alignSelf: 'flex-start',
+  },
   signalRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 6 },
   signalCard: {
     width: '47%',
@@ -63,6 +85,7 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontFamily: 'Helvetica',
     fontWeight: 'bold',
+    width: PDF_CONTENT_WIDTH_PT,
   },
   sectionTitle: {
     fontSize: 11,
@@ -80,14 +103,6 @@ const styles = StyleSheet.create({
   td: { fontSize: 8, color: ink },
   foot: { marginTop: 12, fontSize: 7, color: muted, lineHeight: 1.35 },
   mapBox: { marginTop: 8, borderWidth: 1, borderColor: '#ddd' },
-  legend: {
-    marginTop: 10,
-    backgroundColor: '#f9fafb',
-    padding: 8,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    fontSize: 7,
-  },
 })
 
 function fmtMoney(n: number | null | undefined) {
@@ -95,19 +110,29 @@ function fmtMoney(n: number | null | undefined) {
   return '$' + Math.round(n).toLocaleString('en-US')
 }
 
-/** Helvetica in @react-pdf often lacks Unicode arrows — use ASCII-only marks. */
-function arrowChar(a: SignalIndicator['arrow']) {
-  if (a === 'up') return '+'
-  if (a === 'down') return '-'
-  return '~'
-}
+/**
+ * Multiple shorter Text nodes wrap/page-break more reliably than one long @react-pdf Text
+ * (percentage width + single block often clips mid-line at the page margin).
+ */
+function narrativeTextBlocks(raw: string): string[] {
+  const t = raw
+    .replace(/\r\n/g, '\n')
+    .replace(/\u2019/g, "'")
+    .replace(/[\u2028\u2029\u00a0]/g, ' ')
+    .trim()
+  if (!t) return []
 
-function classifierMark(cycle: CycleAnalysis | null | undefined, key: 'rent' | 'vacancy' | 'permits' | 'employment'): string {
-  if (!cycle) return '—'
-  const s = cycle.signals[key].score
-  if (s === 1) return '+'
-  if (s === -1) return '-'
-  return '~'
+  const out: string[] = []
+  for (const para of t.split(/\n+/).map((p) => p.trim()).filter(Boolean)) {
+    if (para.length <= 300) {
+      out.push(para)
+      continue
+    }
+    const sentences = para.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean)
+    if (sentences.length > 1) out.push(...sentences)
+    else out.push(para)
+  }
+  return out.length > 0 ? out : [t]
 }
 
 export interface SiteCompareRow {
@@ -235,55 +260,84 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
           </View>
         </View>
 
-        <Text style={{ fontSize: 9, color: muted, marginBottom: 4 }}>{payload.marketLabel}</Text>
-        <Text style={styles.h1}>{brief.cycleHeadline}</Text>
-        <Text style={styles.narrative}>{brief.narrative}</Text>
-
-        {cycleAnalysis ? (
-          <>
-            <Text style={[styles.sectionTitle, { marginTop: 8 }]}>Cycle map</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 8 }}>
-              <CycleWheelPdf cycle={cycleAnalysis} />
-              <View style={{ flex: 1, paddingTop: 4, marginLeft: 14 }}>
-                <Text style={{ fontSize: 8, color: ink, fontFamily: 'Helvetica', fontWeight: 'bold' }}>
-                  {cycleAnalysis.cycleStage} {cycleAnalysis.cyclePosition}
-                </Text>
-                <Text style={{ fontSize: 7, color: muted, marginTop: 4, lineHeight: 1.35 }}>
-                  Quadrants: Recovery (upper-left), Expansion (upper-right), Hypersupply (lower-right), Recession
-                  (lower-left). Dot placement reflects stage within the phase; color reflects confidence (accent =
-                  stronger read, amber = medium, gray = cautious).
-                </Text>
-              </View>
-            </View>
-            <Text style={[styles.sectionTitle, { marginTop: 4 }]}>Signals</Text>
-            <CycleSignalTilesPdf cycle={cycleAnalysis} />
-          </>
-        ) : (
-          <View style={styles.signalRow}>
-            {signals.map((s) => (
-              <View key={s.id} style={styles.signalCard}>
-                <Text style={styles.signalTitle}>{s.label}</Text>
-                <Text style={styles.signalArrow}>{arrowChar(s.arrow)}</Text>
-                <Text style={styles.signalLine}>{s.line}</Text>
-              </View>
-            ))}
-          </View>
-        )}
-        <Text style={styles.confidence}>Confidence — {brief.confidenceLine}</Text>
-
-        {cycleAnalysis && (
-          <Text style={[styles.foot, { marginBottom: 6 }]}>
-            Analytical cycle classifier: {cycleAnalysis.signalsAgreement}/4 signals agree · data quality {cycleAnalysis.dataQuality}
-            {cycleAnalysis.transitional ? ' · transitional / mixed read' : ''}.
+        <View style={styles.body}>
+          <Text style={{ fontSize: 9, color: muted, marginBottom: 4 }} wrap>
+            {payload.marketLabel}
           </Text>
-        )}
+          <Text style={styles.h1} wrap hyphenationCallback={(word) => [word]}>
+            {brief.cycleHeadline}
+          </Text>
+          {narrativeTextBlocks(brief.narrative).map((block, i) => (
+            <Text
+              key={i}
+              style={[styles.narrative, ...(i > 0 ? [{ marginTop: 6 }] : [])]}
+              wrap
+              hyphenationCallback={(word) => [word]}
+            >
+              {block}
+            </Text>
+          ))}
 
-        <Text style={styles.foot}>
-          Projectr Analytics · Data: Zillow Research (ZORI/ZHVI), Census ACS & BPS, FRED, Google Trends.
-          {zoriSeriesSource === 'zillow_monthly'
-            ? ' ZORI trend uses monthly index values from ingested Zillow Research data.'
-            : ' ZORI trend is modeled from latest index and YoY until the zillow_zori_monthly table is populated (npm run ingest:zillow).'}
-        </Text>
+          {cycleAnalysis ? (
+            <>
+              <Text style={[styles.sectionTitle, { marginTop: 8 }]}>Cycle map</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 8, width: '100%' }}>
+                <CycleWheelPdf cycle={cycleAnalysis} />
+                <View style={{ flex: 1, minWidth: 120, paddingTop: 4, marginLeft: 14 }}>
+                  <Text
+                    style={{ fontSize: 8, color: ink, fontFamily: 'Helvetica', fontWeight: 'bold', width: '100%' }}
+                    wrap
+                    hyphenationCallback={(word) => [word]}
+                  >
+                    {cycleAnalysis.cycleStage} {cycleAnalysis.cyclePosition}
+                  </Text>
+                  <Text
+                    style={{ fontSize: 7, color: muted, marginTop: 4, lineHeight: 1.35, width: '100%' }}
+                    wrap
+                    hyphenationCallback={(word) => [word]}
+                  >
+                    Dot color reflects confidence; stroke indicates trajectory hint. Quadrants: Recovery (upper-left),
+                    Expansion (upper-right), Hypersupply (lower-right), Recession (lower-left).
+                  </Text>
+                </View>
+              </View>
+              <Text style={[styles.sectionTitle, { marginTop: 4 }]}>Signals</Text>
+              <CycleSignalTilesPdf cycle={cycleAnalysis} />
+            </>
+          ) : (
+            <View style={styles.signalRow}>
+              {signals.map((s) => (
+                <View key={s.id} style={styles.signalCard}>
+                  <Text style={styles.signalTitle}>{s.label}</Text>
+                  <View style={{ height: 14, marginBottom: 2, justifyContent: 'center' }}>
+                    <PdfTrendArrow variant={signalIndicatorToVariant(s)} color={accent} />
+                  </View>
+                  <Text style={styles.signalLine} wrap>
+                    {s.line}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+          <Text style={styles.confidence} wrap hyphenationCallback={(word) => [word]}>
+            Confidence — {brief.confidenceLine}
+          </Text>
+
+          {cycleAnalysis && (
+            <Text style={[styles.foot, { marginBottom: 6, width: PDF_CONTENT_WIDTH_PT }]} wrap hyphenationCallback={(word) => [word]}>
+              Analytical cycle classifier: {cycleAnalysis.signalsAgreement}/4 signals agree · data quality{' '}
+              {cycleAnalysis.dataQuality}
+              {cycleAnalysis.transitional ? ' · transitional / mixed read' : ''}.
+            </Text>
+          )}
+
+          <Text style={[styles.foot, { width: PDF_CONTENT_WIDTH_PT }]} wrap hyphenationCallback={(word) => [word]}>
+            Projectr Analytics · Data: Zillow Research (ZORI/ZHVI), Census ACS & BPS, FRED, Google Trends.
+            {zoriSeriesSource === 'zillow_monthly'
+              ? ' ZORI trend uses monthly index values from ingested Zillow Research data.'
+              : ' ZORI trend is modeled from latest index and YoY until the zillow_zori_monthly table is populated (npm run ingest:zillow).'}
+          </Text>
+        </View>
       </Page>
 
       {/* Page 2 — Data */}
@@ -301,13 +355,26 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
           <Text style={[styles.th, { width: '30%' }]}>Metro peer avg</Text>
         </View>
         {tableRows.map((r) => (
-          <View key={r.label} style={styles.tableRow} wrap={false}>
-            <Text style={[styles.td, { width: '38%' }]}>{r.label}</Text>
-            <Text style={[styles.td, { width: '22%', fontFamily: 'Helvetica', fontWeight: 'bold' }]}>{r.sub}</Text>
-            <Text style={[styles.td, { width: '10%', fontFamily: 'Helvetica', fontWeight: 'bold' }]}>
-              {r.signalKey ? classifierMark(cycleAnalysis, r.signalKey) : '—'}
+          <View key={r.label} style={[styles.tableRow, { flexDirection: 'row', alignItems: 'center' }]} wrap={false}>
+            <Text style={[styles.td, { width: '38%' }]} wrap={false}>
+              {r.label}
             </Text>
-            <Text style={[styles.td, { width: '30%', color: muted }]}>{r.bench}</Text>
+            <Text style={[styles.td, { width: '22%', fontFamily: 'Helvetica', fontWeight: 'bold' }]} wrap={false}>
+              {r.sub}
+            </Text>
+            <View style={{ width: '10%', alignItems: 'center', justifyContent: 'center', minHeight: 14 }}>
+              {r.signalKey && cycleAnalysis ? (
+                <PdfTrendArrow
+                  variant={trendKindToVariant(r.signalKey, cycleAnalysis.signals[r.signalKey].score)}
+                  color={ink}
+                />
+              ) : (
+                <Text style={[styles.td, { textAlign: 'center' }]}>—</Text>
+              )}
+            </View>
+            <Text style={[styles.td, { width: '30%', color: muted }]} wrap={false}>
+              {r.bench}
+            </Text>
           </View>
         ))}
         {metro && (
@@ -324,7 +391,7 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
         <SparklinePdf data={zoriSeries} width={480} height={72} />
 
         <Text style={styles.sectionTitle}>Permit acceleration (Census BPS, county)</Text>
-        <BarChartPdf bars={permitBars} width={480} height={100} />
+        <BarChartPdf bars={permitBars} width={480} height={118} />
 
         <Text style={styles.sectionTitle}>Search sentiment (Google Trends)</Text>
         <Text style={{ fontSize: 7, color: muted, marginBottom: 4 }}>{payload.trends.keyword_scope}</Text>
@@ -346,9 +413,9 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
         </View>
 
         {mapImageDataUri ? (
-          <View style={{ width: 515, height: 290, position: 'relative' }}>
+          <View style={{ width: 515, height: 420, position: 'relative' }}>
             <View style={styles.mapBox}>
-              <Image src={mapImageDataUri} style={{ width: 515, height: 290 }} />
+              <Image src={mapImageDataUri} style={{ width: 515, height: 420 }} />
             </View>
             {cycleAnalysis && (
               <View
@@ -362,7 +429,7 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
                   borderWidth: 1,
                   borderColor: '#ddd',
                   borderRadius: 3,
-                  maxWidth: 200,
+                  maxWidth: 220,
                 }}
               >
                 <Text style={{ fontSize: 9, fontFamily: 'Helvetica', fontWeight: 'bold', color: ink }}>
@@ -375,37 +442,16 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
             )}
           </View>
         ) : (
-          <View style={[styles.mapBox, { height: 200, justifyContent: 'center', alignItems: 'center', padding: 16 }]}>
-            <Text style={{ color: muted, textAlign: 'center', fontSize: 9 }}>
-              Static map unavailable (check Google Static Maps API key). Submarket boundary and pin positions are still
-              listed in the legend.
+          <View style={[styles.mapBox, { height: 420, justifyContent: 'center', alignItems: 'center', padding: 16 }]}>
+            <Text style={{ color: muted, textAlign: 'center', fontSize: 9 }} wrap>
+              Static map unavailable (check Google Static Maps API key). Boundary and client markers would appear here
+              when the key is configured.
             </Text>
           </View>
         )}
 
-        <Text style={[styles.sectionTitle, { marginTop: 12 }]}>Active layers at export</Text>
-        <Text style={{ fontSize: 8, lineHeight: 1.4 }}>{formatActiveLayersList(payload.layers)}</Text>
-        <Text style={[styles.sectionTitle, { marginTop: 12 }]}>Geography</Text>
-        <Text style={{ fontSize: 8 }}>
-          Primary ZIP: {payload.primaryZip ?? '—'} · Center:{' '}
-          {payload.geo ? `${payload.geo.lat.toFixed(4)}, ${payload.geo.lng.toFixed(4)}` : '—'}
-        </Text>
-        {payload.pins.length > 0 && (
-          <Text style={{ fontSize: 8, marginTop: 6 }}>
-            Client pins: {payload.pins.map((p) => p.label).join('; ')}
-          </Text>
-        )}
-
-        <View style={styles.legend}>
-          <Text style={{ fontFamily: 'Helvetica', fontWeight: 'bold', fontSize: 7, marginBottom: 4 }}>Legend</Text>
-          <Text style={{ fontSize: 6, lineHeight: 1.35 }}>
-            Orange outline: ZIP boundary (approx.) · Orange markers: client uploads / sites · Basemap: Google Static
-            Maps (dark styled)
-          </Text>
-        </View>
-        <Text style={styles.foot} wrap>
-          Deck.gl overlay layers (tracts, flood, etc.) are listed above; only basemap + boundary + markers render in
-          static export.
+        <Text style={{ fontSize: 8, color: muted, marginTop: 10, lineHeight: 1.45 }} wrap>
+          Orange outline: primary submarket boundary · orange markers: client sites · dark basemap (Google Static Maps).
         </Text>
       </Page>
 

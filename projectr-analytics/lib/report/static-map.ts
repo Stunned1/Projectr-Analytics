@@ -19,7 +19,7 @@ export async function fetchStaticMapPng(options: {
   const key = mapsKey()
   if (!key) return null
 
-  const size = '640x360'
+  const size = '640x420'
   const scale = '2'
   const base = new URL('https://maps.googleapis.com/maps/api/staticmap')
   base.searchParams.set('size', size)

@@ -23,39 +23,49 @@ export async function generateCycleNarrative(
   const key = process.env.GEMINI_API_KEY
   if (!key) return fallbackCycleNarrative(partial)
 
-  const ctx = JSON.stringify({
-    marketLabel,
-    zip: partial.zip,
-    cyclePosition: partial.cyclePosition,
-    cycleStage: partial.cycleStage,
-    confidence: partial.confidence,
-    signalsAgreement: partial.signalsAgreement,
-    dataQuality: partial.dataQuality,
-    transitional: partial.transitional,
-    confidenceLine: partial.confidenceLine,
-    signals: partial.signals,
-  })
+  const rentDir = sanitizeCycleSignalText(partial.signals.rent.direction)
+  const rentVal = sanitizeCycleSignalText(partial.signals.rent.value)
+  const vacDir = sanitizeCycleSignalText(partial.signals.vacancy.direction)
+  const vacVal = sanitizeCycleSignalText(partial.signals.vacancy.value)
+  const permDir = sanitizeCycleSignalText(partial.signals.permits.direction)
+  const permVal = sanitizeCycleSignalText(partial.signals.permits.value)
+  const empDir = sanitizeCycleSignalText(partial.signals.employment.direction)
+  const empVal = sanitizeCycleSignalText(partial.signals.employment.value)
 
-  const prompt = `You are a senior multifamily / residential investment analyst at Projectr Analytics.
+  const prompt = `You are a real estate analyst writing a one-paragraph market brief for a consulting client.
 
-The deterministic cycle classifier has already locked in the phase — do NOT contradict it.
+Market: ${marketLabel}
+ZIP (anchor): ${partial.zip}
+Cycle position: ${partial.cycleStage} ${partial.cyclePosition} — this classification is LOCKED; do not contradict or re-label it.
+Confidence: ${partial.confidence}% (${partial.signalsAgreement}/4 signals agree)
+Data quality: ${partial.dataQuality}${partial.transitional ? ' · transitional / mixed read' : ''}
 
-Write exactly 2 or 3 sentences of narrative for the executive brief. Sound like a human analyst, not a list.
-Reference at most three concrete facts from the signal values (numbers or percentages) when available.
-Explain what the phase implies for supply/demand and underwriting (risk or opportunity), in plain language.
-No bullet points, no JSON, no markdown.
+Rent signal: ${rentDir} — ${rentVal}
+Vacancy signal: ${vacDir} — ${vacVal}
+Permit signal: ${permDir} — ${permVal}
+Employment signal: ${empDir} — ${empVal}
 
-Classifier output (JSON):
-${ctx}`
+Deterministic summary line (for tone only): ${sanitizeCycleSignalText(partial.confidenceLine)}
+
+Write exactly 2–3 sentences. Reference specific numbers or percentages from the four signal lines whenever they contain quantitative detail. End with one forward-looking implication for a developer or investor (supply, rents, risk, or timing). Sound like a human analyst — not a list.
+
+No bullet points, no JSON, no markdown. Do not use vague filler such as "nuanced picture," "presents opportunities," "robust outlook," or "landscape."`
 
   try {
     const genAI = new GoogleGenerativeAI(key)
     const model = genAI.getGenerativeModel({
       model: 'gemini-2.5-flash',
-      generationConfig: { maxOutputTokens: 512 },
+      generationConfig: { maxOutputTokens: 2048 },
     })
     const result = await model.generateContent(prompt)
-    const text = stripGeminiStringWrappers(result.response.text().trim())
+    const response = result.response as unknown as {
+      text: () => string
+      candidates?: Array<{ finishReason?: string }>
+    }
+    const finish = response.candidates?.[0]?.finishReason
+    const text = stripGeminiStringWrappers(response.text().trim())
+    // Truncated model output often ends mid-clause (e.g. "confidence (9"); prefer full deterministic brief.
+    if (finish === 'MAX_TOKENS') return fallbackCycleNarrative(partial)
     if (text.length > 40) return text
     return fallbackCycleNarrative(partial)
   } catch {
