@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
         method: 'POST',
         body: body.toString(),
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        signal: AbortSignal.timeout(18000),
+        cache: 'no-store',
       })
       if (!res.ok) continue
       text = await res.text()

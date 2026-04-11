@@ -34,13 +34,13 @@ export interface TransitGeoJSON {
   stop_count: number
 }
 
-async function overpassQuery(query: string, timeoutMs = 14000): Promise<{ elements: unknown[] }> {
+async function overpassQuery(query: string): Promise<{ elements: unknown[] }> {
   const body = new URLSearchParams({ data: query })
   const res = await fetch('https://overpass-api.de/api/interpreter', {
     method: 'POST',
     body: body.toString(),
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    signal: AbortSignal.timeout(timeoutMs),
+    cache: 'no-store',
   })
   if (!res.ok) throw new Error(`Overpass ${res.status}`)
   const text = await res.text()
@@ -80,7 +80,7 @@ out geom;`
     try {
       const smallBbox = `${lat - 0.06},${lng - 0.06},${lat + 0.06},${lng + 0.06}`
       const retryQuery = `[out:json][timeout:10];(node["highway"="bus_stop"](${smallBbox});node["railway"~"station|subway_entrance"](${smallBbox}););out;`
-      const data = await overpassQuery(retryQuery, 10000)
+      const data = await overpassQuery(retryQuery)
       elements = data.elements as typeof elements
     } catch {
       return { type: 'FeatureCollection', features: [], routes: [], stop_count: 0 }
