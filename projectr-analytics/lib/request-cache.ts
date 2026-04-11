@@ -3,6 +3,7 @@ const responseCache = new Map<string, { expiresAt: number; data: unknown }>()
 
 const DEFAULT_TTL_MS = 5 * 60 * 1000
 const MAX_CACHE_ENTRIES = 40
+const PERF_DEBUG = process.env.NEXT_PUBLIC_PERF_DEBUG === '1'
 
 interface DedupedFetchOptions {
   ttlMs?: number
@@ -18,13 +19,16 @@ export async function dedupedFetchJson<T>(
 
   const cached = responseCache.get(cacheKey)
   if (cached && cached.expiresAt > Date.now()) {
+    if (PERF_DEBUG) console.log('[fetch] CACHED', cacheKey)
     return cached.data as T
   }
 
   const existing = inFlight.get(cacheKey)
   if (existing) {
+    if (PERF_DEBUG) console.log('[fetch] DEDUPED', cacheKey)
     return existing as Promise<T>
   }
+  if (PERF_DEBUG) console.log('[fetch] NEW', cacheKey)
 
   const request = fetch(url)
     .then(async (res) => {

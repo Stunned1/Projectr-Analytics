@@ -138,6 +138,7 @@ const DATA_LAYER_REGISTRY = [
 
 // Reuse expensive county blockgroup responses across CommandMap remounts.
 const BLOCKGROUP_CACHE = new globalThis.Map<string, BlockGroupCollection>()
+let commandMapRenderCounter = 0
 
 // ── Color scale: blue (low rent) → red (high rent) ───────────────────────────
 // Normalized across the set of loaded ZIPs for relative contrast
@@ -291,6 +292,8 @@ interface CommandMapProps {
 }
 
 function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
+  const perfDebug = process.env.NEXT_PUBLIC_PERF_DEBUG === '1'
+
   const [primaryBoundary, setPrimaryBoundary] = useState<GeoJSON | null>(null)
   const [neighborBoundaries, setNeighborBoundaries] = useState<ZipBoundary[]>([])
   const [blockGroupData, setBlockGroupData] = useState<BlockGroupCollection | null>(null)
@@ -324,6 +327,12 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
       return sameText && sameX && sameY ? prev : next
     })
   }, [])
+
+  useEffect(() => {
+    if (!perfDebug) return
+    commandMapRenderCounter += 1
+    console.log('[perf] CommandMap render #', commandMapRenderCounter)
+  })
 
   // Fetch primary boundary + transit + neighbors when zip changes
   useEffect(() => {
