@@ -3,6 +3,8 @@
 import { useState } from 'react'
 import dynamic from 'next/dynamic'
 import Image from 'next/image'
+import AgenticNormalizer from '@/components/AgenticNormalizer'
+import ExecutiveMemo from '@/components/ExecutiveMemo'
 
 const CommandMap = dynamic(() => import('@/components/CommandMap'), { ssr: false })
 
@@ -33,6 +35,30 @@ interface TrendsData {
   latest_score: number | null
   data_points: number
   series: Array<{ date: string; value: number }>
+}
+
+interface AggregateData {
+  label: string
+  zip_count: number
+  total_population: number | null
+  zillow: { avg_zori: number | null; avg_zhvi: number | null; zori_growth_12m: number | null; zhvi_growth_12m: number | null }
+  housing: { total_units: number | null; vacancy_rate: number | null; median_income: number | null; median_rent: number | null }
+  permits: { total_units: number | null; total_value: number | null }
+  metro_velocity: { region_name: string; doz_pending_latest: number | null; price_cut_pct_latest: number | null; inventory_latest: number | null } | null
+  fred: Array<{ metric_name: string; metric_value: number; time_period: string | null }>
+}
+
+interface CityZip {
+  zip: string
+  city: string
+  state: string | null
+  metro_name: string | null
+  lat: number | null
+  lng: number | null
+  zori_latest: number | null
+  zhvi_latest: number | null
+  zori_growth_12m: number | null
+  zhvi_growth_12m: number | null
 }
 
 interface MarketData {
@@ -157,38 +183,119 @@ const ChevronRight = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentC
 
 export default function Home() {
   const [zip, setZip] = useState('')
+  const [searchInput, setSearchInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<MarketData | null>(null)
+  const [cityZips, setCityZips] = useState<CityZip[] | null>(null)
+  const [boroughBoundary, setBoroughBoundary] = useState<object | null>(null)
+  const [aggregateData, setAggregateData] = useState<AggregateData | null>(null)
+  const [uploadedMarkers, setUploadedMarkers] = useState<Array<{ lat: number; lng: number; label: string; value: number | null }> | null>(null)
   const [transit, setTransit] = useState<TransitData | null>(null)
   const [trends, setTrends] = useState<TrendsData | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [activeNav, setActiveNav] = useState<'map' | 'analytics' | 'agent' | 'reports'>('map')
   const [panelOpen, setPanelOpen] = useState(false)
 
+  async function handleNormalizerIngested(result: { triage: { bucket: string }; marker_points?: Array<{ lat: number; lng: number; value: number | null; label: string }> }) {
+    if (result.triage.bucket === 'GEOSPATIAL' && result.marker_points?.length) {
+      setUploadedMarkers(result.marker_points)
+    }
+  }
+
+  async function fetchAggregate(zips: string[], label: string) {
+    try {
+      const res = await fetch('/api/aggregate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ zips, label }),
+      })
+      const data = await res.json()
+      if (!data.error) setAggregateData(data)
+    } catch { /* non-critical */ }
+  }
+
+  const BOROUGHS = new Set(['manhattan', 'brooklyn', 'queens', 'bronx', 'staten island'])
+
   async function fetchMarket(e: React.FormEvent) {
     e.preventDefault()
-    if (!/^\d{5}$/.test(zip)) { setError('Enter a valid 5-digit zip'); return }
+    const input = searchInput.trim()
+    if (!input) return
     setLoading(true)
     setError(null)
-    try {
-      const [marketRes, transitRes, trendsRes] = await Promise.all([
-        fetch(`/api/market?zip=${zip}`),
-        fetch(`/api/transit?zip=${zip}`),
-        fetch(`/api/trends?zip=${zip}`),
-      ])
-      const data = await marketRes.json()
-      const transitData = await transitRes.json()
-      const trendsData = await trendsRes.json()
-      if (data.error) { setError(data.error); return }
-      setResult(data)
-      if (!transitData.error) setTransit(transitData)
-      if (!trendsData.error) setTrends(trendsData)
-      setPanelOpen(true)
-    } catch {
-      setError('Failed to fetch data')
-    } finally {
-      setLoading(false)
+    setCityZips(null)
+    setBoroughBoundary(null)
+    setAggregateData(null)
+
+    if (/^\d{5}$/.test(input)) {
+      // ZIP code search — clear city mode state
+      setCityZips(null)
+      setBoroughBoundary(null)
+      setZip(input)
+      try {
+        const [marketRes, transitRes, trendsRes] = await Promise.all([
+          fetch(`/api/market?zip=${input}`),
+          fetch(`/api/transit?zip=${input}`),
+          fetch(`/api/trends?zip=${input}`),
+        ])
+        const data = await marketRes.json()
+        const transitData = await transitRes.json()
+        const trendsData = await trendsRes.json()
+        if (data.error) { setError(data.error); return }
+        setResult(data)
+        if (!transitData.error) setTransit(transitData)
+        if (!trendsData.error) setTrends(trendsData)
+        setPanelOpen(true)
+      } catch {
+        setError('Failed to fetch data')
+      }
+    } else {
+      // Check if it's a borough name
+      const lowerInput = input.toLowerCase().replace(/,.*$/, '').trim()
+      if (BOROUGHS.has(lowerInput)) {
+        try {
+          const res = await fetch(`/api/borough?name=${encodeURIComponent(lowerInput)}`)
+          const data = await res.json()
+          if (data.error || !data.zips?.length) {
+            setError(`No data found for "${input}"`)
+            return
+          }
+          setCityZips(data.zips)
+          setBoroughBoundary(data.boundary ?? null)
+          setResult(null)
+          setZip('')
+          setTransit(null)
+          setTrends(null)
+          setPanelOpen(true)
+          fetchAggregate(data.zips.map((z: CityZip) => z.zip), data.borough)
+        } catch {
+          setError('Failed to fetch borough data')
+        }
+      } else {
+        // City search — parse "City, ST" or just "City"
+        const parts = input.split(',').map((s) => s.trim())
+        const cityName = parts[0]
+        const stateAbbr = parts[1] ?? ''
+        try {
+          const url = `/api/city?city=${encodeURIComponent(cityName)}${stateAbbr ? `&state=${stateAbbr}` : ''}`
+          const res = await fetch(url)
+          const data = await res.json()
+          if (data.error || !data.zips?.length) {
+            setError(`No data found for "${input}". Try "City, ST" format.`)
+            return
+          }
+          setCityZips(data.zips)
+          setResult(null)
+          setZip('')
+          setTransit(null)
+          setTrends(null)
+          setPanelOpen(true)
+          fetchAggregate(data.zips.map((z: CityZip) => z.zip), `${cityName}${stateAbbr ? ', ' + stateAbbr : ''}`)
+        } catch {
+          setError('Failed to fetch city data')
+        }
+      }
     }
+    setLoading(false)
   }
 
   const fredSeries: Record<string, Array<{ date: string; value: number }>> = {}
@@ -225,10 +332,9 @@ export default function Home() {
               </span>
               <input
                 type="text"
-                value={zip}
-                onChange={(e) => setZip(e.target.value.replace(/\D/g, '').slice(0, 5))}
-                placeholder="ZIP code..."
-                maxLength={5}
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                placeholder="ZIP, City, ST, or Borough..."
                 className="w-full bg-white/5 border border-white/10 rounded-md pl-7 pr-3 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-[#D76B3D]/50 transition-colors"
               />
             </div>
@@ -252,7 +358,7 @@ export default function Home() {
         </nav>
 
         {/* Active market badge */}
-        {result && (
+        {(result || cityZips) && (
           <div className="px-3 py-3 border-t border-white/8">
             <div
               className="bg-white/5 border border-white/8 rounded-lg p-3 cursor-pointer hover:border-[#D76B3D]/30 transition-colors"
@@ -262,8 +368,17 @@ export default function Home() {
                 <p className="text-[9px] text-zinc-500 uppercase tracking-widest">Active Market</p>
                 <ChevronRight />
               </div>
-              <p className="text-white text-sm font-semibold">{result.zillow?.city ?? result.zip}</p>
-              <p className="text-zinc-500 text-[10px]">{result.zip} · {result.geo?.state}</p>
+              {result ? (
+                <>
+                  <p className="text-white text-sm font-semibold">{result.zillow?.city ?? result.zip}</p>
+                  <p className="text-zinc-500 text-[10px]">{result.zip} · {result.geo?.state}</p>
+                </>
+              ) : cityZips ? (
+                <>
+                  <p className="text-white text-sm font-semibold">{cityZips[0]?.city}</p>
+                  <p className="text-zinc-500 text-[10px]">{cityZips.length} ZIPs · {cityZips[0]?.state}</p>
+                </>
+              ) : null}
             </div>
           </div>
         )}
@@ -271,57 +386,31 @@ export default function Home() {
 
       {/* ── Map ── */}
       <div className="flex-1 relative overflow-hidden">
-        <CommandMap zip={result?.zip ?? null} marketData={result} transitData={transit} />
+        <CommandMap zip={result?.zip ?? null} marketData={result} transitData={transit} cityZips={cityZips} boroughBoundary={boroughBoundary} uploadedMarkers={uploadedMarkers} />
 
         {/* Bottom stats bar */}
-        {result && (
+        {(result || aggregateData) && (
           <div className="absolute bottom-0 left-0 right-0 z-30 bg-black/85 backdrop-blur-sm border-t border-white/8 flex items-center h-[60px] px-3 overflow-x-auto">
-            <BottomStat
-              label="Market Status"
-              value={marketStatus ?? '—'}
-              sub={marketStatus === 'Active' ? '● Live' : marketStatus === 'Moderate' ? '● Moderate' : null}
-              accent={marketStatus === 'Active' ? 'green' : null}
-            />
-            <BottomStat
-              label="Median Rent"
-              value={fmtMoney(result.zillow?.zori_latest)}
-              sub={zoriGrowth ? `▲ ${zoriGrowth} YoY` : null}
-              accent={result.zillow?.zori_growth_12m != null && result.zillow.zori_growth_12m > 0 ? 'green' : null}
-            />
-            <BottomStat
-              label="Home Value"
-              value={fmtMoney(result.zillow?.zhvi_latest)}
-              sub={fmtGrowth(result.zillow?.zhvi_growth_12m) ?? undefined}
-            />
-            <BottomStat
-              label="Active Listings"
-              value={fmtNum(result.metro_velocity?.inventory_latest)}
-              sub={result.metro_velocity?.region_name ?? undefined}
-            />
-            <BottomStat
-              label="Days to Pending"
-              value={fmtNum(result.metro_velocity?.doz_pending_latest, ' days')}
-            />
-            <BottomStat
-              label="Price Cuts"
-              value={fmtNum(result.metro_velocity?.price_cut_pct_latest, '%')}
-              sub="of listings"
-            />
-            {transit && (
-              <BottomStat label="Transit Stops" value={transit.stop_count.toLocaleString()} sub="nearby" />
-            )}
-            {trends?.latest_score != null && (
-              <BottomStat
-                label="Search Interest"
-                value={`${trends.latest_score} / 100`}
-                sub={trends.is_fallback ? 'state-level' : 'local'}
-              />
-            )}
+            {result ? (<>
+            <BottomStat label="Market Status" value={marketStatus ?? '—'} sub={marketStatus === 'Active' ? '● Live' : marketStatus === 'Moderate' ? '● Moderate' : null} accent={marketStatus === 'Active' ? 'green' : null} />
+            <BottomStat label="Median Rent" value={fmtMoney(result.zillow?.zori_latest)} sub={zoriGrowth ? `▲ ${zoriGrowth} YoY` : null} accent={result.zillow?.zori_growth_12m != null && result.zillow.zori_growth_12m > 0 ? 'green' : null} />
+            <BottomStat label="Home Value" value={fmtMoney(result.zillow?.zhvi_latest)} sub={fmtGrowth(result.zillow?.zhvi_growth_12m) ?? undefined} />
+            <BottomStat label="Active Listings" value={fmtNum(result.metro_velocity?.inventory_latest)} sub={result.metro_velocity?.region_name ?? undefined} />
+            <BottomStat label="Days to Pending" value={fmtNum(result.metro_velocity?.doz_pending_latest, ' days')} />
+            <BottomStat label="Price Cuts" value={fmtNum(result.metro_velocity?.price_cut_pct_latest, '%')} sub="of listings" />
+            {transit && <BottomStat label="Transit Stops" value={transit.stop_count.toLocaleString()} sub="nearby" />}
+            {trends?.latest_score != null && <BottomStat label="Search Interest" value={`${trends.latest_score} / 100`} sub={trends.is_fallback ? 'state-level' : 'local'} />}
+            </>) : aggregateData ? (<>
+            <BottomStat label="ZIP Codes" value={aggregateData.zip_count.toString()} sub={aggregateData.label} />
+            <BottomStat label="Avg Rent (ZORI)" value={fmtMoney(aggregateData.zillow.avg_zori)} sub={aggregateData.zillow.zori_growth_12m != null ? `▲ ${fmtGrowth(aggregateData.zillow.zori_growth_12m)} YoY` : null} accent="green" />
+            <BottomStat label="Avg Home Value" value={fmtMoney(aggregateData.zillow.avg_zhvi)} sub={fmtGrowth(aggregateData.zillow.zhvi_growth_12m) ?? undefined} />
+            <BottomStat label="Population" value={fmtNum(aggregateData.total_population)} />
+            <BottomStat label="Vacancy Rate" value={fmtNum(aggregateData.housing.vacancy_rate, '%')} />
+            <BottomStat label="Active Listings" value={fmtNum(aggregateData.metro_velocity?.inventory_latest)} sub={aggregateData.metro_velocity?.region_name ?? undefined} />
+            <BottomStat label="Days to Pending" value={fmtNum(aggregateData.metro_velocity?.doz_pending_latest, ' days')} />
+            </>) : null}
             <div className="ml-auto pl-4 flex-shrink-0">
-              <button
-                onClick={() => setPanelOpen(!panelOpen)}
-                className="text-xs text-[#D76B3D] border border-[#D76B3D]/30 bg-[#D76B3D]/10 hover:bg-[#D76B3D]/20 px-3 py-1.5 rounded-md transition-colors whitespace-nowrap"
-              >
+              <button onClick={() => setPanelOpen(!panelOpen)} className="text-xs text-[#D76B3D] border border-[#D76B3D]/30 bg-[#D76B3D]/10 hover:bg-[#D76B3D]/20 px-3 py-1.5 rounded-md transition-colors whitespace-nowrap">
                 {panelOpen ? 'Hide Panel' : 'Show Data'}
               </button>
             </div>
@@ -332,9 +421,110 @@ export default function Home() {
       {/* ── Right Data Panel ── */}
       <aside
         className={`flex-shrink-0 bg-[#0a0a0a] border-l border-white/8 overflow-y-auto transition-all duration-300 z-20 ${
-          panelOpen && result ? 'w-[300px]' : 'w-0 overflow-hidden'
+          panelOpen && (result || aggregateData) ? 'w-[300px]' : 'w-0 overflow-hidden'
         }`}
       >
+        {aggregateData && panelOpen && !result && (
+          <div className="p-4 min-w-[300px]">
+            <div className="flex items-start justify-between mb-5">
+              <div>
+                <h2 className="text-white font-bold text-base leading-tight">{aggregateData.label}</h2>
+                <p className="text-zinc-500 text-xs mt-0.5">{aggregateData.zip_count} ZIP codes · aggregated</p>
+              </div>
+              <button onClick={() => setPanelOpen(false)} className="text-zinc-600 hover:text-white text-xl leading-none mt-0.5">×</button>
+            </div>
+
+            <PanelSection title="Market Pricing (Zillow)">
+              <MetricRow label="Avg Median Rent (ZORI)" value={fmtMoney(aggregateData.zillow.avg_zori)} sub={aggregateData.zillow.zori_growth_12m != null ? `${fmtGrowth(aggregateData.zillow.zori_growth_12m)} YoY avg` : undefined} />
+              <MetricRow label="Avg Home Value (ZHVI)" value={fmtMoney(aggregateData.zillow.avg_zhvi)} sub={aggregateData.zillow.zhvi_growth_12m != null ? `${fmtGrowth(aggregateData.zillow.zhvi_growth_12m)} YoY avg` : undefined} />
+            </PanelSection>
+
+            <PanelSection title="Housing & Demographics">
+              <MetricRow label="Total Population" value={fmtNum(aggregateData.total_population)} />
+              <MetricRow label="Total Housing Units" value={fmtNum(aggregateData.housing.total_units)} />
+              <MetricRow label="Vacancy Rate" value={fmtNum(aggregateData.housing.vacancy_rate, '%')} />
+              <MetricRow label="Median Household Income" value={fmtMoney(aggregateData.housing.median_income)} />
+              <MetricRow label="Median Gross Rent" value={fmtMoney(aggregateData.housing.median_rent)} />
+            </PanelSection>
+
+            {aggregateData.permits.total_units != null && aggregateData.permits.total_units > 0 && (
+              <PanelSection title="Building Permits (2021–2023)">
+                <MetricRow label="Total Units Permitted" value={fmtNum(aggregateData.permits.total_units)} />
+                <MetricRow label="Total Construction Value" value={fmtMoney(aggregateData.permits.total_value)} />
+              </PanelSection>
+            )}
+
+            {aggregateData.metro_velocity && (
+              <PanelSection title="Market Velocity">
+                <MetricRow label="Days to Pending" value={fmtNum(aggregateData.metro_velocity.doz_pending_latest, ' days')} />
+                <MetricRow label="Price Cuts" value={fmtNum(aggregateData.metro_velocity.price_cut_pct_latest, '%')} sub="of listings" />
+                <MetricRow label="Active Inventory" value={fmtNum(aggregateData.metro_velocity.inventory_latest)} />
+              </PanelSection>
+            )}
+
+            {aggregateData.fred.length > 0 && (
+              <PanelSection title="Economic Indicators (FRED)">
+                {Object.entries(
+                  aggregateData.fred.reduce((acc, r) => {
+                    if (!acc[r.metric_name]) acc[r.metric_name] = []
+                    acc[r.metric_name].push(r)
+                    return acc
+                  }, {} as Record<string, typeof aggregateData.fred>)
+                ).map(([metric, points]) => {
+                  const sorted = [...points].sort((a, b) => (a.time_period ?? '').localeCompare(b.time_period ?? ''))
+                  const latest = sorted.at(-1)
+                  const max = Math.max(...sorted.map((x) => x.metric_value))
+                  const min = Math.min(...sorted.map((x) => x.metric_value))
+                  const isRate = metric.includes('Rate')
+                  const isMoney = metric.includes('GDP')
+                  const latestDisplay = isMoney ? fmtMoney(latest?.metric_value) : isRate ? fmtNum(latest?.metric_value, '%') : fmtNum(latest?.metric_value)
+                  return (
+                    <div key={metric} className="mb-3">
+                      <div className="flex justify-between mb-1">
+                        <p className="text-zinc-400 text-[11px]">{metric.replace(/_/g, ' ')}</p>
+                        <p className="text-white text-[11px] font-medium">{latestDisplay}</p>
+                      </div>
+                      <div className="flex items-end gap-px h-7">
+                        {sorted.map((p, i) => {
+                          const height = max === min ? 50 : ((p.metric_value - min) / (max - min)) * 100
+                          return <div key={i} className="flex-1 bg-[#D76B3D]/40 rounded-sm" style={{ height: `${Math.max(height, 6)}%` }} />
+                        })}
+                      </div>
+                    </div>
+                  )
+                })}
+              </PanelSection>
+            )}
+          </div>
+        )}
+
+        {/* Aggregate panel memo + normalizer */}
+        {aggregateData && panelOpen && !result && (
+          <div className="px-4 pb-4 min-w-[300px]">
+            <PanelSection title="Executive Memo">
+              <ExecutiveMemo
+                marketLabel={aggregateData.label}
+                data={{
+                  avg_zori: aggregateData.zillow.avg_zori,
+                  avg_zhvi: aggregateData.zillow.avg_zhvi,
+                  zori_growth: aggregateData.zillow.zori_growth_12m,
+                  zhvi_growth: aggregateData.zillow.zhvi_growth_12m,
+                  vacancy_rate: aggregateData.housing.vacancy_rate,
+                  median_income: aggregateData.housing.median_income,
+                  doz_pending: aggregateData.metro_velocity?.doz_pending_latest,
+                  price_cut_pct: aggregateData.metro_velocity?.price_cut_pct_latest,
+                  inventory: aggregateData.metro_velocity?.inventory_latest,
+                  permit_units: aggregateData.permits.total_units,
+                  population: aggregateData.total_population,
+                }}
+              />
+            </PanelSection>
+            <PanelSection title="Agentic Normalizer">
+              <AgenticNormalizer onIngested={handleNormalizerIngested} />
+            </PanelSection>
+          </div>
+        )}
+
         {result && panelOpen && (
           <div className="p-4 min-w-[300px]">
             {/* Header */}
@@ -435,6 +625,33 @@ export default function Home() {
                 <MetricRow label="Nearby Stops" value={transit.stop_count.toLocaleString()} sub="bus stops within radius" />
               </PanelSection>
             )}
+
+            {/* Executive Memo */}
+            <PanelSection title="Executive Memo">
+              <ExecutiveMemo
+                marketLabel={result.zillow?.city ?? result.zip}
+                data={{
+                  avg_zori: result.zillow?.zori_latest,
+                  avg_zhvi: result.zillow?.zhvi_latest,
+                  zori_growth: result.zillow?.zori_growth_12m,
+                  zhvi_growth: result.zillow?.zhvi_growth_12m,
+                  vacancy_rate: result.data.find((r) => r.metric_name === 'Vacancy_Rate')?.metric_value,
+                  median_income: result.data.find((r) => r.metric_name === 'Median_Household_Income')?.metric_value,
+                  doz_pending: result.metro_velocity?.doz_pending_latest,
+                  price_cut_pct: result.metro_velocity?.price_cut_pct_latest,
+                  inventory: result.metro_velocity?.inventory_latest,
+                  permit_units: result.data.find((r) => r.metric_name === 'Permit_Units')?.metric_value,
+                  population: result.data.find((r) => r.metric_name === 'Total_Population')?.metric_value,
+                  transit_stops: transit?.stop_count,
+                  search_interest: trends?.latest_score,
+                }}
+              />
+            </PanelSection>
+
+            {/* Agentic Normalizer */}
+            <PanelSection title="Agentic Normalizer">
+              <AgenticNormalizer currentZip={result.zip} onIngested={handleNormalizerIngested} />
+            </PanelSection>
           </div>
         )}
       </aside>

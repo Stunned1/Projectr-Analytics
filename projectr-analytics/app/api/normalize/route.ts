@@ -5,6 +5,18 @@ import type { VisualBucket } from '@/lib/supabase'
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
 
+// Simple in-memory triage cache — keyed by CSV preview hash
+// Avoids re-calling Gemini for the same file structure
+const triageCache = new Map<string, { bucket: string; visual_bucket: VisualBucket; metric_name: string; geo_column: string | null; value_column: string | null; date_column: string | null; reasoning: string }>()
+
+function hashPreview(preview: string): string {
+  let h = 0
+  for (let i = 0; i < preview.length; i++) {
+    h = (Math.imul(31, h) + preview.charCodeAt(i)) | 0
+  }
+  return h.toString(36)
+}
+
 const TRIAGE_PROMPT = `You are a Data Triage Cop for a real estate analytics platform.
 Analyze the CSV headers and first 5 rows provided and return ONLY valid JSON (no markdown).
 
@@ -38,25 +50,20 @@ export async function POST(request: NextRequest) {
     const lines = text.split('\n').filter(Boolean)
     const preview = lines.slice(0, 6).join('\n') // headers + 5 rows
 
-    // Ask Gemini to triage the data
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-pro' })
-    const result = await model.generateContent(`${TRIAGE_PROMPT}\n\nCSV Preview:\n${preview}`)
-    const raw = result.response.text().trim()
+    // Ask Gemini to triage the data (with cache)
+    const cacheKey = hashPreview(preview)
+    let triage = triageCache.get(cacheKey)
 
-    let triage: {
-      bucket: string
-      visual_bucket: VisualBucket
-      metric_name: string
-      geo_column: string | null
-      value_column: string | null
-      date_column: string | null
-      reasoning: string
-    }
-
-    try {
-      triage = JSON.parse(raw)
-    } catch {
-      return NextResponse.json({ error: 'Gemini returned invalid JSON', raw }, { status: 500 })
+    if (!triage) {
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
+      const result = await model.generateContent(`${TRIAGE_PROMPT}\n\nCSV Preview:\n${preview}`)
+      const raw = result.response.text().trim()
+      try {
+        triage = JSON.parse(raw)
+        triageCache.set(cacheKey, triage!)
+      } catch {
+        return NextResponse.json({ error: 'Gemini returned invalid JSON', raw }, { status: 500 })
+      }
     }
 
     // Parse and ingest all rows into Supabase
@@ -74,20 +81,39 @@ export async function POST(request: NextRequest) {
         const value = valIdx >= 0 ? parseFloat(cols[valIdx]) : null
         const date = dateIdx >= 0 ? cols[dateIdx] : null
 
+        // For lat/lng data, find lat and lng columns
+        const latIdx = headers.findIndex((h) => h.toLowerCase().includes('lat'))
+        const lngIdx = headers.findIndex((h) => h.toLowerCase().includes('lon') || h.toLowerCase().includes('lng'))
+        const lat = latIdx >= 0 ? parseFloat(cols[latIdx]) : null
+        const lng = lngIdx >= 0 ? parseFloat(cols[lngIdx]) : null
+
         return {
           submarket_id: submarket,
-          geometry: null,
+          geometry: (lat && lng && !isNaN(lat) && !isNaN(lng)) ? `POINT(${lng} ${lat})` : null,
           metric_name: triage.metric_name,
           metric_value: isNaN(value as number) ? null : value,
           time_period: date ? new Date(date).toISOString().split('T')[0] : null,
           data_source: 'Client Upload',
           visual_bucket: triage.visual_bucket,
+          _lat: lat,
+          _lng: lng,
         }
       })
       .filter((r) => r.metric_value !== null || r.submarket_id !== null)
 
+    // Extract marker points for immediate map rendering
+    const markerPoints = insertRows
+      .filter((r) => r._lat && r._lng && !isNaN(r._lat) && !isNaN(r._lng))
+      .map((r) => ({ lat: r._lat!, lng: r._lng!, value: r.metric_value, label: r.metric_name }))
+
+    // Remove internal fields before inserting
+    const dbRows = insertRows.map(({ _lat, _lng, ...rest }) => rest)
+
     if (insertRows.length > 0) {
-      const { error } = await supabase.from('projectr_master_data').insert(insertRows)
+      const { error } = await supabase.from('projectr_master_data').upsert(dbRows as never[], {
+        onConflict: 'submarket_id,metric_name,time_period,data_source',
+        ignoreDuplicates: true,
+      })
       if (error) throw new Error(error.message)
     }
 
@@ -95,6 +121,7 @@ export async function POST(request: NextRequest) {
       triage,
       rows_ingested: insertRows.length,
       preview_rows: insertRows.slice(0, 5),
+      marker_points: markerPoints, // lat/lng points for immediate map rendering
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unexpected error'

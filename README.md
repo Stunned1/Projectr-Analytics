@@ -66,7 +66,13 @@ _4.8.2026_
 - Built full data pipeline with 7-day Supabase cache and cold-start fetch logic
 - API routes: `/api/market`, `/api/transit`, `/api/trends`, `/api/boundaries`, `/api/neighbors`, `/api/normalize` (Gemini triage)
 
+_4.9.2026_
+- Added `/api/city` — resolves city name to all ZIP codes with Zillow data; supports "City, ST" format with zippopotam fallback for smaller markets
+
 **Map & Visualization**
+
+_4.9.2026_
+- Removed OSM 3D Buildings layer — deleted `PolygonLayer`, `BuildingFeature`/`BuildingCollection` interfaces, `CameraSampler` component, all buildings fetch/debounce logic, and `/api/buildings` route
 
 _4.8.2026_
 - Google Maps + deck.gl map with `GoogleMapsOverlay` (interleaved vector mode)

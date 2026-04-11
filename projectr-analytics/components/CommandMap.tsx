@@ -3,7 +3,7 @@
 import { memo, useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { APIProvider, Map, useMap } from '@vis.gl/react-google-maps'
 import { GoogleMapsOverlay } from '@deck.gl/google-maps'
-import { GeoJsonLayer, ScatterplotLayer, PolygonLayer, ColumnLayer } from '@deck.gl/layers'
+import { GeoJsonLayer, ScatterplotLayer, ColumnLayer } from '@deck.gl/layers'
 import { HeatmapLayer } from '@deck.gl/aggregation-layers'
 import type { Layer, PickingInfo } from '@deck.gl/core'
 import type { GeoJSON, Feature, FeatureCollection, Geometry } from 'geojson'
@@ -62,24 +62,6 @@ interface BlockGroupCollection {
   features: BlockGroupFeature[]
 }
 
-interface BuildingFeature {
-  type: 'Feature'
-  geometry: { type: 'Polygon'; coordinates: number[][][] }
-  properties: {
-    id: number
-    building: string
-    name: string | null
-    levels: number | null
-    height: number
-  }
-}
-
-interface BuildingCollection {
-  type: 'FeatureCollection'
-  features: BuildingFeature[]
-  meta?: { count: number; bbox: string }
-}
-
 interface AmenityPoint {
   position: [number, number]
   weight: number
@@ -109,11 +91,11 @@ interface LayerState {
   transitStops: boolean
   rentChoropleth: boolean
   blockGroups: boolean
-  buildings: boolean
   parcels: boolean
   tracts: boolean
   amenityHeatmap: boolean
   floodRisk: boolean
+  clientData: boolean
 }
 
 interface MapViewState {
@@ -153,7 +135,6 @@ const DATA_LAYER_REGISTRY = [
   { label: 'Census Tracts', source: 'Census TIGER + ACS', visualized: true, layerType: 'GeoJsonLayer (rent/income choropleth)' },
   { label: 'Amenity Heatmap', source: 'OpenStreetMap', visualized: true, layerType: 'HeatmapLayer (weighted by amenity type)' },
   { label: 'Flood Risk Zones', source: 'FEMA NFHL', visualized: true, layerType: 'GeoJsonLayer (red = high risk)' },
-  { label: 'OSM Buildings', source: 'OpenStreetMap', visualized: true, layerType: 'PolygonLayer extruded (3D building footprints)' },
   { label: 'NYC Parcels (PLUTO)', source: 'NYC Open Data', visualized: true, layerType: 'ColumnLayer (3D columns — height = assessed value/sqft)' },
   { label: 'Block Groups', source: 'Census TIGER + ACS', visualized: true, layerType: 'GeoJsonLayer (population density — replaced by Tracts)' },
   { label: 'Vacancy Rate', source: 'Census ACS', visualized: false, layerType: null, note: 'Now included in Tracts layer' },
@@ -237,7 +218,7 @@ function MapFitter({ boundary, zip }: { boundary: GeoJSON | null; zip: string | 
 // ── DeckGL overlay ────────────────────────────────────────────────────────────
 
 function DeckGlOverlay({ layers }: { layers: Layer[] }) {
-  const deck = useMemo(() => new GoogleMapsOverlay({ interleaved: true }), [])
+  const deck = useMemo(() => new GoogleMapsOverlay({ interleaved: false }), [])
   const map = useMap()
   const attachedMapRef = useRef<google.maps.Map | null>(null)
   const isAttachedRef = useRef(false)
@@ -286,49 +267,24 @@ function TiltController({ tilt, heading }: { tilt: number; heading: number }) {
   return null
 }
 
-// ── Camera sampler (listener-free) ────────────────────────────────────────────
-// Polls map center/zoom periodically to avoid brittle addListener wiring.
-function CameraSampler({ enabled, onSample }: { enabled: boolean; onSample: (view: MapViewState) => void }) {
-  const map = useMap()
-  const lastKeyRef = useRef<string | null>(null)
-
-  useEffect(() => {
-    if (!enabled || !map) return
-
-    const sample = () => {
-      const center = map.getCenter()
-      const zoom = map.getZoom()
-      if (!center || typeof zoom !== 'number') return
-      const view = { lat: center.lat(), lng: center.lng(), zoom }
-      const key = `${view.lat.toFixed(3)}|${view.lng.toFixed(3)}|${Math.round(view.zoom * 10) / 10}`
-      if (key === lastKeyRef.current) return
-      lastKeyRef.current = key
-      onSample(view)
-    }
-
-    sample()
-    const id = setInterval(sample, 400)
-    return () => clearInterval(id)
-  }, [enabled, map, onSample])
-
-  return null
-}
-
 // ── Main component ────────────────────────────────────────────────────────────
 
 interface CommandMapProps {
   zip: string | null
   marketData: MarketData | null
   transitData: TransitData | null
+  cityZips?: Array<{ zip: string; lat: number | null; lng: number | null; zori_latest: number | null; zhvi_latest: number | null; city: string; state: string | null }> | null
+  boroughBoundary?: object | null
+  uploadedMarkers?: Array<{ lat: number; lng: number; value: number | null; label: string }> | null
 }
 
-function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
+function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, uploadedMarkers }: CommandMapProps) {
   const perfDebug = process.env.NEXT_PUBLIC_PERF_DEBUG === '1'
 
   const [primaryBoundary, setPrimaryBoundary] = useState<GeoJSON | null>(null)
   const [neighborBoundaries, setNeighborBoundaries] = useState<ZipBoundary[]>([])
+  const [cityBoundaries, setCityBoundaries] = useState<ZipBoundary[]>([])
   const [blockGroupData, setBlockGroupData] = useState<BlockGroupCollection | null>(null)
-  const [buildingData, setBuildingData] = useState<BuildingCollection | null>(null)
   const [parcelData, setParcelData] = useState<{ parcels: ParcelPayload[]; stats: { p25_per_sqft: number; p75_per_sqft: number } } | null>(null)
   const [tractData, setTractData] = useState<TractCollection | null>(null)
   const [amenityPoints, setAmenityPoints] = useState<AmenityPoint[]>([])
@@ -338,20 +294,16 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
     transitStops: true,
     rentChoropleth: true,
     blockGroups: false,
-    buildings: false,
     parcels: false,
     tracts: false,
     amenityHeatmap: false,
     floodRisk: false,
+    clientData: true,
   })
   const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null)
   const [activeMetric, setActiveMetric] = useState<'zori' | 'zhvi'>('zori')
   const [tilt, setTilt] = useState(0)
   const [heading, setHeading] = useState(0)
-  const latestViewRef = useRef<MapViewState | null>(null)
-  const buildingsFetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const lastBuildingsFetchKeyRef = useRef<string | null>(null)
-  const lastSampleHandledAtRef = useRef(0)
   const mapId = process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID ?? process.env.NEXT_PUBLIC_GOOGLE_MAPS_ID ?? undefined
 
   const setTooltipStable = useCallback((next: { x: number; y: number; text: string } | null) => {
@@ -371,9 +323,75 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
     console.log('[perf] CommandMap render #', commandMapRenderCounter)
   })
 
+  // Fetch city ZIP boundaries when city search is performed
+  useEffect(() => {
+    if (!cityZips?.length) { setCityBoundaries([]); return }
+    setCityBoundaries([])
+    // Also clear single-ZIP layers when switching to city mode
+    setPrimaryBoundary(null)
+    setNeighborBoundaries([])
+
+    // Fetch borough parcels if this is an NYC borough search
+    // Detect by checking if all ZIPs are in the same NYC borough range
+    const firstZip = cityZips[0]?.zip ?? ''
+    const nycBoroughMap: Record<string, string> = {
+      '10': 'manhattan', '11': 'bronx',
+    }
+    const manhattanZips = cityZips.every((z) => z.zip >= '10001' && z.zip <= '10282')
+    const bronxZips = cityZips.every((z) => z.zip >= '10451' && z.zip <= '10475')
+    const brooklynZips = cityZips.every((z) => z.zip >= '11200' && z.zip <= '11256')
+    const queensZips = cityZips.every((z) => z.zip >= '11100' && z.zip <= '11436')
+    const siZips = cityZips.every((z) => z.zip >= '10300' && z.zip <= '10315')
+
+    const detectedBorough = manhattanZips ? 'manhattan'
+      : bronxZips ? 'bronx'
+      : brooklynZips ? 'brooklyn'
+      : queensZips ? 'queens'
+      : siZips ? 'staten island'
+      : null
+
+    void nycBoroughMap // suppress unused warning
+    void firstZip
+
+    if (detectedBorough) {
+      dedupedFetchJson<ParcelResponse>(`/api/parcels?borough=${encodeURIComponent(detectedBorough)}`)
+        .then((d) => {
+          if (Array.isArray(d.parcels) && d.stats) {
+            setParcelData({ parcels: d.parcels, stats: d.stats })
+          }
+        })
+        .catch(() => {})
+    }
+
+    // Pan map to first ZIP centroid
+    const first = cityZips.find((z) => z.lat && z.lng)
+    if (first?.lat && first?.lng) {
+      // Will be handled by MapFitter via primaryBoundary
+    }
+
+    // Fetch boundaries for all city ZIPs in parallel (limit 30)
+    const sample = cityZips.filter((z) => z.lat && z.lng).slice(0, 30)
+    Promise.allSettled(
+      sample.map((z) =>
+        fetch('/api/boundaries?zip=' + z.zip)
+          .then((r) => r.json())
+          .then((geojson) => ({ zip: z.zip, geojson, zori: z.zori_latest, zhvi: z.zhvi_latest }))
+      )
+    ).then((results) => {
+      const loaded: ZipBoundary[] = results
+        .filter((r): r is PromiseFulfilledResult<ZipBoundary> => r.status === 'fulfilled' && r.value.geojson?.features?.length > 0)
+        .map((r) => r.value)
+      setCityBoundaries(loaded)
+    })
+  }, [cityZips])
+
   // Fetch primary boundary + transit + neighbors when zip changes
   useEffect(() => {
     if (!zip) return
+    // Clear city mode layers when switching to ZIP mode
+    setCityBoundaries([])
+    // Skip neighbor loading when city mode is active — city ZIPs provide the context
+    const inCityMode = (cityZips?.length ?? 0) > 0
 
     // Primary boundary
     dedupedFetchJson<GeoJSON>('/api/boundaries?zip=' + zip)
@@ -381,6 +399,7 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
       .catch(() => {})
     dedupedFetchJson<{ zips?: NeighborZip[] }>('/api/neighbors?zip=' + zip)
       .then(async (d) => {
+        if (inCityMode) return // city ZIPs already provide context
         const neighbors: NeighborZip[] = d.zips ?? []
         if (!neighbors.length) return
 
@@ -427,7 +446,7 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
         .catch(() => {})
     }
 
-    // NYC parcels (PLUTO) — only for NYC ZIPs
+    // NYC parcels (PLUTO) — ZIP mode or borough mode
     if (marketData?.zip) {
       dedupedFetchJson<ParcelResponse>(`/api/parcels?zip=${marketData.zip}`)
         .then((d) => {
@@ -456,65 +475,6 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
       .catch(() => {})
   }, [marketData])
 
-  const fetchBuildingsForView = useCallback((view: MapViewState) => {
-    if (!layers.buildings) return
-    if (view.zoom < 14) {
-      setBuildingData(null)
-      return
-    }
-    const roundedLat = Number(view.lat.toFixed(3))
-    const roundedLng = Number(view.lng.toFixed(3))
-    const zoomBucket = Math.floor(view.zoom)
-    const radius = view.zoom >= 16 ? 0.01 : 0.02
-    const fetchKey = `${roundedLat}|${roundedLng}|${zoomBucket}|${radius}`
-    if (fetchKey === lastBuildingsFetchKeyRef.current) return
-    lastBuildingsFetchKeyRef.current = fetchKey
-
-    const buildingsUrl = `/api/buildings?lat=${roundedLat}&lng=${roundedLng}&radius=${radius}&zoom=${zoomBucket}`
-    const tryBuildings = (attempt = 0) => {
-      dedupedFetchJson<BuildingCollection>(buildingsUrl, { ttlMs: 60_000 })
-        .then((d) => {
-          if (d.features) setBuildingData(d)
-          else if (attempt < 1) setTimeout(() => tryBuildings(1), 3000)
-        })
-        .catch(() => { if (attempt < 1) setTimeout(() => tryBuildings(1), 3000) })
-    }
-    tryBuildings()
-  }, [layers.buildings])
-
-  const handleCameraSample = useCallback((view: MapViewState) => {
-    // Hard throttle camera-driven logic to max 10Hz.
-    const now = Date.now()
-    if (now - lastSampleHandledAtRef.current < 100) return
-    lastSampleHandledAtRef.current = now
-
-    latestViewRef.current = view
-    if (!layers.buildings) return
-    if (buildingsFetchTimerRef.current) clearTimeout(buildingsFetchTimerRef.current)
-    buildingsFetchTimerRef.current = setTimeout(() => {
-      const latest = latestViewRef.current
-      if (!latest) return
-      fetchBuildingsForView(latest)
-    }, 220)
-  }, [layers.buildings, fetchBuildingsForView])
-
-  // Seed buildings using zip-center view.
-  useEffect(() => {
-    if (!layers.buildings || !marketData?.geo) return
-    handleCameraSample({ lat: marketData.geo.lat, lng: marketData.geo.lng, zoom: 15 })
-  }, [layers.buildings, marketData, handleCameraSample])
-
-  useEffect(() => {
-    if (layers.buildings) return
-    if (buildingsFetchTimerRef.current) clearTimeout(buildingsFetchTimerRef.current)
-  }, [layers.buildings])
-
-  useEffect(() => {
-    return () => {
-      if (buildingsFetchTimerRef.current) clearTimeout(buildingsFetchTimerRef.current)
-    }
-  }, [])
-
   const transitStops = useMemo(() => {
     if (!zip || !transitData || transitData.zip !== zip) return []
     if (!transitData.geojson?.features) return []
@@ -531,8 +491,9 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
       : marketData?.zillow?.zori_latest ?? null
     const vals: (number | null)[] = [primaryValue]
     neighborBoundaries.forEach((n) => vals.push(activeMetric === 'zhvi' ? n.zhvi : n.zori))
+    cityBoundaries.forEach((n) => vals.push(activeMetric === 'zhvi' ? n.zhvi : n.zori))
     return vals
-  }, [activeMetric, marketData, neighborBoundaries])
+  }, [activeMetric, marketData, neighborBoundaries, cityBoundaries])
 
   const colorScale = useMemo(() => buildColorScale(allMetricValues), [allMetricValues])
 
@@ -542,6 +503,49 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
 
   const deckLayers = useMemo(() => {
     const result: Layer[] = []
+
+    // City ZIP boundaries (rendered first when in city mode)
+    if (layers.zipBoundary && cityBoundaries.length > 0) {
+      cityBoundaries.forEach((n) => {
+        const metricValue = activeMetric === 'zhvi' ? n.zhvi : n.zori
+        result.push(
+          new GeoJsonLayer({
+            id: 'city-zip-' + n.zip,
+            data: n.geojson,
+            stroked: true,
+            filled: true,
+            getFillColor: layers.rentChoropleth ? colorScale(metricValue) : [60, 60, 80, 60],
+            getLineColor: [255, 255, 255, 160],
+            lineWidthMinPixels: 1,
+            pickable: true,
+            onHover: (info: PickingInfo) => {
+              if (info.object) {
+                setTooltipStable({
+                  x: info.x, y: info.y,
+                  text: 'ZIP ' + n.zip + (metricValue ? ` · $${metricValue.toFixed(0)} ${activeMetric.toUpperCase()}` : ''),
+                })
+              } else setTooltipStable(null)
+            },
+          })
+        )
+      })
+    }
+
+    // Borough boundary outline (rendered on top of city ZIPs)
+    if (boroughBoundary && cityBoundaries.length > 0) {
+      result.push(
+        new GeoJsonLayer({
+          id: 'borough-boundary',
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          data: { type: 'FeatureCollection' as const, features: [boroughBoundary] } as any,
+          stroked: true,
+          filled: false,
+          getLineColor: [215, 107, 61, 255], // #D76B3D orange
+          lineWidthMinPixels: 3,
+          pickable: false,
+        })
+      )
+    }
 
     // Neighbor ZIP boundaries (rendered first, behind primary)
     if (layers.zipBoundary && neighborBoundaries.length > 0) {
@@ -649,39 +653,6 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
       )
     }
 
-    // OSM Buildings — 3D extruded footprints
-    if (layers.buildings && buildingData) {
-      const features = buildingData.features ?? []
-
-      result.push(
-        new PolygonLayer({
-          id: 'osm-buildings',
-          data: features,
-          extruded: true,
-          wireframe: false,
-          getPolygon: (f) => f.geometry.coordinates[0] as [number, number][],
-          getElevation: (f) => f.properties.height ?? 4,
-          getFillColor: (f) => {
-            const type = f.properties.building
-            if (type === 'commercial' || type === 'retail') return [255, 180, 50, 200]
-            if (type === 'industrial') return [150, 150, 180, 200]
-            if (type === 'apartments' || type === 'residential') return [100, 180, 255, 200]
-            return [180, 160, 120, 200] // default warm
-          },
-          getLineColor: [255, 255, 255, 30],
-          lineWidthMinPixels: 1,
-          pickable: true,
-          onHover: (info: PickingInfo) => {
-            const f = info.object as { properties: { name: string | null; building: string; height: number } } | undefined
-            if (f) {
-              const label = f.properties.name ?? f.properties.building
-              setTooltipStable({ x: info.x, y: info.y, text: `🏢 ${label} · ${f.properties.height}m` })
-            } else setTooltipStable(null)
-          },
-        })
-      )
-    }
-
     // NYC PLUTO parcels — ColumnLayer (3D columns sized by assessed value per sqft)
     if (layers.parcels && parcelData?.parcels?.length) {
       const { p25_per_sqft, p75_per_sqft } = parcelData.stats
@@ -691,24 +662,29 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
         new ColumnLayer({
           id: 'nyc-parcels',
           data: parcelData.parcels,
-          diskResolution: 6, // hexagonal columns
-          radius: 12,
+          diskResolution: 6,
+          radius: 7,
           extruded: true,
           getPosition: (d) => [d.lng, d.lat],
           getElevation: (d) => {
-            // Height = assessed value per sqft, scaled to visible range (5m - 200m)
-            const t = Math.min(Math.max((d.assessed_per_sqft - p25_per_sqft) / range, 0), 1)
-            return 5 + t * 195
+            const v = Math.max(d.assessed_value, 1)
+            const logVal = Math.log10(v)
+            const t = Math.min(Math.max((logVal - 3) / 7, 0), 1)
+            return 5 + t * 400
           },
           getFillColor: (d) => {
-            // Color by land use
             const lu = d.land_use ?? '0'
-            if (lu === '1' || lu === '2') return [100, 180, 255, 220]  // residential — blue
-            if (lu === '3') return [60, 140, 255, 220]                  // multi-family elevator — deeper blue
-            if (lu === '4') return [255, 200, 80, 220]                  // mixed use — gold
-            if (lu === '5') return [255, 120, 50, 220]                  // commercial — orange
-            if (lu === '6') return [160, 160, 180, 220]                 // industrial — grey
-            return [180, 160, 120, 220]                                 // other — tan
+            if (lu === '1') return [100, 200, 120, 230]
+            if (lu === '2') return [60, 160, 100, 230]
+            if (lu === '3') return [40, 120, 220, 230]
+            if (lu === '4') return [180, 100, 220, 230]
+            if (lu === '5') return [255, 160, 30, 230]
+            if (lu === '6') return [140, 140, 160, 230]
+            if (lu === '8') return [220, 80, 80, 230]
+            if (lu === '9') return [80, 200, 160, 230]
+            if (lu === '10') return [100, 100, 120, 180]
+            if (lu === '11') return [200, 180, 60, 180]
+            return [160, 140, 120, 180]
           },
           pickable: true,
           onHover: (info: PickingInfo) => {
@@ -829,8 +805,40 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
       )
     }
 
+    // Uploaded client data markers (from Agentic Normalizer) — 3D columns
+    if (layers.clientData && uploadedMarkers?.length) {
+      const values = uploadedMarkers.map((d) => d.value ?? 0).filter((v) => v > 0)
+      const maxVal = values.length ? Math.max(...values) : 1
+      const minVal = values.length ? Math.min(...values) : 0
+
+      result.push(
+        new ColumnLayer({
+          id: 'uploaded-markers',
+          data: uploadedMarkers,
+          diskResolution: 3, // triangle = cone-like appearance
+          radius: 25,        // much smaller footprint
+          extruded: true,
+          getPosition: (d: { lat: number; lng: number }) => [d.lng, d.lat],
+          getElevation: (d: { value: number | null }) => {
+            const v = d.value ?? 0
+            const t = maxVal === minVal ? 0.5 : Math.min(Math.max((v - minVal) / (maxVal - minVal), 0), 1)
+            return 30 + t * 120 // 30m–150m — more subtle
+          },
+          getFillColor: [215, 107, 61, 255],
+          getLineColor: [255, 255, 255, 200],
+          lineWidthMinPixels: 1,
+          pickable: true,
+          onHover: (info: PickingInfo) => {
+            const d = info.object as { label: string; value: number | null } | undefined
+            if (d) setTooltipStable({ x: info.x, y: info.y, text: `📍 ${d.label}${d.value != null ? ': $' + d.value.toLocaleString() : ''}` })
+            else setTooltipStable(null)
+          },
+        })
+      )
+    }
+
     return result
-  }, [primaryBoundary, neighborBoundaries, transitStops, blockGroupData, buildingData, parcelData, tractData, amenityPoints, floodData, layers, colorScale, primaryMetricValue, activeMetric, zip, setTooltipStable])
+  }, [primaryBoundary, neighborBoundaries, cityBoundaries, boroughBoundary, transitStops, blockGroupData, parcelData, tractData, amenityPoints, floodData, layers, colorScale, primaryMetricValue, activeMetric, zip, setTooltipStable, uploadedMarkers])
 
   const handleToggle = useCallback((key: keyof LayerState) => {
     setLayers((prev) => ({ ...prev, [key]: !prev[key] }))
@@ -848,9 +856,8 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
           gestureHandling="greedy"
           style={{ width: '100%', height: '100%' }}
         >
-          <MapFitter boundary={primaryBoundary} zip={zip} />
+          <MapFitter boundary={primaryBoundary ?? (cityBoundaries[0]?.geojson ?? null)} zip={zip ?? cityZips?.[0]?.zip ?? null} />
           <TiltController tilt={tilt} heading={heading} />
-          <CameraSampler enabled={layers.buildings} onSample={handleCameraSample} />
           <DeckGlOverlay layers={deckLayers} />
         </Map>
       </APIProvider>
@@ -873,14 +880,18 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
           { key: 'transitStops' as const, label: 'Transit Stops' },
           { key: 'rentChoropleth' as const, label: 'Rent Choropleth' },
           { key: 'blockGroups' as const, label: 'Block Groups' },
-          { key: 'buildings' as const, label: '3D Buildings' },
-          { key: 'parcels' as const, label: '🏙 NYC Parcels' },
+          { key: 'parcels' as const, label: '🏙 NYC Parcels', zipOnly: true },
           { key: 'tracts' as const, label: 'Census Tracts' },
           { key: 'amenityHeatmap' as const, label: '🔥 Amenity Heatmap' },
           { key: 'floodRisk' as const, label: '⚠️ Flood Risk' },
-        ]).map(({ key, label }) => (
+          { key: 'clientData' as const, label: '📍 Client Data', showWhen: !!uploadedMarkers?.length },
+        ]).filter(({ zipOnly, showWhen }) => {
+          if (showWhen === false) return false
+          if (zipOnly) return (!cityZips?.length) || parcelData !== null
+          return true
+        }).map(({ key, label }) => (
           <label key={key} className="flex items-center gap-2 cursor-pointer mb-1">
-            <input type="checkbox" checked={layers[key]} onChange={() => handleToggle(key)} className="accent-blue-500" />
+            <input type="checkbox" checked={layers[key]} onChange={() => handleToggle(key)} className="accent-orange-500" />
             <span className="text-zinc-300 text-xs">{label}</span>
           </label>
         ))}
