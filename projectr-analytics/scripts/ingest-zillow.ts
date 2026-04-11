@@ -97,7 +97,7 @@ function monthDateFromZillowHeader(header: string): string | null {
 }
 
 async function ingestZori() {
-  console.log('\n📊 ZORI (Rent Index) — zip level + monthly series')
+  console.log('\n📊 ZORI (Rent Index) - zip level + monthly series')
   const { headers, rows } = parseCSV(path.join(CSV_DIR, 'Zip_zori_uc_sfrcondomfr_sm_month.csv'))
   const dateCols = getDateCols(headers)
   const zipIdx = headers.indexOf('RegionName')
@@ -187,7 +187,7 @@ async function ingestZori() {
 // ── ZIP-LEVEL: ZHVI ───────────────────────────────────────────────────────────
 
 async function ingestZhvi() {
-  console.log('\n🏠 ZHVI (Home Value Index) — zip level')
+  console.log('\n🏠 ZHVI (Home Value Index) - zip level')
   const { headers, rows } = parseCSV(path.join(CSV_DIR, 'Zip_zhvi_uc_sfrcondo_tier_0.33_0.67_sm_sa_month.csv'))
   const dateCols = getDateCols(headers)
   const zipIdx = headers.indexOf('RegionName')
@@ -219,7 +219,7 @@ async function ingestZhvi() {
 // ── ZIP-LEVEL: ZHVF (forecast growth) ────────────────────────────────────────
 
 async function ingestZhvf() {
-  console.log('\n📈 ZHVF (Home Value Forecast) — zip level')
+  console.log('\n📈 ZHVF (Home Value Forecast) - zip level')
   const { headers, rows } = parseCSV(path.join(CSV_DIR, 'Zip_zhvf_growth_uc_sfrcondo_tier_0.33_0.67_sm_sa_month.csv'))
   const dateCols = getDateCols(headers)
   const zipIdx = headers.indexOf('RegionName')
@@ -230,7 +230,7 @@ async function ingestZhvf() {
     const zip = row[zipIdx]
     if (!zip || !/^\d{5}$/.test(zip)) continue
 
-    // ZHVF is already a growth % — take the latest 1yr forecast column
+    // ZHVF is already a growth % - take the latest 1yr forecast column
     const latest = latestValue(row, dateCols)
 
     snapshots.push({
@@ -253,7 +253,7 @@ async function ingestZhvf() {
 // ── METRO-LEVEL: Days on Market ───────────────────────────────────────────────
 
 async function ingestDoz() {
-  console.log('\n⏱  Days on Market — metro level')
+  console.log('\n⏱  Days on Market - metro level')
   const { headers, rows } = parseCSV(path.join(CSV_DIR, 'Metro_mean_doz_pending_uc_sfrcondo_sm_month.csv'))
   const dateCols = getDateCols(headers)
   const regionIdIdx = headers.indexOf('RegionID')
@@ -283,7 +283,7 @@ async function ingestDoz() {
 // ── METRO-LEVEL: Price Cuts ───────────────────────────────────────────────────
 
 async function ingestPriceCuts() {
-  console.log('\n✂️  Price Cuts — metro level')
+  console.log('\n✂️  Price Cuts - metro level')
   const { headers, rows } = parseCSV(path.join(CSV_DIR, 'Metro_perc_listings_price_cut_uc_sfrcondo_sm_month.csv'))
   const dateCols = getDateCols(headers)
   const regionIdIdx = headers.indexOf('RegionID')
@@ -314,7 +314,7 @@ async function ingestPriceCuts() {
 // ── METRO-LEVEL: Inventory ────────────────────────────────────────────────────
 
 async function ingestInventory() {
-  console.log('\n📦 Inventory — metro level')
+  console.log('\n📦 Inventory - metro level')
   const { headers, rows } = parseCSV(path.join(CSV_DIR, 'Metro_invt_fs_uc_sfrcondo_sm_month.csv'))
   const dateCols = getDateCols(headers)
   const regionIdIdx = headers.indexOf('RegionID')

@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import { GEMINI_NO_EM_DASH_RULE } from '@/lib/gemini-text-rules'
 import { stripGeminiStringWrappers } from '@/lib/sanitize-gemini-string'
 
 export const dynamic = 'force-dynamic'
@@ -11,7 +12,7 @@ export async function POST(request: NextRequest) {
     const cycleCtx =
       cycle && typeof cycle === 'object' && typeof cycle.cycleStage === 'string' && typeof cycle.cyclePosition === 'string'
         ? `
-Analytical cycle (authoritative phase — align narrative):
+Analytical cycle (authoritative phase - align narrative):
 - ${cycle.cycleStage} ${cycle.cyclePosition} (confidence ${typeof cycle.confidence === 'number' ? cycle.confidence : 'N/A'}/100)
 - ${typeof cycle.confidenceLine === 'string' ? cycle.confidenceLine : ''}
 - Data quality: ${typeof cycle.dataQuality === 'string' ? cycle.dataQuality : 'N/A'}
@@ -36,11 +37,13 @@ ${cycleCtx}
 
 Write a concise 3-paragraph executive investment memo for the following market.
 
-Paragraph 1: Market Overview — summarize the current state using the data.${cycleCtx ? ' Lead with the classified cycle phase when the analytical cycle block is present.' : ''}
-Paragraph 2: Opportunity & Risk — identify the key investment opportunity and primary risk signal.
-Paragraph 3: Recommendation — provide a clear, actionable recommendation for a developer or investor.
+Paragraph 1: Market Overview - summarize the current state using the data.${cycleCtx ? ' Lead with the classified cycle phase when the analytical cycle block is present.' : ''}
+Paragraph 2: Opportunity & Risk - identify the key investment opportunity and primary risk signal.
+Paragraph 3: Recommendation - provide a clear, actionable recommendation for a developer or investor.
 
-Use specific numbers. Be direct and professional. No bullet points, no headers — three clean paragraphs.
+Use specific numbers. Be direct and professional. No bullet points, no headers - three clean paragraphs.
+
+${GEMINI_NO_EM_DASH_RULE}
 
 ${context}`
 

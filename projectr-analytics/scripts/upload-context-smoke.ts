@@ -42,7 +42,7 @@ async function main() {
   rows.forEach((r) => {
     if (r.status === 'ok') {
       console.log(
-        `[ok] ${r.rowId} zip=${r.zip} momentum=${r.momentumScore} ${r.cyclePosition} zori=${r.market?.zori_latest ?? '—'}`
+        `[ok] ${r.rowId} zip=${r.zip} momentum=${r.momentumScore} ${r.cyclePosition} zori=${r.market?.zori_latest ?? '-'}`
       )
     } else {
       console.log(`[failed] ${r.rowId} -> ${r.error ?? 'unknown'}`)

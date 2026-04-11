@@ -1,14 +1,14 @@
 /**
  * Overture Maps POI API
  * Returns categorized points of interest for a lat/lng radius.
- * Uses the open Overture Maps API (DEMO key — no signup required).
+ * Uses the open Overture Maps API (DEMO key - no signup required).
  *
  * Two modes:
  * - mode=anchors  → named brand anchors (Whole Foods, Equinox, SoulCycle, etc.)
  * - mode=signals  → neighborhood signals (coffee, grocery, pharmacy, fitness, school)
  * - mode=all      → both (default)
  *
- * Used for ScatterplotLayer visualization — color by category group.
+ * Used for ScatterplotLayer visualization - color by category group.
  */
 import { type NextRequest, NextResponse } from 'next/server'
 
@@ -17,7 +17,7 @@ export const dynamic = 'force-dynamic'
 const OVERTURE_URL = 'https://api.overturemapsapi.com/places'
 const DEMO_KEY = 'DEMO-API-KEY'
 
-// Anchor tenant brands — signal neighborhood gentrification / premium demand
+// Anchor tenant brands - signal neighborhood gentrification / premium demand
 const ANCHOR_BRANDS = [
   'Whole Foods', 'Whole Foods Market',
   'Equinox', 'SoulCycle', 'Barry\'s', 'Orangetheory',
@@ -43,7 +43,7 @@ const SIGNAL_CATEGORIES = [
 
 // Color mapping by category group (RGB)
 export const POI_COLORS: Record<string, [number, number, number]> = {
-  anchor:       [215, 107, 61],   // orange — premium anchor
+  anchor:       [215, 107, 61],   // orange - premium anchor
   coffee_shop:  [180, 120, 60],   // brown
   cafe:         [180, 120, 60],
   grocery:      [80, 180, 100],   // green

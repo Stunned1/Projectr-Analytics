@@ -38,33 +38,33 @@ export function buildSignalIndicators(payload: ClientReportPayload): SignalIndic
 
   const rentLine =
     rentArrow === 'up'
-      ? 'Rent index rising vs. prior year — landlord pricing power intact.'
+      ? 'Rent index rising vs. prior year - landlord pricing power intact.'
       : rentArrow === 'down'
-        ? 'Rent index softening YoY — watch concessions and lease-up risk.'
-        : 'Rent index roughly flat YoY — stable rent regime.'
+        ? 'Rent index softening YoY - watch concessions and lease-up risk.'
+        : 'Rent index roughly flat YoY - stable rent regime.'
 
   const vacancyLine =
     vacancy == null
       ? 'Vacancy data unavailable for this view.'
       : vacancyArrow === 'down'
-        ? `Vacancy near ${vacancy.toFixed(1)}% — tight occupancy signal.`
+        ? `Vacancy near ${vacancy.toFixed(1)}% - tight occupancy signal.`
         : vacancyArrow === 'up'
-          ? `Vacancy elevated near ${vacancy.toFixed(1)}% — monitor supply pressure.`
-          : `Vacancy near ${vacancy.toFixed(1)}% — balanced occupancy.`
+          ? `Vacancy elevated near ${vacancy.toFixed(1)}% - monitor supply pressure.`
+          : `Vacancy near ${vacancy.toFixed(1)}% - balanced occupancy.`
 
   const permitsLine =
     permitsArrow === 'up'
-      ? 'County permit pipeline accelerating — forward supply building.'
+      ? 'County permit pipeline accelerating - forward supply building.'
       : permitsArrow === 'down'
-        ? 'Permit volumes cooling — less near-term delivery risk.'
-        : 'Permit trend mixed — pipeline steady vs. prior years.'
+        ? 'Permit volumes cooling - less near-term delivery risk.'
+        : 'Permit trend mixed - pipeline steady vs. prior years.'
 
   const employmentLine =
     employmentArrow === 'up'
-      ? 'Local unemployment trending down — labor market supportive.'
+      ? 'Local unemployment trending down - labor market supportive.'
       : employmentArrow === 'down'
-        ? 'Unemployment drifting up — macro headwind for demand.'
-        : 'Employment signal neutral — no sharp labor shock.'
+        ? 'Unemployment drifting up - macro headwind for demand.'
+        : 'Employment signal neutral - no sharp labor shock.'
 
   const indicators: SignalIndicator[] = [
     {

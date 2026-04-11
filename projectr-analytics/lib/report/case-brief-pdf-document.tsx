@@ -290,7 +290,7 @@ function formatBriefDate(iso: string): string {
 }
 
 function fmtCtx(v: unknown): string {
-  if (v == null) return '—'
+  if (v == null) return '-'
   if (typeof v === 'number' && Number.isFinite(v)) {
     if (v > 1000 && v < 500000) return '$' + v.toLocaleString('en-US')
     return String(v)
@@ -335,10 +335,10 @@ function MarketSnapshotTable({ ctx }: { ctx: Record<string, unknown> }) {
   const rows: Array<{ k: string; v: string }> = []
   if (ctx.label != null) rows.push({ k: 'Market / view', v: fmtCtx(ctx.label) })
   if (ctx.zip != null) rows.push({ k: 'ZIP (anchor)', v: fmtCtx(ctx.zip) })
-  rows.push({ k: 'Median rent (ZORI)', v: ctx.zori != null ? fmtCtx(ctx.zori) : '—' })
-  rows.push({ k: 'Home value (ZHVI)', v: ctx.zhvi != null ? fmtCtx(ctx.zhvi) : '—' })
-  rows.push({ k: 'ZORI YoY %', v: ctx.zoriGrowth != null ? `${fmtCtx(ctx.zoriGrowth)}%` : '—' })
-  rows.push({ k: 'Vacancy %', v: ctx.vacancyRate != null ? `${fmtCtx(ctx.vacancyRate)}%` : '—' })
+  rows.push({ k: 'Median rent (ZORI)', v: ctx.zori != null ? fmtCtx(ctx.zori) : '-' })
+  rows.push({ k: 'Home value (ZHVI)', v: ctx.zhvi != null ? fmtCtx(ctx.zhvi) : '-' })
+  rows.push({ k: 'ZORI YoY %', v: ctx.zoriGrowth != null ? `${fmtCtx(ctx.zoriGrowth)}%` : '-' })
+  rows.push({ k: 'Vacancy %', v: ctx.vacancyRate != null ? `${fmtCtx(ctx.vacancyRate)}%` : '-' })
   if (rows.length === 0) return null
   return (
     <View style={styles.box}>
@@ -393,9 +393,9 @@ function SitesMetricsTable({ sites }: { sites: CaseBriefSitePayload[] }) {
           <Text style={[styles.td, { width: colFar }]}>{(s.far_utilization * 100).toFixed(0)}%</Text>
           <Text style={[styles.td, { width: colAir }]}>{(s.air_rights_sqft / 1000).toFixed(0)}k</Text>
           <Text style={[styles.td, { width: colZori }]}>
-            {s.zori_growth != null ? `${s.zori_growth > 0 ? '+' : ''}${s.zori_growth.toFixed(1)}%` : '—'}
+            {s.zori_growth != null ? `${s.zori_growth > 0 ? '+' : ''}${s.zori_growth.toFixed(1)}%` : '-'}
           </Text>
-          <Text style={[styles.td, { width: colMom }]}>{s.momentum ?? '—'}</Text>
+          <Text style={[styles.td, { width: colMom }]}>{s.momentum ?? '-'}</Text>
         </View>
       ))}
     </View>
@@ -478,7 +478,7 @@ export function CaseBriefPdfDocument({
 
   return (
     <Document>
-      {/* Page 1 — cover + executive depth */}
+      {/* Page 1 - cover + executive depth */}
       <Page size="A4" style={styles.page}>
         <BriefPageHeader logoDataUri={logoDataUri} generatedAt={generatedAt} />
 
@@ -506,7 +506,7 @@ export function CaseBriefPdfDocument({
         ) : null}
       </Page>
 
-      {/* Page 2 — key findings cards + market signals (skip if Gemini omitted both) */}
+      {/* Page 2 - key findings cards + market signals (skip if Gemini omitted both) */}
       {keyFindingItems.length > 0 || tiles.length > 0 ? (
         <Page size="A4" style={styles.page}>
           <BriefPageHeader logoDataUri={logoDataUri} generatedAt={generatedAt} />
@@ -515,7 +515,7 @@ export function CaseBriefPdfDocument({
           <>
             <Text style={styles.section}>Key findings</Text>
             <Text style={{ fontSize: 7, color: muted, marginBottom: 8, width: W }}>
-              Evidence-backed takeaways from the ranked set — metrics in pills echo site-level inputs where the model supplied them.
+              Evidence-backed takeaways from the ranked set - metrics in pills echo site-level inputs where the model supplied them.
             </Text>
             {keyFindingItems.map((kf, i) => (
               <KeyFindingCard key={i} index={i} item={kf} />
@@ -612,7 +612,7 @@ export function CaseBriefPdfDocument({
         <Page key={`narr-${chunkIdx}`} size="A4" style={styles.page}>
           <BriefPageHeader logoDataUri={logoDataUri} generatedAt={generatedAt} />
           <Text style={styles.section}>
-            Ranked sites — narrative{narrativeChunks.length > 1 && chunkIdx > 0 ? ' (continued)' : ''}
+            Ranked sites - narrative{narrativeChunks.length > 1 && chunkIdx > 0 ? ' (continued)' : ''}
           </Text>
           {chunk.map((s, j) => {
             const globalIdx = chunkIdx * CHUNK + j
@@ -638,7 +638,7 @@ export function CaseBriefPdfDocument({
         </Page>
       ))}
 
-      {/* Page 4 — risks, steps, methodology */}
+      {/* Page 4 - risks, steps, methodology */}
       <Page size="A4" style={styles.page}>
         <BriefPageHeader logoDataUri={logoDataUri} generatedAt={generatedAt} />
 
@@ -651,8 +651,8 @@ export function CaseBriefPdfDocument({
             </View>
             {risks.map((r, i) => (
               <View key={i} style={styles.riskRow}>
-                <Text style={styles.riskCell}>{safeStr(r.risk, '—')}</Text>
-                <Text style={styles.mitCell}>{safeStr(r.mitigation, '—')}</Text>
+                <Text style={styles.riskCell}>{safeStr(r.risk, '-')}</Text>
+                <Text style={styles.mitCell}>{safeStr(r.mitigation, '-')}</Text>
               </View>
             ))}
           </>

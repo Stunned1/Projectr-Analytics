@@ -5,8 +5,8 @@
  * Now includes FAR (Floor Area Ratio) data:
  * - builtfar: what's currently built
  * - residfar / commfar / facilfar: what zoning allows
- * - air_rights_sqft: (max_allowed_far - builtfar) * lotarea — unused development potential
- * - far_utilization: builtfar / max_allowed_far — 0–1, how "full" the lot is
+ * - air_rights_sqft: (max_allowed_far - builtfar) * lotarea - unused development potential
+ * - far_utilization: builtfar / max_allowed_far - 0–1, how "full" the lot is
  *
  * Query modes:
  * - ?zip=10001         → single ZIP, up to 1000 parcels
@@ -114,7 +114,7 @@ function computeStats(parcels: ReturnType<typeof parseParcels>) {
   const perSqft = parcels.map((p) => p.assessed_per_sqft).filter((v) => v > 0).sort((a, b) => a - b)
   const airRights = parcels.map((p) => p.air_rights_sqft).filter((v) => v > 0).sort((a, b) => a - b)
 
-  // Top underbuilt lots — high air rights, not vacant/parking
+  // Top underbuilt lots - high air rights, not vacant/parking
   const underbuilt = parcels
     .filter((p) => p.air_rights_sqft > 5000 && p.land_use !== '10' && p.land_use !== '11' && p.far_utilization !== null && p.far_utilization < 0.5)
     .sort((a, b) => b.air_rights_sqft - a.air_rights_sqft)
@@ -148,7 +148,7 @@ export async function GET(request: NextRequest) {
       const borocode = BOROUGH_CODES[borough]
       if (!borocode) return NextResponse.json({ error: `Unknown borough "${borough}"` }, { status: 404 })
 
-      // Use cache: 'no-store' — response is >2MB so Next.js fetch cache can't handle it
+      // Use cache: 'no-store' - response is >2MB so Next.js fetch cache can't handle it
       // Limit to 3000 top parcels to keep response manageable
       const url = `${PLUTO_URL}?$limit=3000&borocode=${borocode}&$select=${PLUTO_SELECT}&$order=assesstot+DESC`
       const res = await fetch(url, { cache: 'no-store' })

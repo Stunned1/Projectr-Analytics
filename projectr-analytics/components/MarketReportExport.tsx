@@ -130,7 +130,7 @@ export default function MarketReportExport({
       {error && <p className="text-red-400 text-[10px]">{error}</p>}
       <p className="text-zinc-600 text-[9px] leading-relaxed">
         Multi-page analyst brief: cycle headline, signals, metrics vs metro, charts, static map, and site comparison
-        when 2+ shortlist sites are checked for compare or 2+ client CSV pins are on the map.
+        when 2+ shortlist sites are checked for compare or 2+ uploaded CSV pins are on the map.
       </p>
     </div>
   )

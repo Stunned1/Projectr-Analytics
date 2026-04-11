@@ -25,7 +25,7 @@ const supabase = createClient(
 const SOCRATA_URL = 'https://data.cityofnewyork.us/resource/ic3t-wcy2.json'
 const BATCH_SIZE = 500
 const PAGE_SIZE = 1000
-// A2 (minor alterations) excluded — too noisy (bathroom renos, window swaps, etc.)
+// A2 (minor alterations) excluded - too noisy (bathroom renos, window swaps, etc.)
 // A1 filtered to initial_cost > $500k to keep only major renovations
 const JOB_TYPES = ['NB', 'A1', 'DM']
 const BOROUGHS = ['MANHATTAN', 'BROOKLYN', 'QUEENS', 'BRONX', 'STATEN ISLAND']
@@ -99,7 +99,7 @@ async function ingestBoroughJobType(borough: string, jobType: string) {
 
     const permits = raw.map(parsePermit).filter(Boolean) as NonNullable<ReturnType<typeof parsePermit>>[]
 
-    // Deduplicate within the batch — same job__ can appear multiple times in API response
+    // Deduplicate within the batch - same job__ can appear multiple times in API response
     const seen = new Set<string>()
     const deduped = permits.filter((p) => {
       if (seen.has(p.id)) return false
@@ -131,7 +131,7 @@ async function main() {
   console.log('=== NYC Permits Ingestion ===')
   console.log(`Supabase: ${process.env.NEXT_PUBLIC_SUPABASE_URL}`)
   console.log(`Boroughs: ${BOROUGHS.join(', ')}`)
-  console.log(`Job types: NB, DM (all), A1 (initial_cost > $${A1_MIN_COST.toLocaleString()}) — A2 excluded\n`)
+  console.log(`Job types: NB, DM (all), A1 (initial_cost > $${A1_MIN_COST.toLocaleString()}) - A2 excluded\n`)
 
   let grand = 0
   for (const borough of BOROUGHS) {

@@ -1,5 +1,5 @@
 /**
- * Zillow snapshots only store latest ZORI + YoY — approximate a monthly series for the PDF chart.
+ * Zillow snapshots only store latest ZORI + YoY - approximate a monthly series for the PDF chart.
  * Footnote in PDF labels this as modeled from latest index and YoY change.
  */
 export function buildZoriProxySeries(

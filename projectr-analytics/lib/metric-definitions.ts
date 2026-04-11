@@ -44,21 +44,21 @@ export interface MetricDefinition {
 export const METRIC_DEFINITIONS: Record<MetricKey, MetricDefinition> = {
   zori: {
     label: 'Median Rent (ZORI)',
-    short: 'Zillow Observed Rent Index — asking rents on new leases, not in-place rents.',
+    short: 'Zillow Observed Rent Index - asking rents on new leases, not in-place rents.',
     long: 'Zillow Observed Rent Index tracks asking rents for new leases, not in-place rents. It is more responsive to market conditions than many median-rent figures.',
     source: 'Zillow Research',
     calculation: null,
   },
   zhvi: {
     label: 'Home Value (ZHVI)',
-    short: 'Zillow Home Value Index — smoothed typical home value, mid-tier market.',
+    short: 'Zillow Home Value Index - smoothed typical home value, mid-tier market.',
     long: 'Zillow Home Value Index is a smoothed estimate of typical home value and reflects the middle tier of the market.',
     source: 'Zillow Research',
     calculation: null,
   },
   zhvf: {
     label: '1yr Forecast (ZHVF)',
-    short: 'Zillow home value forecast — forward-looking modeled growth.',
+    short: 'Zillow home value forecast - forward-looking modeled growth.',
     long: 'Zillow Home Value Forecast (ZHVF) is a modeled forward-looking growth rate for typical home values in this ZIP.',
     source: 'Zillow Research',
     calculation: null,
@@ -72,14 +72,14 @@ export const METRIC_DEFINITIONS: Record<MetricKey, MetricDefinition> = {
   },
   medianGrossRent: {
     label: 'Median Gross Rent',
-    short: 'ACS median contract rent — in-place rents, not new-lease asking rents.',
+    short: 'ACS median contract rent - in-place rents, not new-lease asking rents.',
     long: 'Census ACS median gross rent for renter-occupied units. It reflects in-place rents and moves more slowly than ZORI.',
     source: 'Census ACS',
     calculation: null,
   },
   fmr: {
     label: 'Fair Market Rent (FMR)',
-    short: 'HUD benchmark rent for a modest unit by bedroom — affordability comparisons.',
+    short: 'HUD benchmark rent for a modest unit by bedroom - affordability comparisons.',
     long: 'HUD Fair Market Rent is the federal benchmark for what a modest rental unit should cost by bedroom count. Useful for comparing market rents to affordability thresholds.',
     source: 'HUD / Census ACS fallback',
     calculation: null,
@@ -87,13 +87,13 @@ export const METRIC_DEFINITIONS: Record<MetricKey, MetricDefinition> = {
   migration: {
     label: 'Migration (movers)',
     short: 'ACS estimate of people who moved from a different state in the past year.',
-    long: 'American Community Survey estimate of people who moved from a different state into this ZIP in the past year — a structural demand signal.',
+    long: 'American Community Survey estimate of people who moved from a different state into this ZIP in the past year - a structural demand signal.',
     source: 'Census ACS',
     calculation: null,
   },
   permits: {
     label: 'Building permits (units)',
-    short: 'County residential units permitted (Census BPS) — leading supply ~18–24 months.',
+    short: 'County residential units permitted (Census BPS) - leading supply ~18–24 months.',
     long: 'Residential units permitted at the county level from the Census Building Permits Survey. A leading indicator of future supply, typically 18–24 months before units reach the market.',
     source: 'Census BPS',
     calculation: null,
@@ -136,13 +136,13 @@ export const METRIC_DEFINITIONS: Record<MetricKey, MetricDefinition> = {
   vacantUnits: {
     label: 'Vacant units',
     short: 'ACS count of vacant housing units.',
-    long: 'Vacant housing units from Census ACS — used with total units to contextualize vacancy.',
+    long: 'Vacant housing units from Census ACS - used with total units to contextualize vacancy.',
     source: 'Census ACS',
     calculation: null,
   },
   popGrowth3yr: {
     label: 'Population growth (3yr)',
-    short: 'Approximate 2019→2022 ACS population change — can reflect enrollment/noise in college towns.',
+    short: 'Approximate 2019→2022 ACS population change - can reflect enrollment/noise in college towns.',
     long: 'Three-year population change from comparing ACS vintages (2019 vs 2022 in the pipeline). Can be noisy in college towns or during COVID-era swings.',
     source: 'Census ACS',
     calculation: null,
@@ -171,7 +171,7 @@ export const METRIC_DEFINITIONS: Record<MetricKey, MetricDefinition> = {
   dozPending: {
     label: 'Days to pending',
     short: 'Metro mean days listings stay active before pending (Zillow).',
-    long: 'Metro-level mean days on market until pending from Zillow Research — velocity indicator for for-sale housing in the broader metro.',
+    long: 'Metro-level mean days on market until pending from Zillow Research - velocity indicator for for-sale housing in the broader metro.',
     source: 'Zillow Research (metro)',
     calculation: null,
   },
@@ -191,7 +191,7 @@ export const METRIC_DEFINITIONS: Record<MetricKey, MetricDefinition> = {
   },
   trends: {
     label: 'Google Trends score',
-    short: 'Relative search interest (0–100) for apartment-related queries — leads some rent moves.',
+    short: 'Relative search interest (0–100) for apartment-related queries - leads some rent moves.',
     long: 'Relative search interest (0–100) for apartment-related queries in this market from Google Trends. Often moves before rent data fully reflects demand shifts.',
     source: 'Google Trends',
     calculation: null,
@@ -199,7 +199,7 @@ export const METRIC_DEFINITIONS: Record<MetricKey, MetricDefinition> = {
   transit: {
     label: 'Transit stops',
     short: 'OpenStreetMap transit stops within the fetch radius.',
-    long: 'Count of transit stops from OpenStreetMap / GTFS context within the configured radius — connectivity proxy, not ridership.',
+    long: 'Count of transit stops from OpenStreetMap / GTFS context within the configured radius - connectivity proxy, not ridership.',
     source: 'OSM / GTFS',
     calculation: null,
   },

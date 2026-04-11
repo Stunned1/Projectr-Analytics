@@ -147,11 +147,11 @@ function applyQualityCap(confidence: number, q: CycleDataQuality): number {
 }
 
 function buildConfidenceLine(agreement: number, label: string, confidence: number, transitional: boolean): string {
-  const tail = transitional ? ' — transitional / mixed signals' : ''
+  const tail = transitional ? ' - transitional / mixed signals' : ''
   if (agreement <= 1) {
-    return `${agreement} of 4 signals align — insufficient signal for a clean cycle read (${label}, score ${confidence}).${tail}`
+    return `${agreement} of 4 signals align - insufficient signal for a clean cycle read (${label}, score ${confidence}).${tail}`
   }
-  return `${agreement} of 4 signals align — ${label} confidence (${confidence}).${tail}`
+  return `${agreement} of 4 signals align - ${label} confidence (${confidence}).${tail}`
 }
 
 export function classifyCycle(zip: string, features: ComputedCycleFeatures): Omit<CycleAnalysis, 'narrative'> {

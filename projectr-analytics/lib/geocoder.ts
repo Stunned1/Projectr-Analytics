@@ -13,7 +13,7 @@ export interface GeoResult {
   fullFips: string // e.g. "51121"
 }
 
-/** City + USPS state only — for Google Trends (keyword + `US-XX`), when ZIP geocoding is skipped. */
+/** City + USPS state only - for Google Trends (keyword + `US-XX`), when ZIP geocoding is skipped. */
 export function geoTrendsStub(city: string, stateAbbr: string): GeoResult {
   const st = stateAbbr.trim().toUpperCase()
   const abbr = st.length === 2 ? st : st.slice(0, 2)
@@ -112,7 +112,7 @@ async function geocodeViaZippopotam(zip: string): Promise<{ lat: number; lng: nu
   }
 }
 
-/** 2020 ZCTA internal point (INTPT) from Census TigerWeb — no synthetic street address. */
+/** 2020 ZCTA internal point (INTPT) from Census TigerWeb - no synthetic street address. */
 async function geocodeViaCensusZctaInternalPoint(zip: string): Promise<GeoResult | null> {
   try {
     const params = new URLSearchParams({
@@ -207,7 +207,7 @@ async function persistGeocodeToDb(zip: string, geo: GeoResult, source: string): 
       { onConflict: 'zip' }
     )
   } catch {
-    /* table missing or RLS — in-process cache still helps */
+    /* table missing or RLS - in-process cache still helps */
   }
 }
 

@@ -16,7 +16,7 @@ export function normalizeAgentLayersRecord(layers: Record<string, boolean>): Rec
   return out
 }
 
-/** Map context for Gemini — keep vocabulary aligned with AVAILABLE LAYERS (`permits`). */
+/** Map context for Gemini - keep vocabulary aligned with AVAILABLE LAYERS (`permits`). */
 export function denormalizeAgentLayersForContext(overrides: Record<string, boolean>): Record<string, boolean> {
   const out: Record<string, boolean> = { ...overrides }
   if (Object.prototype.hasOwnProperty.call(out, 'nycPermits')) {

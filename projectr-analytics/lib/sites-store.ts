@@ -131,7 +131,7 @@ export const useSitesStore = create<SitesStore>((set, get) => ({
         set({
           sites: [],
           loading: false,
-          syncError: 'Sign in unavailable — enable Anonymous sign-ins in Supabase Auth (Authentication → Providers).',
+          syncError: 'Sign in unavailable - enable Anonymous sign-ins in Supabase Auth (Authentication → Providers).',
         })
         return
       }
@@ -153,7 +153,7 @@ export const useSitesStore = create<SitesStore>((set, get) => ({
     const user = await ensureAuthUser()
     if (!user) {
       set({
-        syncError: 'Cannot save — enable Anonymous sign-ins in Supabase Auth (Authentication → Providers).',
+        syncError: 'Cannot save - enable Anonymous sign-ins in Supabase Auth (Authentication → Providers).',
       })
       return false
     }

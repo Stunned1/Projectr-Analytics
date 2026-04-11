@@ -1,12 +1,13 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import { GEMINI_NO_EM_DASH_RULE } from '@/lib/gemini-text-rules'
 import { stripGeminiStringWrappers } from '@/lib/sanitize-gemini-string'
 import type { ClientReportPayload, GeminiBriefResult, SignalIndicator } from './types'
 
 const FALLBACK: GeminiBriefResult = {
-  cycleHeadline: 'Submarket under mixed signals — review data pack',
+  cycleHeadline: 'Submarket under mixed signals - review data pack',
   narrative:
     'Current indicators point to a balanced market without a single dominant driver. Rent, occupancy, permits, and labor are sending overlapping signals, so underwriting should stress-test both upside lease scenarios and downside absorption.',
-  confidenceLine: 'Signal mix — proceed with scenario-based planning.',
+  confidenceLine: 'Signal mix - proceed with scenario-based planning.',
 }
 
 export async function generateBriefWithGemini(
@@ -18,7 +19,7 @@ export async function generateBriefWithGemini(
   if (!key) return { ...FALLBACK, confidenceLine }
 
   const signalSummary = signals
-    .map((s) => `${s.label}: ${s.arrow.toUpperCase()} — ${s.line}`)
+    .map((s) => `${s.label}: ${s.arrow.toUpperCase()} - ${s.line}`)
     .join('\n')
 
   const ctx = `
@@ -46,7 +47,7 @@ Choose ONE cycle phase for the headline sentence fragment (after the submarket n
 - Early Contraction
 - Deep Contraction
 
-The client-facing headline format must be: "{Submarket} is in {Phase}" — use the exact submarket name from context.
+The client-facing headline format must be: "{Submarket} is in {Phase}" - use the exact submarket name from context.
 
 Also write narrative: exactly 2 or 3 sentences, professional, as if a human analyst wrote it. No bullet points. Reference at most two specific numbers from the data.
 
@@ -57,7 +58,9 @@ Return JSON shape:
   "confidenceEcho": "short optional echo of agreement line"
 }
 
-Use confidenceEcho to restate agreement in one short clause, or null. Write plain text only — do not wrap confidenceEcho in quotation marks (no leading or trailing " characters).
+Use confidenceEcho to restate agreement in one short clause, or null. Write plain text only - do not wrap confidenceEcho in quotation marks (no leading or trailing " characters).
+
+${GEMINI_NO_EM_DASH_RULE}
 
 Context:
 ${ctx}`

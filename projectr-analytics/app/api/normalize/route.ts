@@ -4,6 +4,7 @@ import Papa from 'papaparse'
 import { supabase } from '@/lib/supabase'
 import type { VisualBucket } from '@/lib/supabase'
 import { geocodeZip } from '@/lib/geocoder'
+import { GEMINI_NO_EM_DASH_RULE } from '@/lib/gemini-text-rules'
 import { geocodeAddressForward, getGoogleForwardGeocodeKey } from '@/lib/google-forward-geocode'
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
@@ -49,7 +50,9 @@ Return this exact JSON shape (single object, no markdown fences, no commentary):
   "value_column": "exact header string for primary numeric value, or null",
   "date_column": "exact header string containing dates, or null",
   "reasoning": "one sentence explanation"
-}`
+}
+
+${GEMINI_NO_EM_DASH_RULE}`
 
 /** Strip ```json fences and isolate the outermost `{ ... }` when the model adds prose. */
 function extractJsonObject(raw: string): string {

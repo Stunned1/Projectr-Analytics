@@ -14,7 +14,7 @@ interface MomentumApiResponse {
 }
 
 function fmtComp(n: number | null) {
-  if (n == null || !Number.isFinite(n)) return '—'
+  if (n == null || !Number.isFinite(n)) return '-'
   return `${Math.round(n)}`
 }
 
@@ -119,7 +119,7 @@ export function MomentumExplainBlock({
             <MetricTooltip metricKey={metricKey}>Momentum score</MetricTooltip>
           </p>
           <p className="mt-1 text-lg font-bold text-white tabular-nums">
-            {loading ? '…' : displayScore != null ? displayScore : '—'}
+            {loading ? '…' : displayScore != null ? displayScore : '-'}
             <span className="text-xs font-normal text-zinc-500"> / 100</span>
           </p>
           <p className="mt-0.5 text-[10px] text-zinc-500">

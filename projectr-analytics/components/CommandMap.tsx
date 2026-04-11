@@ -138,7 +138,7 @@ export interface LayerState {
   clientData: boolean
 }
 
-/** Pill colors — reused for collapsed layer “active” dot stack (CommandMap chrome). */
+/** Pill colors - reused for collapsed layer “active” dot stack (CommandMap chrome). */
 const LAYER_DOT_INDICATORS: Array<{
   key: keyof LayerState
   color: string
@@ -229,22 +229,22 @@ function hasFeatures(value: unknown): value is { features: unknown[] } {
 
 const DATA_LAYER_REGISTRY = [
   { label: 'ZIP Boundary', source: 'Census TIGER', visualized: true, layerType: 'GeoJsonLayer (outline)' },
-  { label: 'Rent/value fill', source: 'Zillow Research', visualized: true, layerType: 'GeoJsonLayer choropleth — ZORI or ZHVI (metric toggle)' },
+  { label: 'Rent/value fill', source: 'Zillow Research', visualized: true, layerType: 'GeoJsonLayer choropleth - ZORI or ZHVI (metric toggle)' },
   { label: 'Transit Stops', source: 'GTFS / OSM', visualized: true, layerType: 'ScatterplotLayer (cyan dots)' },
   { label: 'Census Tracts', source: 'Census TIGER + ACS', visualized: true, layerType: 'GeoJsonLayer (rent/income choropleth)' },
   { label: 'Amenity Heatmap', source: 'OpenStreetMap', visualized: true, layerType: 'HeatmapLayer (weighted by amenity type)' },
   { label: 'Flood Risk Zones', source: 'FEMA NFHL', visualized: true, layerType: 'GeoJsonLayer (red = high risk)' },
-  { label: 'NYC Parcels (PLUTO)', source: 'NYC Open Data', visualized: true, layerType: 'ColumnLayer (3D columns — height = assessed value/sqft)' },
-  { label: 'Block Groups', source: 'Census TIGER + ACS', visualized: true, layerType: 'GeoJsonLayer (population density — replaced by Tracts)' },
+  { label: 'NYC Parcels (PLUTO)', source: 'NYC Open Data', visualized: true, layerType: 'ColumnLayer (3D columns - height = assessed value/sqft)' },
+  { label: 'Block Groups', source: 'Census TIGER + ACS', visualized: true, layerType: 'GeoJsonLayer (population density - replaced by Tracts)' },
   { label: 'Vacancy Rate', source: 'Census ACS', visualized: false, layerType: null, note: 'Now included in Tracts layer' },
   { label: 'PoP Momentum Score', source: 'Computed', visualized: false, layerType: null, note: 'Computed API exists; no map layer yet' },
-  { label: 'Unemployment Rate', source: 'FRED', visualized: false, layerType: null, note: 'County aggregate — sidebar chart only' },
-  { label: 'Real GDP', source: 'FRED', visualized: false, layerType: null, note: 'County aggregate — sidebar chart only' },
+  { label: 'Unemployment Rate', source: 'FRED', visualized: false, layerType: null, note: 'County aggregate - sidebar chart only' },
+  { label: 'Real GDP', source: 'FRED', visualized: false, layerType: null, note: 'County aggregate - sidebar chart only' },
   { label: 'Median Household Income', source: 'Census ACS', visualized: false, layerType: null, note: 'Now included in Tracts layer' },
   { label: 'FMR by Bedroom', source: 'HUD / Census ACS', visualized: false, layerType: null, note: 'No spatial variation within ZIP' },
-  { label: 'Days on Market', source: 'Zillow Metro', visualized: false, layerType: null, note: 'Metro-level — stat card only' },
-  { label: 'Google Trends Score', source: 'Google Trends', visualized: false, layerType: null, note: 'City/state sentiment — sidebar sparkline only' },
-  { label: 'Permit Pin Locations', source: 'ArcGIS REST', visualized: false, layerType: null, note: 'DEFERRED — jurisdiction-specific feeds required' },
+  { label: 'Days on Market', source: 'Zillow Metro', visualized: false, layerType: null, note: 'Metro-level - stat card only' },
+  { label: 'Google Trends Score', source: 'Google Trends', visualized: false, layerType: null, note: 'City/state sentiment - sidebar sparkline only' },
+  { label: 'Permit Pin Locations', source: 'ArcGIS REST', visualized: false, layerType: null, note: 'DEFERRED - jurisdiction-specific feeds required' },
 ]
 
 // Reuse expensive county blockgroup responses across CommandMap remounts.
@@ -290,7 +290,7 @@ function getBounds(geojson: { features: Array<{ geometry: { coordinates: number[
   return { minLat, maxLat, minLng, maxLng }
 }
 
-// ── Map fitter — fits to boundary polygon on zip change ───────────────────────
+// ── Map fitter - fits to boundary polygon on zip change ───────────────────────
 
 function MapFitter({ boundary, zip }: { boundary: GeoJSON | null; zip: string | null }) {
   const map = useMap()
@@ -427,9 +427,9 @@ function ZoomTracker({ onZoomChange }: { onZoomChange: (zoom: number) => void })
 
 // ── Tilt controller ───────────────────────────────────────────────────────────
 
-// ── Fly-to controller — eased camera flight when agentFlyTo changes ────────────
+// ── Fly-to controller - eased camera flight when agentFlyTo changes ────────────
 // Vector maps: use moveCamera({ center, zoom, tilt, heading }) each frame (Google’s
-// recommended pattern). Avoid lastTarget “dedupe” — it breaks React Strict Mode
+// recommended pattern). Avoid lastTarget “dedupe” - it breaks React Strict Mode
 // (first effect cleanup cancels RAF; second run would bail and never fly).
 
 const FLY_DURATION_MS = 1600
@@ -545,25 +545,28 @@ interface CommandMapProps {
   cityZips?: Array<{ zip: string; lat: number | null; lng: number | null; zori_latest: number | null; zhvi_latest: number | null; city: string; state: string | null }> | null
   boroughBoundary?: object | null
   uploadedMarkers?: Array<{ lat: number; lng: number; value: number | null; label: string }> | null
-  /** Saved analyst shortlist — always drawn while browsing other ZIPs. */
+  /** Saved analyst shortlist - always drawn while browsing other ZIPs. */
   shortlistSites?: Site[]
-  /** Analysis result sites from agent spatial model — glowing pins */
+  /** Analysis result sites from agent spatial model - glowing pins */
   analysisSites?: AnalysisSite[]
   /** Agent-controlled permit type filter */
   agentPermitFilter?: string[] | null
   agentLayerOverrides?: Record<string, boolean>
   agentMetric?: 'zori' | 'zhvi' | null
   agentFlyTo?: { lat: number; lng: number } | null
-  /** Fired when toggles or agent overrides change — used for PDF export layer legend. */
+  /** Fired when toggles or agent overrides change - used for PDF export layer legend. */
   onLayersChange?: (snapshot: LayerState & { choroplethMetric: 'zori' | 'zhvi' }) => void
-  /** Fired when user manually toggles a layer — clears agent override for that key */
+  /** Fired when user manually toggles a layer - clears agent override for that key */
   onClearAgentOverride?: (key: string) => void
   /** When `id` increments, replaces internal layer toggles (keeps parent overrides in sync after `/clear:layers`). */
   layerStateResync?: { id: number; state: LayerState } | null
-  /** Map camera tilt (0–67.5) — controlled from parent / 3D pill. */
+  /** Map camera tilt (0–67.5) — controlled from parent / 3D control on the map. */
   mapTilt: number
   /** Map camera heading (degrees). */
   mapHeading?: number
+  /** 45° perspective toggle (stacked with layer control, top-left). */
+  map3DActive: boolean
+  onToggleMap3D: () => void
 }
 
 function CommandMap({
@@ -584,6 +587,8 @@ function CommandMap({
   layerStateResync,
   mapTilt,
   mapHeading = 0,
+  map3DActive,
+  onToggleMap3D,
 }: CommandMapProps) {
   const perfDebug = process.env.NEXT_PUBLIC_PERF_DEBUG === '1'
 
@@ -599,7 +604,7 @@ function CommandMap({
   const [floodData, setFloodData] = useState<FloodCollection | null>(null)
   const [nycPermitData, setNycPermitData] = useState<PermitPayload[]>([])
   const [permitHeatPoints, setPermitHeatPoints] = useState<PermitHeatPoint[]>([])
-  // Multi-select type filter — Set of active types, empty = all
+  // Multi-select type filter - Set of active types, empty = all
   const [permitTypeFilter, setPermitTypeFilter] = useState<Set<string>>(new Set())
   const [mapZoom, setMapZoom] = useState(11)
   const handleZoomChange = useCallback((zoom: number) => { setMapZoom(zoom) }, [])
@@ -714,7 +719,7 @@ function CommandMap({
         })
         .catch(() => {})
 
-      // Fetch permits for this borough — load full scatter data upfront, derive heatmap client-side
+      // Fetch permits for this borough - load full scatter data upfront, derive heatmap client-side
       const boroughParam = detectedBorough.toUpperCase().replace(' ', '+')
       dedupedFetchJson<PermitResponse>(`/api/permits?borough=${encodeURIComponent(detectedBorough.toUpperCase())}&zoom=14`)
         .then((d) => {
@@ -782,7 +787,7 @@ function CommandMap({
     if (!zip) return
     // Clear city mode layers when switching to ZIP mode
     setCityBoundaries([])
-    // Skip neighbor loading when city mode is active — city ZIPs provide the context
+    // Skip neighbor loading when city mode is active - city ZIPs provide the context
     const inCityMode = (cityZips?.length ?? 0) > 0
 
     // Primary boundary
@@ -817,7 +822,7 @@ function CommandMap({
     if (!marketData?.geo) return
     const { lat, lng, stateFips, countyFips } = marketData.geo
 
-    // Block groups — need state + county FIPS
+    // Block groups - need state + county FIPS
     if (stateFips && countyFips && countyFips !== '000') {
       const countyKey = `${stateFips}-${countyFips}`
       const cached = BLOCKGROUP_CACHE[countyKey]
@@ -836,7 +841,7 @@ function CommandMap({
         .catch(() => {})
     }
 
-    // NYC parcels (PLUTO) — ZIP mode or borough mode
+    // NYC parcels (PLUTO) - ZIP mode or borough mode
     if (marketData?.zip) {
       dedupedFetchJson<ParcelResponse>(`/api/parcels?zip=${marketData.zip}`)
         .then((d) => {
@@ -846,7 +851,7 @@ function CommandMap({
         })
         .catch(() => {})
 
-      // Fetch permits for this ZIP — load upfront, derive heatmap client-side
+      // Fetch permits for this ZIP - load upfront, derive heatmap client-side
       dedupedFetchJson<PermitResponse>(`/api/permits?zip=${marketData.zip}&zoom=14`)
         .then((d) => {
           if (d.permits) {
@@ -873,7 +878,7 @@ function CommandMap({
       .then((d) => { if (d.points) setAmenityPoints(d.points) })
       .catch(() => {})
 
-    // Overture Maps POIs — neighborhood signals + anchor tenants
+    // Overture Maps POIs - neighborhood signals + anchor tenants
     dedupedFetchJson<{ points?: POIPoint[] }>(`/api/pois?lat=${lat}&lng=${lng}&radius=1500`)
       .then((d) => { if (d.points) setPoiPoints(d.points) })
       .catch(() => {})
@@ -981,7 +986,7 @@ function CommandMap({
       )
     }
 
-    // Momentum choropleth — overlays ZIP boundaries with score-based color
+    // Momentum choropleth - overlays ZIP boundaries with score-based color
     if (effectiveLayers.momentum && Object.keys(momentumScores).length > 0) {
       const allBoundaries = [
         ...(primaryBoundary ? [{ zip: zip ?? '', geojson: primaryBoundary }] : []),
@@ -1051,7 +1056,7 @@ function CommandMap({
     }
 
     // Primary ZIP boundary (on top, brighter outline)
-    // When block groups are active, show outline only — block groups provide the color
+    // When block groups are active, show outline only - block groups provide the color
     if (effectiveLayers.zipBoundary && primaryBoundary) {
       result.push(
         new GeoJsonLayer({
@@ -1075,7 +1080,7 @@ function CommandMap({
       )
     }
 
-    // Transit routes — PathLayer for subway/rail/bus lines with brand colors
+    // Transit routes - PathLayer for subway/rail/bus lines with brand colors
     if (effectiveLayers.transitStops && transitRoutes.length > 0) {
       const segments = transitRoutes.flatMap((r: TransitRoute) => {
         const pathList =
@@ -1132,7 +1137,7 @@ function CommandMap({
       }
     }
 
-    // Transit stops — colored by type
+    // Transit stops - colored by type
     if (effectiveLayers.transitStops && transitStops.length > 0) {
       result.push(
         new ScatterplotLayer({
@@ -1164,7 +1169,7 @@ function CommandMap({
     }
 
 
-    // NYC PLUTO parcels — ColumnLayer (3D columns sized by assessed value, color = land use or air rights)
+    // NYC PLUTO parcels - ColumnLayer (3D columns sized by assessed value, color = land use or air rights)
     if (effectiveLayers.parcels && parcelData?.parcels?.length) {
       result.push(
         new ColumnLayer({
@@ -1214,7 +1219,7 @@ function CommandMap({
       )
     }
 
-    // Census Tracts — rent/income choropleth (replaces block groups as primary sub-ZIP layer)
+    // Census Tracts - rent/income choropleth (replaces block groups as primary sub-ZIP layer)
     if (effectiveLayers.tracts && tractData) {
       const tractFeatures = tractData.features ?? []
       const rents = tractFeatures.map((f: TractFeature) => f.properties.median_rent ?? 0).filter((v: number) => v > 0)
@@ -1262,7 +1267,7 @@ function CommandMap({
       )
     }
 
-    // Amenity Heatmap — weighted by amenity type (transit > commercial > retail)
+    // Amenity Heatmap - weighted by amenity type (transit > commercial > retail)
     if (effectiveLayers.amenityHeatmap && amenityPoints.length > 0) {
       result.push(
         new HeatmapLayer({
@@ -1319,15 +1324,15 @@ function CommandMap({
       )
     }
 
-    // NYC Permits — zoom-adaptive: heatmap below zoom 15, 3D ColumnLayer at zoom ≥ 15
-    // All filtering is client-side — no API calls on zoom/pan
+    // NYC Permits - zoom-adaptive: heatmap below zoom 15, 3D ColumnLayer at zoom ≥ 15
+    // All filtering is client-side - no API calls on zoom/pan
     if (effectiveLayers.nycPermits) {
       // Merge agent permit filter with user toggle filter
       const agentFilterSet = agentPermitFilter ? new Set(agentPermitFilter) : null
       const activeTypes = agentFilterSet ?? (permitTypeFilter.size === 0 ? null : permitTypeFilter)
 
       if (mapZoom < 15) {
-        // Heatmap — filter by type client-side
+        // Heatmap - filter by type client-side
         const heatData = activeTypes
           ? permitHeatPoints.filter((_, i) => {
               const p = nycPermitData[i]
@@ -1357,7 +1362,7 @@ function CommandMap({
           )
         }
       } else {
-        // 3D ColumnLayer — filter by active types
+        // 3D ColumnLayer - filter by active types
         const filtered = activeTypes
           ? nycPermitData.filter((p) => activeTypes.has(p.job_type ?? ''))
           : nycPermitData
@@ -1380,9 +1385,9 @@ function CommandMap({
               },
               getFillColor: (d: PermitPayload) => {
                 switch (d.job_type) {
-                  case 'NB': return [215, 107, 61, 240]   // orange — new building
-                  case 'A1': return [100, 180, 255, 220]  // blue — major alteration
-                  case 'DM': return [220, 80, 80, 230]    // red — demolition
+                  case 'NB': return [215, 107, 61, 240]   // orange - new building
+                  case 'A1': return [100, 180, 255, 220]  // blue - major alteration
+                  case 'DM': return [220, 80, 80, 230]    // red - demolition
                   default:   return [160, 160, 160, 180]
                 }
               },
@@ -1402,7 +1407,7 @@ function CommandMap({
       }
     }
 
-    // Overture Maps POIs — ScatterplotLayer colored by category, anchors larger
+    // Overture Maps POIs - ScatterplotLayer colored by category, anchors larger
     if (effectiveLayers.pois && poiPoints.length > 0) {
       result.push(
         new ScatterplotLayer({
@@ -1456,7 +1461,7 @@ function CommandMap({
       )
     }
 
-    // Analysis result sites — glowing neon ColumnLayer pins from agent spatial model
+    // Analysis result sites - glowing neon ColumnLayer pins from agent spatial model
     if (analysisSites.length > 0) {
       result.push(
         new ColumnLayer({
@@ -1471,7 +1476,7 @@ function CommandMap({
             return 80 + t * 320
           },
           getFillColor: (d: AnalysisSite) => {
-            // Neon orange gradient — brighter = higher score
+            // Neon orange gradient - brighter = higher score
             const t = d.score / 100
             return [215, Math.round(107 + t * 80), 61, 255] as [number, number, number, number]
           },
@@ -1508,7 +1513,7 @@ function CommandMap({
           getElevation: (d: { value: number | null }) => {
             const v = d.value ?? 0
             const t = maxVal === minVal ? 0.5 : Math.min(Math.max((v - minVal) / (maxVal - minVal), 0), 1)
-            return 30 + t * 120 // 30m–150m — more subtle
+            return 30 + t * 120 // 30m–150m - more subtle
           },
           getFillColor: [215, 107, 61, 255],
           getLineColor: [255, 255, 255, 200],
@@ -1677,6 +1682,21 @@ function CommandMap({
           >
             <Layers className="h-[18px] w-[18px]" strokeWidth={1.75} />
           </button>
+
+          <button
+            type="button"
+            aria-pressed={map3DActive}
+            aria-label={map3DActive ? 'Turn off 3D tilt' : 'Turn on 3D tilt'}
+            onClick={onToggleMap3D}
+            className={cn(
+              'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border shadow-lg shadow-black/40 backdrop-blur-xl text-[10px] font-bold tracking-wide transition-colors',
+              map3DActive
+                ? 'border-primary/60 bg-primary/20 text-primary'
+                : 'border-border/80 bg-card/90 text-muted-foreground hover:text-foreground'
+            )}
+          >
+            3D
+          </button>
         </div>
 
         <div
@@ -1737,7 +1757,7 @@ function CommandMap({
 
         <div className="mx-3 h-px bg-border/70" />
 
-        {/* Parcel color mode — only shown when parcels layer is on */}
+        {/* Parcel color mode - only shown when parcels layer is on */}
         {effectiveLayers.parcels && parcelData && (
           <>
             <div className="px-3 py-2">
@@ -1768,7 +1788,7 @@ function CommandMap({
           </>
         )}
 
-        {/* Permit type filter — only shown when permits layer is on */}
+        {/* Permit type filter - only shown when permits layer is on */}
         {effectiveLayers.nycPermits && (
           <>
             <div className="px-3 py-2">
@@ -1787,7 +1807,7 @@ function CommandMap({
                         setPermitTypeFilter((prev) => {
                           const next = new Set(prev)
                           if (next.size === 0) {
-                            // currently "all" — activate only this one
+                            // currently "all" - activate only this one
                             next.add('NB'); next.add('A1'); next.add('DM')
                             next.delete(key)
                           } else if (next.has(key)) {
@@ -1822,7 +1842,7 @@ function CommandMap({
           </>
         )}
 
-        {/* ZORI vs ZHVI — only applies when rent/value fill choropleth is on */}
+        {/* ZORI vs ZHVI - only applies when rent/value fill choropleth is on */}
         {effectiveLayers.rentChoropleth && (
           <>
             <div className="px-3 py-2">

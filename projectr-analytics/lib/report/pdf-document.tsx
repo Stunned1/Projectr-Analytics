@@ -51,7 +51,7 @@ const styles = StyleSheet.create({
     color: ink,
     marginBottom: 10,
     lineHeight: 1.3,
-    /** Numeric pt — percentage width on Text often resolves wrong in @react-pdf and clips to one line. */
+    /** Numeric pt - percentage width on Text often resolves wrong in @react-pdf and clips to one line. */
     width: PDF_CONTENT_WIDTH_PT,
   },
   narrative: {
@@ -189,7 +189,7 @@ const styles = StyleSheet.create({
 })
 
 function fmtMoney(n: number | null | undefined) {
-  if (n == null || !Number.isFinite(n)) return '—'
+  if (n == null || !Number.isFinite(n)) return '-'
   return '$' + Math.round(n).toLocaleString('en-US')
 }
 
@@ -283,13 +283,13 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
     },
     {
       label: 'Vacancy rate',
-      sub: payload.census.vacancy_rate != null ? `${payload.census.vacancy_rate.toFixed(1)}%` : '—',
-      bench: metroVac != null ? `${metroVac.toFixed(1)}% avg` : '—',
+      sub: payload.census.vacancy_rate != null ? `${payload.census.vacancy_rate.toFixed(1)}%` : '-',
+      bench: metroVac != null ? `${metroVac.toFixed(1)}% avg` : '-',
       signalKey: 'vacancy',
     },
     {
       label: 'Permits (county BPS, 2021–23 units)',
-      sub: payload.permits.total_units_2021_2023 != null ? String(Math.round(payload.permits.total_units_2021_2023)) : '—',
+      sub: payload.permits.total_units_2021_2023 != null ? String(Math.round(payload.permits.total_units_2021_2023)) : '-',
       bench: 'County scope',
       signalKey: 'permits',
     },
@@ -305,11 +305,11 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
           ? `${payload.employment.employment_rate.toFixed(1)}% employed (est.)`
           : payload.employment.unemployment_rate != null
             ? `${payload.employment.unemployment_rate.toFixed(1)}% unemployment`
-            : '—',
+            : '-',
       bench:
         metroUnemp != null
           ? `${metroUnemp.toFixed(1)}% unempl. (avg)`
-          : '—',
+          : '-',
       signalKey: 'employment',
     },
     {
@@ -317,11 +317,11 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
       sub:
         payload.census.migration_movers != null
           ? `${Math.round(payload.census.migration_movers).toLocaleString()} movers (diff. state)`
-          : '—',
+          : '-',
       bench:
         metroMig != null
           ? `${metroMig.toLocaleString()} movers (avg / ZIP)`
-          : '—',
+          : '-',
     },
   ]
 
@@ -332,8 +332,8 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
     .slice(-12)
 
   return (
-    <Document title={`Projectr Brief — ${payload.marketLabel}`} author="Projectr Analytics">
-      {/* Page 1 — Brief */}
+    <Document title={`Projectr Brief - ${payload.marketLabel}`} author="Projectr Analytics">
+      {/* Page 1 - Brief */}
       <Page size="A4" style={styles.page}>
         <View style={styles.headerBand}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -405,7 +405,7 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
             </View>
           )}
           <Text style={styles.confidence} wrap hyphenationCallback={(word) => [word]}>
-            Confidence — {brief.confidenceLine}
+            Confidence - {brief.confidenceLine}
           </Text>
 
           <Text style={styles.methTitle}>Methodology & definitions</Text>
@@ -449,7 +449,7 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
         </View>
       </Page>
 
-      {/* Dossier p1 — Gemini whole-market narrative */}
+      {/* Dossier p1 - Gemini whole-market narrative */}
       <Page size="A4" style={styles.page}>
         <View style={styles.headerBand}>
           {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>PROJECTR</Text>}
@@ -502,7 +502,7 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
         </View>
       </Page>
 
-      {/* Dossier p2 — peer read, risks, opportunities, scenarios */}
+      {/* Dossier p2 - peer read, risks, opportunities, scenarios */}
       <Page size="A4" style={styles.page}>
         <View style={styles.headerBand}>
           {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>PROJECTR</Text>}
@@ -559,7 +559,7 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
         </Text>
       </Page>
 
-      {/* Data page — charts & benchmark table */}
+      {/* Data page - charts & benchmark table */}
       <Page size="A4" style={styles.page}>
         <View style={styles.headerBand}>
           {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>PROJECTR</Text>}
@@ -588,7 +588,7 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
                   color={ink}
                 />
               ) : (
-                <Text style={[styles.td, { textAlign: 'center' }]}>—</Text>
+                <Text style={[styles.td, { textAlign: 'center' }]}>-</Text>
               )}
             </View>
             <Text style={[styles.td, { width: '30%', color: muted }]} wrap={false}>
@@ -600,12 +600,12 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
           <Text style={[styles.foot, { marginTop: 6 }]}>
             Metro peer column: ZORI/ZHVI are simple means across {metro.zip_count} Zillow-tracked ZIPs in the same metro.
             Vacancy, unemployment, and migration benchmarks are simple means across peer ZIPs that have those rows in
-            cache (ACS / FRED) — many peers may be missing data until cold-loaded.
+            cache (ACS / FRED) - many peers may be missing data until cold-loaded.
           </Text>
         )}
 
         <Text style={styles.sectionTitle}>
-          Rent trajectory (ZORI — {zoriSeriesSource === 'zillow_monthly' ? 'monthly, Zillow Research' : 'modeled from latest + YoY'})
+          Rent trajectory (ZORI - {zoriSeriesSource === 'zillow_monthly' ? 'monthly, Zillow Research' : 'modeled from latest + YoY'})
         </Text>
         <SparklinePdf data={zoriSeries} width={480} height={72} />
 
@@ -620,11 +620,11 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
           FRED uses the first ZIP&apos;s county; the employment row prefers a computed employment rate when labor-force
           series match, otherwise latest unemployment. Vacancy, migration, and BPS permits need Census ACS/BPS rows in
           Supabase for this area (cold-load at least one ZIP via the map). County BPS counts are identical for all ZIPs in
-          the same county — the chart uses one anchor ZIP&apos;s yearly series.
+          the same county - the chart uses one anchor ZIP&apos;s yearly series.
         </Text>
       </Page>
 
-      {/* Page 3 — Map */}
+      {/* Page 3 - Map */}
       <Page size="A4" style={styles.page}>
         <View style={styles.headerBand}>
           {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>PROJECTR</Text>}
@@ -674,7 +674,7 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
         </Text>
       </Page>
 
-      {/* Page 4 — Site comparison */}
+      {/* Page 4 - Site comparison */}
       {siteRows && siteRows.length >= 2 && (
         <Page size="A4" style={styles.page}>
           <View style={styles.headerBand}>
@@ -698,8 +698,8 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
               <Text style={[styles.td, { width: '18%' }]}>{r.label}</Text>
               <Text style={[styles.td, { width: '12%' }]}>{r.zip}</Text>
               <Text style={[styles.td, { width: '12%' }]}>{fmtMoney(r.zori)}</Text>
-              <Text style={[styles.td, { width: '10%' }]}>{r.momentum != null ? String(r.momentum) : '—'}</Text>
-              <Text style={[styles.td, { width: '18%', fontSize: 7 }]}>{r.cyclePhase ?? '—'}</Text>
+              <Text style={[styles.td, { width: '10%' }]}>{r.momentum != null ? String(r.momentum) : '-'}</Text>
+              <Text style={[styles.td, { width: '18%', fontSize: 7 }]}>{r.cyclePhase ?? '-'}</Text>
               <Text style={[styles.td, { width: '23%', fontSize: 7 }]}>{r.signalLine}</Text>
             </View>
           ))}

@@ -24,7 +24,7 @@ function employmentArrow(score: number): SignalIndicator['arrow'] {
 }
 
 function lineFromDetail(d: CycleSignalDetail): string {
-  return `${sanitizeCycleSignalText(d.direction)} — ${sanitizeCycleSignalText(d.value)}`
+  return `${sanitizeCycleSignalText(d.direction)} - ${sanitizeCycleSignalText(d.value)}`
 }
 
 export function cycleAnalysisToSignalIndicators(cycle: CycleAnalysis): SignalIndicator[] {

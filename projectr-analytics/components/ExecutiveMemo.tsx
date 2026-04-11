@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import type { CycleAnalysis } from '@/lib/cycle/types'
+import { GEMINI_NO_EM_DASH_RULE } from '@/lib/gemini-text-rules'
 import { stripGeminiStringWrappers } from '@/lib/sanitize-gemini-string'
 
 interface MemoProps {
@@ -28,14 +29,14 @@ interface MemoProps {
 
 function cycleBlock(cycle: CycleAnalysis): string {
   return `
-Analytical cycle (classifier — do not contradict this phase in your narrative):
+Analytical cycle (classifier - do not contradict this phase in your narrative):
 - Phase: ${cycle.cycleStage} ${cycle.cyclePosition}
 - Confidence: ${cycle.confidence}/100. ${cycle.confidenceLine}
 - Data quality: ${cycle.dataQuality}
-- Rent: ${cycle.signals.rent.direction} — ${cycle.signals.rent.value} (${cycle.signals.rent.source})
-- Vacancy: ${cycle.signals.vacancy.direction} — ${cycle.signals.vacancy.value} (${cycle.signals.vacancy.source})
-- Permits: ${cycle.signals.permits.direction} — ${cycle.signals.permits.value} (${cycle.signals.permits.source})
-- Employment: ${cycle.signals.employment.direction} — ${cycle.signals.employment.value} (${cycle.signals.employment.source})
+- Rent: ${cycle.signals.rent.direction} - ${cycle.signals.rent.value} (${cycle.signals.rent.source})
+- Vacancy: ${cycle.signals.vacancy.direction} - ${cycle.signals.vacancy.value} (${cycle.signals.vacancy.source})
+- Permits: ${cycle.signals.permits.direction} - ${cycle.signals.permits.value} (${cycle.signals.permits.source})
+- Employment: ${cycle.signals.employment.direction} - ${cycle.signals.employment.value} (${cycle.signals.employment.source})
 `
 }
 
@@ -74,12 +75,14 @@ Key Metrics:
 
 Write a concise 3-paragraph executive investment memo for the following market. 
 
-Paragraph 1: Market Overview — summarize the current state of the market using the data provided.${cycle ? ' Open with the classified cycle phase (stage + position) and interpret what it means for supply and demand.' : ''}
-Paragraph 2: Opportunity & Risk — identify the key investment opportunity and the primary risk signal.
-Paragraph 3: Recommendation — provide a clear, actionable recommendation for a real estate developer or investor.
+Paragraph 1: Market Overview - summarize the current state of the market using the data provided.${cycle ? ' Open with the classified cycle phase (stage + position) and interpret what it means for supply and demand.' : ''}
+Paragraph 2: Opportunity & Risk - identify the key investment opportunity and the primary risk signal.
+Paragraph 3: Recommendation - provide a clear, actionable recommendation for a real estate developer or investor.
 
-Use specific numbers from the data. Be direct and professional. No bullet points, no headers — just three clean paragraphs.
-${cycle ? 'The analytical cycle block is authoritative for phase naming — align your wording with it.' : ''}
+Use specific numbers from the data. Be direct and professional. No bullet points, no headers - just three clean paragraphs.
+${cycle ? 'The analytical cycle block is authoritative for phase naming - align your wording with it.' : ''}
+
+${GEMINI_NO_EM_DASH_RULE}
 
 ${context}`
 
@@ -108,7 +111,7 @@ ${context}`
     const win = window.open('', '_blank')
     if (!win) return
     win.document.write(`
-      <html><head><title>Executive Memo — ${marketLabel}</title>
+      <html><head><title>Executive Memo - ${marketLabel}</title>
       <style>
         body { font-family: Georgia, serif; max-width: 700px; margin: 60px auto; color: #111; line-height: 1.7; }
         h1 { font-size: 18px; font-weight: bold; margin-bottom: 4px; }

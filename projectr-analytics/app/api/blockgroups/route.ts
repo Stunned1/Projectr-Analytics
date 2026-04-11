@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
     const [boundaryRes, acsRes] = await Promise.all([
       fetch(
         `${TIGER_URL}?where=STATE%3D'${stateFips}'+AND+COUNTY%3D'${countyFips}'&outFields=GEOID,STATE,COUNTY,TRACT,BLKGRP&geometryPrecision=4&f=geojson`,
-        { cache: 'no-store' } // skip Next.js cache — response can be >2MB
+        { cache: 'no-store' } // skip Next.js cache - response can be >2MB
       ),
       fetch(
         `${CENSUS_URL}?get=B01003_001E,B25001_001E,B25003_002E&for=block%20group:*&in=state:${stateFips}%20county:${countyFips}&key=${process.env.CENSUS_API_KEY}`,
@@ -69,7 +69,7 @@ export async function GET(request: NextRequest) {
     // Warn if response is large
     const featureCount = geojson.features?.length ?? 0
     if (featureCount > 300) {
-      // Large county — return a sample to keep response manageable
+      // Large county - return a sample to keep response manageable
       geojson.features = geojson.features.slice(0, 300)
     }
 

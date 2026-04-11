@@ -1,5 +1,5 @@
 /**
- * Transit Fetcher — Overpass API (OSM)
+ * Transit Fetcher - Overpass API (OSM)
  * Free, no key, global coverage.
  * Fetches: bus stops, rail/subway stations, subway route lines
  *

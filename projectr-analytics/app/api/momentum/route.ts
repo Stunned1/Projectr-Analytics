@@ -1,8 +1,8 @@
 /**
  * Momentum Score API
  * Computes a 0–100 investment momentum score per ZIP from:
- * - Job market (FRED unemployment, inverted — lower = better)
- * - Rent growth (Zillow ZORI 12m YoY — stronger signal than Census median rent)
+ * - Job market (FRED unemployment, inverted - lower = better)
+ * - Rent growth (Zillow ZORI 12m YoY - stronger signal than Census median rent)
  * - Permit density (Census BPS units permitted)
  * - Population growth (Census ACS 3yr)
  *

@@ -123,7 +123,7 @@ export function BarChartPdf({
   )
 }
 
-/** Left-aligned labels; horizontal bars — good for comparing sites on one metric. */
+/** Left-aligned labels; horizontal bars - good for comparing sites on one metric. */
 export function HorizontalBarChartPdf({
   rows,
   width,

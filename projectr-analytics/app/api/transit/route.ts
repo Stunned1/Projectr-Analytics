@@ -1,5 +1,5 @@
 /**
- * Transit API — Transitland REST API (primary) + Overpass OSM (fallback)
+ * Transit API - Transitland REST API (primary) + Overpass OSM (fallback)
  *
  * Fetches subway/rail/tram routes (types 0,1,2) and local bus (type 3) separately.
  * Filters out intercity routes by bounding geometry to a ~50km box around the ZIP.
@@ -59,7 +59,7 @@ const TYPE_COLORS: Record<number, [number, number, number]> = {
   4: [100, 200, 255],
 }
 
-/** Filter out pure intercity routes — route must have at least one coord near the ZIP center */
+/** Filter out pure intercity routes - route must have at least one coord near the ZIP center */
 function isLocalRoute(paths: [number, number][][], centerLng: number, centerLat: number): boolean {
   const NEARBY_DEG = 0.3
   for (const path of paths) {

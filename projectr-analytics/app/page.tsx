@@ -2,9 +2,6 @@
 
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import dynamic from 'next/dynamic'
-import Image from 'next/image'
-import Link from 'next/link'
-import { usePathname } from 'next/navigation'
 import ExecutiveMemo from '@/components/ExecutiveMemo'
 import AgenticNormalizer from '@/components/AgenticNormalizer'
 import MarketReportExport from '@/components/MarketReportExport'
@@ -20,8 +17,9 @@ import { useClientUploadSessionStore } from '@/lib/client-upload-session-store'
 import type { NormalizerIngestPayload } from '@/lib/normalize-client-types'
 import { aggregateClientUploadSession } from '@/lib/client-upload-session-aggregate'
 import SitesBootstrap from '@/components/SitesBootstrap'
-import ShortlistPanel from '@/components/ShortlistPanel'
+import CommandCenterSidebar from '@/components/CommandCenterSidebar'
 import { takePendingNav } from '@/lib/pending-navigation'
+import { RIGHT_PANEL_WIDTH_PX } from '@/lib/analyst-guide'
 import { MetricTooltip } from '@/components/MetricTooltip'
 import { MomentumExplainBlock } from '@/components/MomentumExplainBlock'
 import { CycleExplainCard } from '@/components/CycleExplainCard'
@@ -193,12 +191,12 @@ async function resolveAggregateAnchorGeo(cityZips: CityZip[]): Promise<{ zip: st
 // ── Formatters ────────────────────────────────────────────────────────────────
 
 function fmtMoney(n: number | null | undefined) {
-  if (n == null) return '—'
+  if (n == null) return '-'
   return '$' + Number(n).toLocaleString('en-US', { maximumFractionDigits: 0 })
 }
 
 function fmtNum(n: number | null | undefined, suffix = '') {
-  if (n == null) return '—'
+  if (n == null) return '-'
   return Number(n).toLocaleString('en-US', { maximumFractionDigits: 1 }) + suffix
 }
 
@@ -214,13 +212,13 @@ function trendsShapeForReport(t: TrendsData | null): { series: { date: string; v
   if (t.error) {
     return {
       series: [],
-      keyword_scope: `Search sentiment unavailable — ${t.error}`,
+      keyword_scope: `Search sentiment unavailable - ${t.error}`,
     }
   }
   const scopeParts = [t.geo_note, t.keyword_scope].filter((s): s is string => Boolean(s && String(s).trim()))
   let keyword_scope = scopeParts.join(' · ')
   if (t.empty_message) {
-    keyword_scope = keyword_scope ? `${keyword_scope} — ${t.empty_message}` : t.empty_message
+    keyword_scope = keyword_scope ? `${keyword_scope} - ${t.empty_message}` : t.empty_message
   }
   return { series: t.series, keyword_scope: keyword_scope || t.keyword_scope || 'Google Trends' }
 }
@@ -303,7 +301,7 @@ function ShortlistToggleButton({
       disabled={pending}
       className="mt-3 mb-4 w-full py-2 rounded-lg text-xs font-semibold border transition-colors disabled:opacity-50 bg-white/8 hover:bg-white/12 border-white/15 text-white"
     >
-      {pending ? 'Saving…' : hasZip ? '✓ On shortlist — tap to remove' : '+ Add to shortlist'}
+      {pending ? 'Saving…' : hasZip ? '✓ On shortlist - tap to remove' : '+ Add to shortlist'}
     </button>
   )
 }
@@ -338,7 +336,7 @@ function AggregateShortlistToggle({
     setPending(true)
     const pin = await resolveAggregateAnchorGeo(cityZips)
     if (!pin) {
-      setLocalError('Could not place pin — no coordinates for this area.')
+      setLocalError('Could not place pin - no coordinates for this area.')
       setPending(false)
       return
     }
@@ -383,7 +381,7 @@ function AggregateShortlistToggle({
         disabled={pending || !q}
         className="mt-3 w-full py-2 rounded-lg text-xs font-semibold border transition-colors disabled:opacity-50 bg-white/8 hover:bg-white/12 border-white/15 text-white"
       >
-        {pending ? 'Saving…' : hasArea ? '✓ Area on shortlist — tap to remove' : '+ Add area to shortlist'}
+        {pending ? 'Saving…' : hasArea ? '✓ Area on shortlist - tap to remove' : '+ Add area to shortlist'}
       </button>
       {localError && <p className="text-[9px] text-red-400 mt-1.5 px-0.5">{localError}</p>}
     </div>
@@ -419,48 +417,6 @@ function BubbleDivider() {
   return <div className="w-px h-8 bg-white/8 flex-shrink-0" />
 }
 
-function SidebarNavLink({ href, icon, label }: { href: string; icon: React.ReactNode; label: string }) {
-  const pathname = usePathname()
-  const active =
-    href === '/'
-      ? pathname === '/' || pathname === ''
-      : pathname === href || pathname.startsWith(`${href}/`)
-  return (
-    <Link
-      href={href}
-      className={cn(
-        'flex w-full items-center gap-3 rounded-lg border-l-2 px-3 py-2.5 text-sm transition-colors',
-        active
-          ? 'border-primary bg-primary/15 text-primary'
-          : 'border-transparent text-zinc-400 hover:bg-white/5 hover:text-white'
-      )}
-    >
-      <span className="h-4 w-4 flex-shrink-0">{icon}</span>
-      <span className="font-medium tracking-wide">{label}</span>
-    </Link>
-  )
-}
-
-function SidebarCollapsedLink({ href, icon, title }: { href: string; icon: React.ReactNode; title: string }) {
-  const pathname = usePathname()
-  const active =
-    href === '/'
-      ? pathname === '/' || pathname === ''
-      : pathname === href || pathname.startsWith(`${href}/`)
-  return (
-    <Link
-      href={href}
-      title={title}
-      className={cn(
-        'mx-auto flex h-9 w-9 items-center justify-center rounded-lg transition-colors',
-        active ? 'bg-primary/10 text-primary' : 'text-zinc-500 hover:text-white'
-      )}
-    >
-      {icon}
-    </Link>
-  )
-}
-
 const DEFAULT_MAP_LAYERS: MapLayersSnapshot = {
   zipBoundary: true,
   transitStops: true,
@@ -474,22 +430,7 @@ const DEFAULT_MAP_LAYERS: MapLayersSnapshot = {
   clientData: false,
   choroplethMetric: 'zori',
 }
-const MapIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21" /><line x1="9" y1="3" x2="9" y2="18" /><line x1="15" y1="6" x2="15" y2="21" /></svg>
-const UploadIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4">
-    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-    <polyline points="17 8 12 3 7 8" />
-    <line x1="12" y1="3" x2="12" y2="15" />
-  </svg>
-)
-const SearchIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-3.5 h-3.5"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
-const ChevronRight = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3 h-3"><polyline points="9 18 15 12 9 6" /></svg>
-const CollapseIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4"><polyline points="15 18 9 12 15 6" /></svg>
-const ExpandIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4"><polyline points="9 18 15 12 9 6" /></svg>
-
-const SIDEBAR_EXPANDED_PX = 200
-
-/** Agent-selected parcel / site — lives in the right panel, not over the map. */
+/** Agent-selected parcel / site - lives in the right panel, not over the map. */
 function SiteDetailRightPanel({ site, onBack }: { site: AnalysisSite; onBack: () => void }) {
   return (
     <div className="flex min-h-0 min-w-[360px] flex-1 flex-col overflow-hidden p-4">
@@ -535,7 +476,7 @@ function SiteDetailRightPanel({ site, onBack }: { site: AnalysisSite; onBack: ()
           <div className="rounded-lg border border-border/60 bg-muted/20 px-2.5 py-2">
             <p className="text-[9px] uppercase tracking-wide text-muted-foreground">ZORI growth</p>
             <p className="text-sm font-semibold text-foreground">
-              {site.zori_growth != null ? `+${site.zori_growth.toFixed(1)}%` : '—'}
+              {site.zori_growth != null ? `+${site.zori_growth.toFixed(1)}%` : '-'}
             </p>
             <p className="text-[9px] text-muted-foreground">12m YoY</p>
           </div>
@@ -544,7 +485,7 @@ function SiteDetailRightPanel({ site, onBack }: { site: AnalysisSite; onBack: ()
           <p className="mb-1 text-[10px] font-semibold text-primary">Why this site?</p>
           <p className="text-[11px] leading-relaxed text-muted-foreground">
             {site.far_utilization < 0.2
-              ? `Severely underbuilt — only ${(site.far_utilization * 100).toFixed(0)}% of allowable FAR developed. `
+              ? `Severely underbuilt - only ${(site.far_utilization * 100).toFixed(0)}% of allowable FAR developed. `
               : `Underutilized at ${(site.far_utilization * 100).toFixed(0)}% of max FAR. `}
             {(site.momentum ?? 0) >= 10
               ? `Strong development momentum with ${site.momentum} nearby permits signaling active neighborhood investment. `
@@ -593,7 +534,6 @@ export default function Home() {
   const [mapLayersSnapshot, setMapLayersSnapshot] = useState<MapLayersSnapshot>(DEFAULT_MAP_LAYERS)
   const layerStateResyncIdRef = useRef(0)
   const [layerStateResync, setLayerStateResync] = useState<{ id: number; state: LayerState } | null>(null)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [marketPanelTab, setMarketPanelTab] = useState<'analysis' | 'data'>('analysis')
 
   const handleNormalizerIngested = useCallback((payload: NormalizerIngestPayload) => {
@@ -1038,18 +978,20 @@ export default function Home() {
     }
   }
 
+  const rightPanelVisible = panelOpen && (result != null || aggregateData != null || selectedSite != null)
+
   const sidebarActiveMarket =
     result != null
       ? {
           kind: 'zip' as const,
           title: result.zillow?.city ?? result.zip,
-          subtitle: `${result.zip} · ${result.geo?.state ?? '—'}`,
+          subtitle: `${result.zip} · ${result.geo?.state ?? '-'}`,
         }
       : cityZips != null && cityZips.length > 0
         ? {
             kind: 'aggregate' as const,
             title: cityZips[0]?.city ?? '',
-            subtitle: `${cityZips.length} ZIPs · ${cityZips[0]?.state ?? '—'}`,
+            subtitle: `${cityZips.length} ZIPs · ${cityZips[0]?.state ?? '-'}`,
           }
         : null
 
@@ -1057,177 +999,35 @@ export default function Home() {
     <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
       <SitesBootstrap />
 
-      {/* ── Left Sidebar — collapsible ── */}
-      <aside
-        className="flex-shrink-0 flex flex-col bg-[#0a0a0a] border-r border-white/8 z-20 transition-all duration-200"
-        style={{ width: sidebarCollapsed ? 48 : SIDEBAR_EXPANDED_PX }}
-      >
-        {/* Logo + collapse toggle */}
-        <div className="flex items-center justify-between px-3 py-4 border-b border-white/8 min-h-[56px]">
-          {!sidebarCollapsed && (
-            <Image src="/Projectr_Logo.png" alt="Projectr" width={120} height={32} loading="eager" style={{ width: 'auto', height: '28px' }} />
-          )}
-          <button
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className="text-zinc-500 hover:text-white transition-colors flex-shrink-0 ml-auto"
-          >
-            {sidebarCollapsed ? <ExpandIcon /> : <CollapseIcon />}
-          </button>
-        </div>
+      <CommandCenterSidebar
+        searchInput={searchInput}
+        setSearchInput={setSearchInput}
+        error={error}
+        loading={loading}
+        onAnalyzeSubmit={fetchMarket}
+        activeMarket={sidebarActiveMarket}
+        activeMarketExtra={
+          cycleData ? (
+            <p className="mt-1 text-[9px] font-medium text-primary">
+              {cycleData.cycleStage} · {cycleData.cyclePosition}
+            </p>
+          ) : null
+        }
+        panelOpen={panelOpen}
+        onTogglePanel={() => setPanelOpen(!panelOpen)}
+        onShortlistOpenSite={(site: Site) => {
+          if (site.isAggregate && site.savedSearch?.trim()) {
+            const q = site.savedSearch.trim()
+            setSearchInput(q)
+            void runAggregateSearch(q)
+            return
+          }
+          setSearchInput(site.zip)
+          void loadZipMarket(site.zip)
+        }}
+      />
 
-        {/* Search — hidden when collapsed */}
-        {!sidebarCollapsed && (
-          <div className="px-3 py-3 border-b border-white/8">
-            <form onSubmit={fetchMarket}>
-              <div className="relative">
-                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none">
-                  <SearchIcon />
-                </span>
-                {loading && (
-                  <span
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-[#D76B3D]"
-                    aria-label="Loading"
-                  >
-                    <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path
-                        className="opacity-90"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                      />
-                    </svg>
-                  </span>
-                )}
-                <input
-                  type="text"
-                  value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value)}
-                  disabled={loading}
-                  placeholder="ZIP, City, ST, or Borough — Enter"
-                  className={cn(
-                    'w-full bg-white/5 border border-white/10 rounded-md pl-7 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-[#D76B3D]/50 transition-colors disabled:opacity-60',
-                    loading ? 'pr-9' : 'pr-3'
-                  )}
-                />
-              </div>
-              {error && <p className="text-red-400 text-[10px] mt-1 px-0.5">{error}</p>}
-            </form>
-          </div>
-        )}
-
-        {/* Search icon when collapsed */}
-        {sidebarCollapsed && (
-          <button
-            onClick={() => setSidebarCollapsed(false)}
-            className="flex items-center justify-center h-10 text-zinc-500 hover:text-white transition-colors"
-            title="Search"
-          >
-            <SearchIcon />
-          </button>
-        )}
-
-        {!sidebarCollapsed && (
-          <div className="border-b border-white/8 px-2 py-2">
-            <SidebarNavLink href="/" icon={<MapIcon />} label="Map" />
-            <SidebarNavLink href="/upload" icon={<UploadIcon />} label="Client CSV" />
-          </div>
-        )}
-
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <nav className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
-            {sidebarCollapsed ? (
-              <div className="flex flex-col gap-1">
-                <SidebarCollapsedLink href="/" icon={<MapIcon />} title="Map" />
-                <SidebarCollapsedLink href="/upload" icon={<UploadIcon />} title="Client CSV upload" />
-              </div>
-            ) : (
-              <>
-                <ShortlistPanel
-                  onOpenSite={(site: Site) => {
-                    if (site.isAggregate && site.savedSearch?.trim()) {
-                      const q = site.savedSearch.trim()
-                      setSearchInput(q)
-                      void runAggregateSearch(q)
-                      return
-                    }
-                    setSearchInput(site.zip)
-                    void loadZipMarket(site.zip)
-                  }}
-                />
-              </>
-            )}
-          </nav>
-
-          {(result || cityZips) && (
-            <div
-              className={cn(
-                'flex-shrink-0 border-t border-white/8 py-2',
-                sidebarCollapsed ? 'flex justify-center px-1' : 'px-2'
-              )}
-            >
-              {sidebarCollapsed ? (
-                <button
-                  type="button"
-                  onClick={() => setPanelOpen(!panelOpen)}
-                  className={cn(
-                    'flex h-9 w-9 items-center justify-center rounded-lg border transition-colors',
-                    panelOpen
-                      ? 'border-primary/50 bg-primary/15 text-primary'
-                      : 'border-white/10 bg-white/5 text-zinc-400 hover:border-primary/40 hover:text-white'
-                  )}
-                  title={
-                    result
-                      ? `${result.zillow?.city ?? result.zip} — toggle data panel`
-                      : cityZips
-                        ? `${cityZips[0]?.city ?? 'Area'} — toggle data panel`
-                        : 'Active market'
-                  }
-                >
-                  <MapIcon />
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="w-full rounded-lg border border-white/8 bg-white/5 p-2.5 text-left transition-colors hover:border-primary/40"
-                  onClick={() => setPanelOpen(!panelOpen)}
-                >
-                  <div className="mb-0.5 flex items-center justify-between">
-                    <p className="text-[9px] uppercase tracking-widest text-zinc-500">Active market</p>
-                    <ChevronRight />
-                  </div>
-                  {result ? (
-                    <>
-                      <p className="text-sm font-semibold text-white">{result.zillow?.city ?? result.zip}</p>
-                      <p className="text-[10px] text-zinc-500">
-                        {result.zip} · {result.geo?.state}
-                      </p>
-                      {cycleData && (
-                        <p className="mt-1 text-[9px] font-medium text-primary">
-                          {cycleData.cycleStage} · {cycleData.cyclePosition}
-                        </p>
-                      )}
-                    </>
-                  ) : cityZips ? (
-                    <>
-                      <p className="text-sm font-semibold text-white">{cityZips[0]?.city}</p>
-                      <p className="text-[10px] text-zinc-500">
-                        {cityZips.length} ZIPs · {cityZips[0]?.state}
-                      </p>
-                      {cycleData && (
-                        <p className="mt-1 text-[9px] font-medium text-primary">
-                          {cycleData.cycleStage} · {cycleData.cyclePosition}
-                        </p>
-                      )}
-                    </>
-                  ) : null}
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      </aside>
-
-      {/* ── Map ── — inset-0 fill gives CommandMap a definite box (flex % height + Google Map can otherwise leave overlays misaligned) */}
+      {/* ── Map ── - inset-0 fill gives CommandMap a definite box (flex % height + Google Map can otherwise leave overlays misaligned) */}
       <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
         <div className="absolute inset-0 min-h-0 min-w-0">
         <CommandMap
@@ -1252,6 +1052,8 @@ export default function Home() {
             return next
           })}
           layerStateResync={layerStateResync}
+          map3DActive={map3DActive}
+          onToggleMap3D={handleMap3DToggle}
         />
         </div>
 
@@ -1275,7 +1077,7 @@ export default function Home() {
                 <>
                   <BubbleStat
                     label="Status"
-                    value={marketStatus ?? '—'}
+                    value={marketStatus ?? '-'}
                     sub={marketStatus === 'Active' ? '● Live' : marketStatus === 'Moderate' ? '● Moderate' : null}
                     accent={marketStatus === 'Active' ? 'green' : null}
                   />
@@ -1305,7 +1107,7 @@ export default function Home() {
                       <BubbleDivider />
                       <BubbleStat
                         label="Interest"
-                        value={trends.latest_score != null ? `${trends.latest_score}/100` : '—'}
+                        value={trends.latest_score != null ? `${trends.latest_score}/100` : '-'}
                         sub={
                           trends.error
                             ? trends.error
@@ -1339,7 +1141,7 @@ export default function Home() {
                       <BubbleDivider />
                       <BubbleStat
                         label="Interest"
-                        value={trends.latest_score != null ? `${trends.latest_score}/100` : '—'}
+                        value={trends.latest_score != null ? `${trends.latest_score}/100` : '-'}
                         sub={
                           trends.error
                             ? trends.error
@@ -1373,11 +1175,13 @@ export default function Home() {
 
       {/* ── Right Data Panel ── */}
       <aside
-        className={`z-20 flex min-h-0 flex-shrink-0 flex-col overflow-hidden border-l border-border/80 bg-card transition-all duration-300 ${
-          panelOpen && (result || aggregateData || selectedSite) ? 'w-[360px]' : 'w-0 overflow-hidden border-l-0'
-        }`}
+        className={cn(
+          'z-20 flex min-h-0 flex-shrink-0 flex-col overflow-hidden border-l border-border/80 bg-card transition-[width] duration-300 ease-out',
+          !rightPanelVisible && 'border-l-0'
+        )}
+        style={{ width: rightPanelVisible ? RIGHT_PANEL_WIDTH_PX : 0 }}
       >
-        {panelOpen && selectedSite && (
+        {panelOpen && selectedSite != null && (
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <SiteDetailRightPanel site={selectedSite} onBack={() => setSelectedSite(null)} />
           </div>
@@ -1392,17 +1196,6 @@ export default function Home() {
                   <p className="mt-0.5 text-xs text-muted-foreground">{aggregateData.zip_count} ZIP codes · aggregated</p>
                 </div>
                 <div className="flex flex-shrink-0 items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={handleMap3DToggle}
-                    className="rounded-full border px-3 py-1 text-[10px] font-semibold text-white transition-colors"
-                    style={{
-                      background: map3DActive ? '#D76B3D' : 'rgba(45,51,66,0.95)',
-                      borderColor: map3DActive ? '#D76B3D' : 'rgba(75,85,99,0.9)',
-                    }}
-                  >
-                    3D
-                  </button>
                   <button type="button" onClick={() => setPanelOpen(false)} className="text-xl leading-none text-muted-foreground hover:text-foreground">×</button>
                 </div>
               </div>
@@ -1518,7 +1311,7 @@ export default function Home() {
                 <MetricRow
                   metricKey="trends"
                   label="Interest score"
-                  value={trends.latest_score != null ? `${trends.latest_score} / 100` : '—'}
+                  value={trends.latest_score != null ? `${trends.latest_score} / 100` : '-'}
                   sub={trends.keyword_scope}
                 />
                 {trends.data_points > 1 && trends.series.length > 1 && (
@@ -1592,17 +1385,6 @@ export default function Home() {
                   <p className="mt-0.5 text-xs text-muted-foreground">{result.zillow?.metro_name ?? ''} · {result.zip}</p>
                 </div>
                 <div className="flex flex-shrink-0 items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={handleMap3DToggle}
-                    className="rounded-full border px-3 py-1 text-[10px] font-semibold text-white transition-colors"
-                    style={{
-                      background: map3DActive ? '#D76B3D' : 'rgba(45,51,66,0.95)',
-                      borderColor: map3DActive ? '#D76B3D' : 'rgba(75,85,99,0.9)',
-                    }}
-                  >
-                    3D
-                  </button>
                   <button type="button" onClick={() => setPanelOpen(false)} className="text-xl leading-none text-muted-foreground hover:text-foreground">×</button>
                 </div>
               </div>
@@ -1678,7 +1460,7 @@ export default function Home() {
                   metricKey="zhvf"
                   label="1yr Forecast"
                   value={result.zillow.zhvf_growth_1yr != null && Math.abs(result.zillow.zhvf_growth_1yr) < 50
-                    ? fmtNum(result.zillow.zhvf_growth_1yr, '%') : '—'}
+                    ? fmtNum(result.zillow.zhvf_growth_1yr, '%') : '-'}
                 />
               </PanelSection>
             )}
@@ -1753,7 +1535,7 @@ export default function Home() {
                 <MetricRow
                   metricKey="trends"
                   label="Interest score"
-                  value={trends.latest_score != null ? `${trends.latest_score} / 100` : '—'}
+                  value={trends.latest_score != null ? `${trends.latest_score} / 100` : '-'}
                   sub={trends.keyword_scope}
                 />
                 {trends.data_points > 1 && trends.series.length > 1 && (
@@ -1791,7 +1573,7 @@ export default function Home() {
                       value={
                         result.zillow.zhvf_growth_1yr != null && Math.abs(result.zillow.zhvf_growth_1yr) < 50
                           ? fmtNum(result.zillow.zhvf_growth_1yr, '%')
-                          : '—'
+                          : '-'
                       }
                     />
                   </>
