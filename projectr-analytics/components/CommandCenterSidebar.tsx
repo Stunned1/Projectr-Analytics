@@ -4,7 +4,10 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import ShortlistPanel from '@/components/ShortlistPanel'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import type { Site } from '@/lib/sites-store'
+import { cn } from '@/lib/utils'
 
 const navBtnClass = (active: boolean) =>
   `w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors border-l-2 ${
@@ -99,22 +102,26 @@ export default function CommandCenterSidebar({
             <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none">
               <SearchIcon />
             </span>
-            <input
+            <Input
               type="text"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               placeholder="ZIP, City, ST, or Borough..."
-              className="w-full bg-white/5 border border-white/10 rounded-md pl-7 pr-3 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-[#D76B3D]/50 transition-colors"
+              className={cn(
+                'h-8 rounded-md pl-7 pr-3 text-xs text-white placeholder:text-zinc-600',
+                'border-white/10 bg-white/5 focus-visible:border-[#D76B3D]/50 focus-visible:ring-[#D76B3D]/25'
+              )}
             />
           </div>
           {error && <p className="text-red-400 text-[10px] mt-1 px-0.5">{error}</p>}
-          <button
+          <Button
             type="submit"
             disabled={loading}
-            className="w-full mt-2 bg-[#D76B3D] hover:bg-[#c45e32] text-white text-xs font-semibold py-2 rounded-md transition-colors disabled:opacity-50"
+            size="sm"
+            className="mt-2 h-8 w-full rounded-md bg-[#D76B3D] text-xs font-semibold text-white hover:bg-[#c45e32] disabled:opacity-50"
           >
             {loading ? 'Analyzing...' : 'Analyze Market'}
-          </button>
+          </Button>
         </form>
       </div>
 

@@ -3,6 +3,17 @@
 import { useEffect, useState } from 'react'
 import { useSitesStore } from '@/lib/sites-store'
 import type { Site } from '@/lib/sites-store'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
+import { Input } from '@/components/ui/input'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { cn } from '@/lib/utils'
 
 function cycleBadgeClass(stage: string | undefined): string {
   if (stage === 'Expansion') return 'bg-emerald-500/25 text-emerald-300 border-emerald-500/40'
@@ -24,7 +35,7 @@ function SiteLabelInput({
   }, [label, siteId])
 
   return (
-    <input
+    <Input
       type="text"
       value={value}
       onChange={(e) => setValue(e.target.value)}
@@ -36,7 +47,7 @@ function SiteLabelInput({
         }
         if (t !== label) void updateLabel(siteId, t)
       }}
-      className="w-full bg-black/30 border border-white/15 rounded px-1.5 py-0.5 text-[11px] text-white font-medium focus:outline-none focus:border-[#D76B3D]/50"
+      className="h-6 rounded border border-white/15 bg-black/30 px-1.5 text-[11px] font-medium text-white placeholder:text-zinc-600 focus-visible:border-[#D76B3D]/50"
       title="Site name — shown in PDF and map"
       aria-label="Site name"
     />
@@ -58,105 +69,127 @@ export default function ShortlistPanel({ onOpenSite }: { onOpenSite: (site: Site
   const compareCount = selectedForComparison.length
 
   return (
-    <div className="border-t border-white/8 mt-1 pt-2">
-      <button
-        type="button"
-        onClick={() => setPanelOpen(!panelOpen)}
-        className="w-full flex items-center justify-between px-2 py-1.5 rounded-md text-left hover:bg-white/5 transition-colors"
-      >
-        <span className="text-[10px] font-semibold text-zinc-300 uppercase tracking-wider">
-          Shortlist ({sites.length})
-        </span>
-        <span className="text-zinc-500 text-[10px]">{panelOpen ? '▾' : '▸'}</span>
-      </button>
+    <Collapsible
+      open={panelOpen}
+      onOpenChange={setPanelOpen}
+      className="mt-1 border-t border-white/8 pt-2"
+    >
+      <CollapsibleTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-auto w-full justify-between px-2 py-1.5 text-left font-normal hover:bg-white/5"
+        >
+          <span className="text-[10px] font-semibold tracking-wider text-zinc-300 uppercase">
+            Shortlist ({sites.length})
+          </span>
+          <span className="text-[10px] text-zinc-500">{panelOpen ? '▾' : '▸'}</span>
+        </Button>
+      </CollapsibleTrigger>
 
-      {syncError && <p className="text-[9px] text-amber-500/90 px-2 mt-1 leading-snug">{syncError}</p>}
-
-      {panelOpen && (
-        <div className="mt-1 max-h-[220px] overflow-y-auto px-1 pb-2 space-y-1">
-          {loading && <p className="text-[10px] text-zinc-500 px-1">Loading…</p>}
-          {!loading && sites.length === 0 && (
-            <p className="text-[9px] text-zinc-600 px-1 leading-snug">
-              Add sites from the data panel; names default to the place (ZIP is only the data key).
-            </p>
-          )}
-          {sites.map((s: Site) => (
-            <div
-              key={s.id}
-              className="rounded-md border border-white/10 bg-white/[0.03] p-1.5 space-y-1"
-            >
-              <div className="flex items-start gap-1">
-                <input
-                  type="checkbox"
-                  checked={selectedForComparison.includes(s.id)}
-                  onChange={() => toggleComparison(s.id)}
-                  className="mt-1 rounded border-white/20 flex-shrink-0"
-                  title="Include in PDF site comparison (pick 2+)"
-                />
-                <div className="flex-1 min-w-0 space-y-0.5">
-                  <SiteLabelInput siteId={s.id} label={s.label} />
-                  <button
-                    type="button"
-                    onClick={() => onOpenSite(s)}
-                    className="text-[8px] text-zinc-600 hover:text-[#D76B3D] tracking-wide text-left w-full"
-                  >
-                    {s.isAggregate ? 'Load area' : 'Load market data'}
-                    <span className="text-zinc-700">
-                      {s.isAggregate && s.savedSearch?.trim()
-                        ? ` · ${s.savedSearch.trim()}`
-                        : ` · ZIP ${s.zip}`}
-                    </span>
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void removeSite(s.id)}
-                  className="text-zinc-600 hover:text-red-400 text-[10px] px-1 flex-shrink-0 mt-0.5"
-                  title="Remove"
-                >
-                  ×
-                </button>
-              </div>
-              <div className="flex items-center gap-1 flex-wrap pl-5">
-                {(s.cycleStage || s.cyclePosition) && (
-                  <span className={`text-[8px] px-1.5 py-0.5 rounded border ${cycleBadgeClass(s.cycleStage)}`}>
-                    {s.cycleStage ?? '—'} {s.cyclePosition ?? ''}
-                  </span>
-                )}
-                {s.momentumScore != null && (
-                  <span className="text-[8px] text-zinc-400">Mom. {Math.round(s.momentumScore)}</span>
-                )}
-              </div>
-              <input
-                type="text"
-                defaultValue={s.notes ?? ''}
-                onBlur={(e) => {
-                  const next = e.target.value.trim()
-                  const prev = (s.notes ?? '').trim()
-                  if (next !== prev) void updateNotes(s.id, next)
-                }}
-                placeholder="Analyst note…"
-                className="w-full ml-5 max-w-[calc(100%-1.25rem)] bg-black/40 border border-white/10 rounded text-[9px] text-zinc-300 placeholder:text-zinc-600 px-1.5 py-1 focus:outline-none focus:border-[#D76B3D]/40"
-              />
-            </div>
-          ))}
-
-          {compareCount >= 2 && (
-            <div className="pt-1 px-1 flex items-center justify-between gap-1">
-              <p className="text-[9px] text-[#D76B3D]">
-                PDF site comparison: {compareCount} selected
-              </p>
-              <button
-                type="button"
-                onClick={() => clearComparisonSelection()}
-                className="text-[9px] text-zinc-500 hover:text-zinc-300"
-              >
-                Clear
-              </button>
-            </div>
-          )}
-        </div>
+      {syncError && (
+        <p className="mt-1 px-2 text-[9px] leading-snug text-amber-500/90">{syncError}</p>
       )}
-    </div>
+
+      <CollapsibleContent>
+        <ScrollArea className="mt-1 max-h-[220px]">
+          <div className="space-y-1 px-1 pb-2 pr-2">
+            {loading && <p className="px-1 text-[10px] text-zinc-500">Loading…</p>}
+            {!loading && sites.length === 0 && (
+              <p className="px-1 text-[9px] leading-snug text-zinc-600">
+                Add sites from the data panel; names default to the place (ZIP is only the data key).
+              </p>
+            )}
+            {sites.map((s: Site) => (
+              <div
+                key={s.id}
+                className="space-y-1 rounded-md border border-white/10 bg-white/[0.03] p-1.5"
+              >
+                <div className="flex items-start gap-1">
+                  <Checkbox
+                    checked={selectedForComparison.includes(s.id)}
+                    onCheckedChange={() => toggleComparison(s.id)}
+                    className="mt-1 border-white/20 data-checked:border-[#D76B3D] data-checked:bg-[#D76B3D]"
+                    title="Include in PDF site comparison (pick 2+)"
+                  />
+                  <div className="min-w-0 flex-1 space-y-0.5">
+                    <SiteLabelInput siteId={s.id} label={s.label} />
+                    <Button
+                      type="button"
+                      variant="link"
+                      size="xs"
+                      className="h-auto w-full justify-start p-0 text-[8px] font-normal tracking-wide text-zinc-600 hover:text-[#D76B3D] hover:no-underline"
+                      onClick={() => onOpenSite(s)}
+                    >
+                      {s.isAggregate ? 'Load area' : 'Load market data'}
+                      <span className="text-zinc-700">
+                        {s.isAggregate && s.savedSearch?.trim()
+                          ? ` · ${s.savedSearch.trim()}`
+                          : ` · ZIP ${s.zip}`}
+                      </span>
+                    </Button>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    className="mt-0.5 shrink-0 text-[10px] text-zinc-600 hover:text-red-400"
+                    onClick={() => void removeSite(s.id)}
+                    title="Remove"
+                  >
+                    ×
+                  </Button>
+                </div>
+                <div className="flex flex-wrap items-center gap-1 pl-5">
+                  {(s.cycleStage || s.cyclePosition) && (
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        'h-auto rounded border px-1.5 py-0.5 text-[8px] font-normal',
+                        cycleBadgeClass(s.cycleStage)
+                      )}
+                    >
+                      {s.cycleStage ?? '—'} {s.cyclePosition ?? ''}
+                    </Badge>
+                  )}
+                  {s.momentumScore != null && (
+                    <span className="text-[8px] text-zinc-400">Mom. {Math.round(s.momentumScore)}</span>
+                  )}
+                </div>
+                <Input
+                  type="text"
+                  defaultValue={s.notes ?? ''}
+                  onBlur={(e) => {
+                    const next = e.target.value.trim()
+                    const prev = (s.notes ?? '').trim()
+                    if (next !== prev) void updateNotes(s.id, next)
+                  }}
+                  placeholder="Analyst note…"
+                  className="ml-5 h-auto max-w-[calc(100%-1.25rem)] rounded border border-white/10 bg-black/40 px-1.5 py-1 text-[9px] text-zinc-300 placeholder:text-zinc-600 focus-visible:border-[#D76B3D]/40"
+                />
+              </div>
+            ))}
+
+            {compareCount >= 2 && (
+              <div className="flex items-center justify-between gap-1 px-1 pt-1">
+                <p className="text-[9px] text-[#D76B3D]">
+                  PDF site comparison: {compareCount} selected
+                </p>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  className="h-auto p-0 text-[9px] text-zinc-500 hover:text-zinc-300"
+                  onClick={() => clearComparisonSelection()}
+                >
+                  Clear
+                </Button>
+              </div>
+            )}
+          </div>
+        </ScrollArea>
+      </CollapsibleContent>
+    </Collapsible>
   )
 }
