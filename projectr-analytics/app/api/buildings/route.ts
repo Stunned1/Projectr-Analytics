@@ -42,12 +42,21 @@ export async function GET(request: NextRequest) {
   const lat = parseFloat(request.nextUrl.searchParams.get('lat') ?? '')
   const lng = parseFloat(request.nextUrl.searchParams.get('lng') ?? '')
   const radius = parseFloat(request.nextUrl.searchParams.get('radius') ?? '0.02') // ~2km default
+  const zoom = parseFloat(request.nextUrl.searchParams.get('zoom') ?? '0')
 
   if (isNaN(lat) || isNaN(lng)) {
     return NextResponse.json({ error: 'Missing lat/lng' }, { status: 400 })
   }
 
   const bbox = `${lat - radius},${lng - radius},${lat + radius},${lng + radius}`
+  if (!isNaN(zoom) && zoom < 14) {
+    return NextResponse.json({
+      type: 'FeatureCollection',
+      features: [],
+      meta: { count: 0, bbox, zoom, mode: 'skipped_low_zoom' },
+    })
+  }
+
   const query = `[out:json][timeout:25];way["building"](${bbox});out geom;`
 
   try {
@@ -75,12 +84,12 @@ export async function GET(request: NextRequest) {
       (e: { geometry?: unknown }) => e.geometry && Array.isArray(e.geometry)
     )
 
-    const features = elements.map(osmWayToGeoJSON)
+    const features = elements.slice(0, 2500).map(osmWayToGeoJSON)
 
     return NextResponse.json({
       type: 'FeatureCollection',
       features,
-      meta: { count: features.length, bbox },
+      meta: { count: features.length, bbox, zoom },
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unexpected error'

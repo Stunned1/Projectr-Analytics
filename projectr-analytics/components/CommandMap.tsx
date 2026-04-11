@@ -1,12 +1,13 @@
 'use client'
 
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
+import { memo, useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { APIProvider, Map, useMap } from '@vis.gl/react-google-maps'
 import { GoogleMapsOverlay } from '@deck.gl/google-maps'
 import { GeoJsonLayer, ScatterplotLayer, PolygonLayer, ColumnLayer } from '@deck.gl/layers'
 import { HeatmapLayer } from '@deck.gl/aggregation-layers'
 import type { Layer, PickingInfo } from '@deck.gl/core'
-import type { Feature, FeatureCollection, GeoJSON, Geometry, Polygon } from 'geojson'
+import type { GeoJSON } from 'geojson'
+import { dedupedFetchJson } from '@/lib/request-cache'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -45,26 +46,37 @@ interface ZipBoundary {
   zhvi: number | null
 }
 
-type BlockGroupProps = {
-  GEOID?: string
-  population?: number
-  housing_units?: number
-  owner_occupied?: number
+interface BlockGroupFeature {
+  type: 'Feature'
+  geometry: object
+  properties: {
+    GEOID: string
+    population: number
+    housing_units: number
+    owner_occupied: number
+  }
 }
 
-type BlockGroupFeature = Feature<Geometry, BlockGroupProps>
-type BlockGroupCollection = FeatureCollection<Geometry, BlockGroupProps>
-
-type BuildingProps = {
-  id?: number
-  building?: string
-  name?: string | null
-  levels?: number | null
-  height?: number
+interface BlockGroupCollection {
+  type: 'FeatureCollection'
+  features: BlockGroupFeature[]
 }
 
-type BuildingFeature = Feature<Polygon, BuildingProps>
-type BuildingCollection = FeatureCollection<Polygon, BuildingProps> & {
+interface BuildingFeature {
+  type: 'Feature'
+  geometry: { type: 'Polygon'; coordinates: number[][][] }
+  properties: {
+    id: number
+    building: string
+    name: string | null
+    levels: number | null
+    height: number
+  }
+}
+
+interface BuildingCollection {
+  type: 'FeatureCollection'
+  features: BuildingFeature[]
   meta?: { count: number; bbox: string }
 }
 
@@ -104,6 +116,33 @@ interface LayerState {
   floodRisk: boolean
 }
 
+interface MapViewState {
+  lat: number
+  lng: number
+  zoom: number
+}
+
+interface ParcelPayload {
+  lat: number
+  lng: number
+  assessed_per_sqft: number
+  floors: number
+  land_use: string | null
+  land_use_label: string
+  address: string
+  assessed_value: number
+}
+
+interface ParcelResponse {
+  parcels?: ParcelPayload[]
+  stats?: { p25_per_sqft: number; p75_per_sqft: number }
+}
+
+function hasFeatures(value: unknown): value is { features: unknown[] } {
+  if (!value || typeof value !== 'object') return false
+  return Array.isArray((value as { features?: unknown[] }).features)
+}
+
 // ── Dev sidebar registry ──────────────────────────────────────────────────────
 
 const DATA_LAYER_REGISTRY = [
@@ -128,21 +167,11 @@ const DATA_LAYER_REGISTRY = [
   { label: 'Permit Pin Locations', source: 'ArcGIS REST', visualized: false, layerType: null, note: 'DEFERRED — jurisdiction-specific feeds required' },
 ]
 
-const MAP_STYLE = [
-  { featureType: 'all', elementType: 'labels.text.fill', stylers: [{ saturation: 36 }, { color: '#000000' }, { lightness: 40 }] },
-  { featureType: 'all', elementType: 'labels.text.stroke', stylers: [{ visibility: 'on' }, { color: '#000000' }, { lightness: 16 }] },
-  { featureType: 'all', elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
-  { featureType: 'administrative', elementType: 'geometry.fill', stylers: [{ color: '#000000' }, { lightness: 20 }] },
-  { featureType: 'administrative', elementType: 'geometry.stroke', stylers: [{ color: '#000000' }, { lightness: 17 }, { weight: 1.2 }] },
-  { featureType: 'landscape', elementType: 'geometry', stylers: [{ color: '#000000' }, { lightness: 20 }] },
-  { featureType: 'poi', elementType: 'geometry', stylers: [{ color: '#000000' }, { lightness: 21 }] },
-  { featureType: 'road.highway', elementType: 'geometry.fill', stylers: [{ color: '#000000' }, { lightness: 17 }] },
-  { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#000000' }, { lightness: 29 }, { weight: 0.2 }] },
-  { featureType: 'road.arterial', elementType: 'geometry', stylers: [{ color: '#000000' }, { lightness: 18 }] },
-  { featureType: 'road.local', elementType: 'geometry', stylers: [{ color: '#000000' }, { lightness: 16 }] },
-  { featureType: 'transit', elementType: 'geometry', stylers: [{ color: '#000000' }, { lightness: 19 }] },
-  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#000000' }, { lightness: 17 }] },
-]
+// Reuse expensive county blockgroup responses across CommandMap remounts.
+const BLOCKGROUP_CACHE = new globalThis.Map<string, BlockGroupCollection>()
+let commandMapRenderCounter = 0
+
+// ── Color scale: blue (low rent) → red (high rent) ───────────────────────────
 // Normalized across the set of loaded ZIPs for relative contrast
 
 function buildColorScale(values: (number | null)[]) {
@@ -208,7 +237,7 @@ function MapFitter({ boundary, zip }: { boundary: GeoJSON | null; zip: string | 
 // ── DeckGL overlay ────────────────────────────────────────────────────────────
 
 function DeckGlOverlay({ layers }: { layers: Layer[] }) {
-  const deck = useMemo(() => new GoogleMapsOverlay({ interleaved: false }), [])
+  const deck = useMemo(() => new GoogleMapsOverlay({ interleaved: true }), [])
   const map = useMap()
   const attachedMapRef = useRef<google.maps.Map | null>(null)
   const isAttachedRef = useRef(false)
@@ -257,6 +286,34 @@ function TiltController({ tilt, heading }: { tilt: number; heading: number }) {
   return null
 }
 
+// ── Camera sampler (listener-free) ────────────────────────────────────────────
+// Polls map center/zoom periodically to avoid brittle addListener wiring.
+function CameraSampler({ enabled, onSample }: { enabled: boolean; onSample: (view: MapViewState) => void }) {
+  const map = useMap()
+  const lastKeyRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!enabled || !map) return
+
+    const sample = () => {
+      const center = map.getCenter()
+      const zoom = map.getZoom()
+      if (!center || typeof zoom !== 'number') return
+      const view = { lat: center.lat(), lng: center.lng(), zoom }
+      const key = `${view.lat.toFixed(3)}|${view.lng.toFixed(3)}|${Math.round(view.zoom * 10) / 10}`
+      if (key === lastKeyRef.current) return
+      lastKeyRef.current = key
+      onSample(view)
+    }
+
+    sample()
+    const id = setInterval(sample, 400)
+    return () => clearInterval(id)
+  }, [enabled, map, onSample])
+
+  return null
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 interface CommandMapProps {
@@ -265,13 +322,14 @@ interface CommandMapProps {
   transitData: TransitData | null
 }
 
-export default function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
+function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
+  const perfDebug = process.env.NEXT_PUBLIC_PERF_DEBUG === '1'
+
   const [primaryBoundary, setPrimaryBoundary] = useState<GeoJSON | null>(null)
   const [neighborBoundaries, setNeighborBoundaries] = useState<ZipBoundary[]>([])
-  const [transitStops, setTransitStops] = useState<TransitStop[]>([])
   const [blockGroupData, setBlockGroupData] = useState<BlockGroupCollection | null>(null)
   const [buildingData, setBuildingData] = useState<BuildingCollection | null>(null)
-  const [parcelData, setParcelData] = useState<{ parcels: Array<{ lat: number; lng: number; assessed_per_sqft: number; floors: number; land_use: string | null; land_use_label: string; address: string; assessed_value: number }>; stats: { p25_per_sqft: number; p75_per_sqft: number } } | null>(null)
+  const [parcelData, setParcelData] = useState<{ parcels: ParcelPayload[]; stats: { p25_per_sqft: number; p75_per_sqft: number } } | null>(null)
   const [tractData, setTractData] = useState<TractCollection | null>(null)
   const [amenityPoints, setAmenityPoints] = useState<AmenityPoint[]>([])
   const [floodData, setFloodData] = useState<FloodCollection | null>(null)
@@ -290,65 +348,131 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
   const [activeMetric, setActiveMetric] = useState<'zori' | 'zhvi'>('zori')
   const [tilt, setTilt] = useState(0)
   const [heading, setHeading] = useState(0)
+  const latestViewRef = useRef<MapViewState | null>(null)
+  const buildingsFetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastBuildingsFetchKeyRef = useRef<string | null>(null)
+  const lastSampleHandledAtRef = useRef(0)
+  const mapId = process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID ?? process.env.NEXT_PUBLIC_GOOGLE_MAPS_ID ?? undefined
+
+  const setTooltipStable = useCallback((next: { x: number; y: number; text: string } | null) => {
+    setTooltip((prev) => {
+      if (next === null) return prev === null ? prev : null
+      if (!prev) return next
+      const sameText = prev.text === next.text
+      const sameX = Math.abs(prev.x - next.x) < 2
+      const sameY = Math.abs(prev.y - next.y) < 2
+      return sameText && sameX && sameY ? prev : next
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!perfDebug) return
+    commandMapRenderCounter += 1
+    console.log('[perf] CommandMap render #', commandMapRenderCounter)
+  })
 
   // Fetch primary boundary + transit + neighbors when zip changes
   useEffect(() => {
     if (!zip) return
-    setPrimaryBoundary(null)
-    setNeighborBoundaries([])
-    setTransitStops([])
-    setBlockGroupData(null)
-    setBuildingData(null)
-    setParcelData(null)
-    setTractData(null)
-    setAmenityPoints([])
-    setFloodData(null)
 
     // Primary boundary
-    fetch('/api/boundaries?zip=' + zip)
-      .then((r) => r.json())
-      .then((d) => { if (d.features) setPrimaryBoundary(d) })
+    dedupedFetchJson<GeoJSON>('/api/boundaries?zip=' + zip)
+      .then((d) => { if (hasFeatures(d)) setPrimaryBoundary(d) })
       .catch(() => {})
-    fetch('/api/neighbors?zip=' + zip)
-      .then((r) => r.json())
+    dedupedFetchJson<{ zips?: NeighborZip[] }>('/api/neighbors?zip=' + zip)
       .then(async (d) => {
         const neighbors: NeighborZip[] = d.zips ?? []
         if (!neighbors.length) return
 
-        // Fetch boundaries for all neighbors in parallel (limit to 15 for perf)
-        const sample = neighbors.slice(0, 15)
+        // Fetch boundaries for all neighbors in parallel (limit for perf/GPU load)
+        const sample = neighbors.slice(0, 10)
         const results = await Promise.allSettled(
           sample.map((n) =>
-            fetch('/api/boundaries?zip=' + n.zip)
-              .then((r) => r.json())
+            dedupedFetchJson<GeoJSON>('/api/boundaries?zip=' + n.zip)
               .then((geojson) => ({ zip: n.zip, geojson, zori: n.zori_latest, zhvi: n.zhvi_latest }))
           )
         )
-        const loaded: ZipBoundary[] = results
-          .filter((r): r is PromiseFulfilledResult<ZipBoundary> => r.status === 'fulfilled' && r.value.geojson?.features?.length > 0)
-          .map((r) => r.value)
+        const loaded: ZipBoundary[] = results.flatMap((r) => {
+          if (r.status !== 'fulfilled') return []
+          return hasFeatures(r.value.geojson) && r.value.geojson.features.length > 0 ? [r.value] : []
+        })
         setNeighborBoundaries(loaded)
       })
       .catch(() => {})
   }, [zip])
 
-  // Fetch block groups + buildings when we have geo data
+  // Fetch block groups + parcels when we have geo data
   useEffect(() => {
     if (!marketData?.geo) return
     const { lat, lng, stateFips, countyFips } = marketData.geo
 
     // Block groups — need state + county FIPS
     if (stateFips && countyFips && countyFips !== '000') {
-      fetch(`/api/blockgroups?state=${stateFips}&county=${countyFips}`)
-        .then((r) => r.json())
-        .then((d) => { if (d.features) setBlockGroupData(d) })
+      const countyKey = `${stateFips}-${countyFips}`
+      const cached = BLOCKGROUP_CACHE.get(countyKey)
+      const blockgroupsPromise = cached
+        ? Promise.resolve(cached)
+        : dedupedFetchJson<BlockGroupCollection>(`/api/blockgroups?state=${stateFips}&county=${countyFips}`, {
+          cacheKey: `blockgroups:${countyKey}`,
+          ttlMs: 30 * 60 * 1000,
+        })
+
+      blockgroupsPromise
+        .then((d) => {
+          if (d.features?.length) {
+            BLOCKGROUP_CACHE.set(countyKey, d)
+            setBlockGroupData(d)
+          }
+        })
         .catch(() => {})
     }
 
-    // Buildings — fetch for the searched area, retry once on failure
+    // NYC parcels (PLUTO) — only for NYC ZIPs
+    if (marketData?.zip) {
+      dedupedFetchJson<ParcelResponse>(`/api/parcels?zip=${marketData.zip}`)
+        .then((d) => {
+          if (Array.isArray(d.parcels) && d.stats) {
+            setParcelData({ parcels: d.parcels, stats: d.stats })
+          }
+        })
+        .catch(() => {})
+    }
+
+    // Census Tracts with rent/income data
+    if (stateFips && countyFips && countyFips !== '000') {
+      dedupedFetchJson<TractCollection>(`/api/tracts?state=${stateFips}&county=${countyFips}`)
+        .then((d) => { if (d.features) setTractData(d) })
+        .catch(() => {})
+    }
+
+    // OSM Amenity heatmap points
+    dedupedFetchJson<{ points?: AmenityPoint[] }>(`/api/amenities?lat=${lat}&lng=${lng}&radius=0.06`)
+      .then((d) => { if (d.points) setAmenityPoints(d.points) })
+      .catch(() => {})
+
+    // FEMA Flood Risk zones
+    dedupedFetchJson<FloodCollection>(`/api/floodrisk?lat=${lat}&lng=${lng}&radius=0.05`)
+      .then((d) => { if (d.features) setFloodData(d) })
+      .catch(() => {})
+  }, [marketData])
+
+  const fetchBuildingsForView = useCallback((view: MapViewState) => {
+    if (!layers.buildings) return
+    if (view.zoom < 14) {
+      setBuildingData(null)
+      return
+    }
+    const roundedLat = Number(view.lat.toFixed(3))
+    const roundedLng = Number(view.lng.toFixed(3))
+    const zoomBucket = Math.floor(view.zoom)
+    const radius = view.zoom >= 16 ? 0.01 : 0.02
+    const fetchKey = `${roundedLat}|${roundedLng}|${zoomBucket}|${radius}`
+    if (fetchKey === lastBuildingsFetchKeyRef.current) return
+    lastBuildingsFetchKeyRef.current = fetchKey
+
+    const buildingsUrl = `/api/buildings?lat=${roundedLat}&lng=${roundedLng}&radius=${radius}&zoom=${zoomBucket}`
     const tryBuildings = (attempt = 0) => {
-      fetch(`/api/buildings?lat=${lat}&lng=${lng}&radius=0.025`)
-        .then((r) => r.json())
+      dedupedFetchJson<BuildingCollection>(buildingsUrl, { ttlMs: 60_000 })
         .then((d) => {
           if (d.features) setBuildingData(d)
           else if (attempt < 1) setTimeout(() => tryBuildings(1), 3000)
@@ -356,51 +480,48 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
         .catch(() => { if (attempt < 1) setTimeout(() => tryBuildings(1), 3000) })
     }
     tryBuildings()
+  }, [layers.buildings])
 
-    // NYC parcels (PLUTO) — only for NYC ZIPs
-    if (marketData?.zip) {
-      fetch(`/api/parcels?zip=${marketData.zip}`)
-        .then((r) => r.json())
-        .then((d) => { if (d.parcels) setParcelData(d) })
-        .catch(() => {})
-    }
+  const handleCameraSample = useCallback((view: MapViewState) => {
+    // Hard throttle camera-driven logic to max 10Hz.
+    const now = Date.now()
+    if (now - lastSampleHandledAtRef.current < 100) return
+    lastSampleHandledAtRef.current = now
 
-    // Census Tracts with rent/income data
-    if (stateFips && countyFips && countyFips !== '000') {
-      fetch(`/api/tracts?state=${stateFips}&county=${countyFips}`)
-        .then((r) => r.json())
-        .then((d) => { if (d.features) setTractData(d) })
-        .catch(() => {})
-    }
+    latestViewRef.current = view
+    if (!layers.buildings) return
+    if (buildingsFetchTimerRef.current) clearTimeout(buildingsFetchTimerRef.current)
+    buildingsFetchTimerRef.current = setTimeout(() => {
+      const latest = latestViewRef.current
+      if (!latest) return
+      fetchBuildingsForView(latest)
+    }, 220)
+  }, [layers.buildings, fetchBuildingsForView])
 
-    // OSM Amenity heatmap points
-    fetch(`/api/amenities?lat=${lat}&lng=${lng}&radius=0.06`)
-      .then((r) => r.json())
-      .then((d) => { if (d.points) setAmenityPoints(d.points) })
-      .catch(() => {})
-
-    // FEMA Flood Risk zones
-    fetch(`/api/floodrisk?lat=${lat}&lng=${lng}&radius=0.05`)
-      .then((r) => r.json())
-      .then((d) => { if (d.features) setFloodData(d) })
-      .catch(() => {})
-  }, [marketData])
+  // Seed buildings using zip-center view.
+  useEffect(() => {
+    if (!layers.buildings || !marketData?.geo) return
+    handleCameraSample({ lat: marketData.geo.lat, lng: marketData.geo.lng, zoom: 15 })
+  }, [layers.buildings, marketData, handleCameraSample])
 
   useEffect(() => {
-    if (!zip || !transitData || transitData.zip !== zip) {
-      setTransitStops([])
-      return
+    if (layers.buildings) return
+    if (buildingsFetchTimerRef.current) clearTimeout(buildingsFetchTimerRef.current)
+  }, [layers.buildings])
+
+  useEffect(() => {
+    return () => {
+      if (buildingsFetchTimerRef.current) clearTimeout(buildingsFetchTimerRef.current)
     }
-    if (!transitData.geojson?.features) {
-      setTransitStops([])
-      return
-    }
-    setTransitStops(
-      transitData.geojson.features.map((f) => ({
-        position: f.geometry.coordinates as [number, number],
-        name: f.properties.stop_name,
-      }))
-    )
+  }, [])
+
+  const transitStops = useMemo(() => {
+    if (!zip || !transitData || transitData.zip !== zip) return []
+    if (!transitData.geojson?.features) return []
+    return transitData.geojson.features.map((f) => ({
+      position: f.geometry.coordinates as [number, number],
+      name: f.properties.stop_name,
+    }))
   }, [zip, transitData])
 
   // Build color scale across all loaded ZIPs for the selected metric
@@ -438,11 +559,11 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
             pickable: true,
             onHover: (info: PickingInfo) => {
               if (info.object) {
-                setTooltip({
+                setTooltipStable({
                   x: info.x, y: info.y,
                   text: 'ZIP ' + n.zip + (metricValue ? ` · $${metricValue.toFixed(0)} ${activeMetric.toUpperCase()}` : ''),
                 })
-              } else setTooltip(null)
+              } else setTooltipStable(null)
             },
           })
         )
@@ -464,11 +585,11 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
           pickable: true,
           onHover: (info: PickingInfo) => {
             if (info.object) {
-              setTooltip({
+              setTooltipStable({
                 x: info.x, y: info.y,
                 text: 'ZIP ' + zip + (primaryMetricValue ? ` · $${primaryMetricValue.toFixed(0)} ${activeMetric.toUpperCase()}` : ''),
               })
-            } else setTooltip(null)
+            } else setTooltipStable(null)
           },
         })
       )
@@ -482,12 +603,12 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
           data: transitStops,
           getPosition: (d: TransitStop) => d.position,
           getRadius: 35,
-          getFillColor: [215, 107, 61, 220], // #D76B3D orange
+          getFillColor: [0, 210, 255, 200],
           pickable: true,
           onHover: (info: PickingInfo) => {
             const d = info.object as TransitStop | undefined
-            if (d) setTooltip({ x: info.x, y: info.y, text: '\uD83D\uDE8C ' + d.name })
-            else setTooltip(null)
+            if (d) setTooltipStable({ x: info.x, y: info.y, text: '\uD83D\uDE8C ' + d.name })
+            else setTooltipStable(null)
           },
         })
       )
@@ -496,19 +617,17 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
     // Block groups — sub-ZIP population density choropleth
     if (layers.blockGroups && blockGroupData) {
       const bgFeatures = blockGroupData.features ?? []
-      const pops = bgFeatures
-        .map((f) => f.properties.population ?? 0)
-        .filter((p) => p > 0)
+      const pops = bgFeatures.map((f) => f.properties.population).filter((p) => p > 0)
       const minPop = pops.length ? Math.min(...pops) : 0
       const maxPop = pops.length ? Math.max(...pops) : 1
 
       result.push(
         new GeoJsonLayer({
           id: 'block-groups',
-          data: blockGroupData,
+          data: blockGroupData as unknown as GeoJSON,
           stroked: true,
           filled: true,
-          getFillColor: (f: BlockGroupFeature) => {
+          getFillColor: (f: { properties: { population: number } }) => {
             const pop = f.properties.population ?? 0
             const t = maxPop === minPop ? 0.5 : Math.min(Math.max((pop - minPop) / (maxPop - minPop), 0), 1)
             // Green (low density) → yellow → orange (high density)
@@ -518,13 +637,13 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
           lineWidthMinPixels: 1,
           pickable: true,
           onHover: (info: PickingInfo) => {
-            const f = info.object as BlockGroupFeature | undefined
+            const f = info.object as { properties: { population: number; housing_units: number } } | undefined
             if (f) {
-              setTooltip({
+              setTooltipStable({
                 x: info.x, y: info.y,
-                text: `Pop: ${(f.properties.population ?? 0).toLocaleString()} · Units: ${(f.properties.housing_units ?? 0).toLocaleString()}`,
+                text: `Pop: ${f.properties.population?.toLocaleString()} · Units: ${f.properties.housing_units?.toLocaleString()}`,
               })
-            } else setTooltip(null)
+            } else setTooltipStable(null)
           },
         })
       )
@@ -556,8 +675,8 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
             const f = info.object as { properties: { name: string | null; building: string; height: number } } | undefined
             if (f) {
               const label = f.properties.name ?? f.properties.building
-              setTooltip({ x: info.x, y: info.y, text: `🏢 ${label} · ${f.properties.height}m` })
-            } else setTooltip(null)
+              setTooltipStable({ x: info.x, y: info.y, text: `🏢 ${label} · ${f.properties.height}m` })
+            } else setTooltipStable(null)
           },
         })
       )
@@ -595,11 +714,11 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
           onHover: (info: PickingInfo) => {
             const d = info.object as typeof parcelData.parcels[0] | undefined
             if (d) {
-              setTooltip({
+              setTooltipStable({
                 x: info.x, y: info.y,
                 text: `${d.address} · $${d.assessed_value.toLocaleString()} · ${d.land_use_label}`,
               })
-            } else setTooltip(null)
+            } else setTooltipStable(null)
           },
         })
       )
@@ -711,7 +830,7 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
     }
 
     return result
-  }, [primaryBoundary, neighborBoundaries, transitStops, blockGroupData, buildingData, parcelData, tractData, amenityPoints, floodData, layers, colorScale, primaryMetricValue, activeMetric, zip])
+  }, [primaryBoundary, neighborBoundaries, transitStops, blockGroupData, buildingData, parcelData, tractData, amenityPoints, floodData, layers, colorScale, primaryMetricValue, activeMetric, zip, setTooltipStable])
 
   const handleToggle = useCallback((key: keyof LayerState) => {
     setLayers((prev) => ({ ...prev, [key]: !prev[key] }))
@@ -721,7 +840,7 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
     <div className="relative w-full h-full">
       <APIProvider apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY!}>
         <Map
-          mapId={process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID ?? undefined}
+          mapId={mapId}
           defaultCenter={{ lat: 37.2563, lng: -80.4347 }}
           defaultZoom={11}
           colorScheme="DARK"
@@ -731,6 +850,7 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
         >
           <MapFitter boundary={primaryBoundary} zip={zip} />
           <TiltController tilt={tilt} heading={heading} />
+          <CameraSampler enabled={layers.buildings} onSample={handleCameraSample} />
           <DeckGlOverlay layers={deckLayers} />
         </Map>
       </APIProvider>
@@ -760,7 +880,7 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
           { key: 'floodRisk' as const, label: '⚠️ Flood Risk' },
         ]).map(({ key, label }) => (
           <label key={key} className="flex items-center gap-2 cursor-pointer mb-1">
-            <input type="checkbox" checked={layers[key]} onChange={() => handleToggle(key)} className="accent-orange-500" />
+            <input type="checkbox" checked={layers[key]} onChange={() => handleToggle(key)} className="accent-blue-500" />
             <span className="text-zinc-300 text-xs">{label}</span>
           </label>
         ))}
@@ -783,7 +903,7 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
           <input
             type="range" min={0} max={67.5} step={1} value={tilt}
             onChange={(e) => setTilt(Number(e.target.value))}
-            className="w-full accent-orange-500"
+            className="w-full accent-blue-500"
           />
           <div className="flex justify-between text-zinc-600 text-xs mt-0.5">
             <span>0°</span><span>{tilt}°</span><span>67.5°</span>
@@ -792,7 +912,7 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
           <input
             type="range" min={0} max={360} step={1} value={heading}
             onChange={(e) => setHeading(Number(e.target.value))}
-            className="w-full accent-orange-500"
+            className="w-full accent-blue-500"
           />
           <div className="flex justify-between text-zinc-600 text-xs mt-0.5">
             <span>N</span><span>{heading}°</span>
@@ -811,7 +931,7 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
               <span className="text-zinc-200 text-xs font-medium">{item.label}</span>
             </div>
             <p className="text-zinc-500 text-xs ml-4">{item.source}</p>
-            {item.layerType && <p className="text-[#D76B3D] text-xs ml-4">{item.layerType}</p>}
+            {item.layerType && <p className="text-blue-400 text-xs ml-4">{item.layerType}</p>}
             {item.note && <p className="text-yellow-600 text-xs ml-4">{item.note}</p>}
           </div>
         ))}
@@ -819,3 +939,8 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
     </div>
   )
 }
+
+const MemoizedCommandMap = memo(CommandMap)
+MemoizedCommandMap.displayName = 'CommandMap'
+
+export default MemoizedCommandMap
