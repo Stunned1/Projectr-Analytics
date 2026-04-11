@@ -1027,8 +1027,9 @@ export default function Home() {
         )}
       </aside>
 
-      {/* ── Map ── */}
-      <div className="flex-1 relative overflow-hidden">
+      {/* ── Map ── — inset-0 fill gives CommandMap a definite box (flex % height + Google Map can otherwise leave overlays misaligned) */}
+      <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
+        <div className="absolute inset-0 min-h-0 min-w-0">
         <CommandMap
           zip={result?.zip ?? null}
           marketData={result}
@@ -1043,7 +1044,6 @@ export default function Home() {
           agentMetric={agentMetric}
           mapTilt={effectiveMapTilt}
           mapHeading={0}
-          reservedRightPx={panelOpen && (result || aggregateData) ? 300 : 0}
           agentFlyTo={agentFlyTo}
           onLayersChange={handleMapLayersChange}
           onClearAgentOverride={(key) => setAgentLayerOverrides((prev) => {
@@ -1052,6 +1052,7 @@ export default function Home() {
             return next
           })}
         />
+        </div>
 
         {/* Floating stats bubble */}
         {(result || aggregateData) && (

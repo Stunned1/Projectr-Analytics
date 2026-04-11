@@ -120,6 +120,7 @@ _4.12.2026_
 - `/api/aggregate` BPS permits: PDF bar chart was empty because multiple `Permit_Units` years overwrote each other in cache and multi-ZIP sums were wrong; aggregate now returns `permits.by_year` from one anchor ZIP’s county-level BPS rows and sums `Moved_From_Different_State` for migration on the PDF.
 - `/api/aggregate` cold-fills up to 16 ZIPs (parallel batches of 4) with the same Census/BPS/FRED/HUD fetch as `/api/market` when no `projectr_master_data` exists for the area — borough/city searches no longer require a prior single-ZIP load for PDF metrics.
 - FRED county search uses NYC borough county names (e.g. Richmond County for Staten Island) so unemployment/employment series resolve instead of `Staten Island County NY`-style mismatches.
+- Map layer chrome drifted into the map (read as “top-center”) when the right data panel was open — `reservedRightPx={300}` was wrong for the current layout (panel is a flex sibling, not overlaying the map), so the stack was offset an extra 300px left; removed `reservedRightPx` and anchor layers with `top-4 right-4` only; sheet + dots use `flex-row` with the sheet first so the data panel sits flush beside the toggle column.
 
 **Map & Visualization**
 
@@ -195,7 +196,7 @@ _4.11.2026_
 - Bottom stats bar replaced with floating pill bubble (bottom-center, glassmorphism) — scrollable stats with dividers; ↗ button opens data panel
 - Right data panel gains Overview/All Data tab toggle — "All Data" tab shows every metric as a flat table (Zillow, velocity, Census, FRED, transit, trends)
 - Map layer pill **Rent/value fill** (was labeled Rent) toggles the Zillow-sourced ZIP choropleth; **Fill metric** (ZORI / ZHVI) only appears when that layer is on; PDF active-layer line uses the same naming and omits fill metric when the choropleth is off.
-- **Layers UI** — map layers stack top-right clears the 300px data panel when open; **expandable layers panel** sits left (toward map center); **active dots** above **Layers** toggle in a fixed right column; dots **toggle that layer off** on click; panel uses width/opacity/slide transition.
+- **Layers UI** — map layers stack top-right of the **map column** (the right data panel is a flex sibling, so the map already shrinks); **expandable layers sheet** sits immediately left of the **active dots** + **Layers** toggle (`flex-row`, tight gap when open); dots **toggle that layer off** on click; sheet uses width/opacity transition (no extra `reservedRightPx` offset — that had pushed chrome into the map when the panel was open).
 - **AI agent** — sidebar footer **AI** button opens docked chat beside the nav (red dot when a reply arrived while closed); floating FAB removed from the map on the home page.
 - **3D** — tilt/rotation sliders removed from the map; **3D** pill in the right data panel header toggles 45° perspective (Projectr orange when on); agent `set_tilt` still overrides until cleared.
 - Sidebar market search — removed **Analyze Market** button; **Enter** submits; small spinner in the field while the request runs (map page + `/upload` sidebar).

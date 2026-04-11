@@ -11,6 +11,7 @@ import { Layers } from 'lucide-react'
 import { dedupedFetchJson } from '@/lib/request-cache'
 import type { Site } from '@/lib/sites-store'
 import type { AnalysisSite } from '@/components/AgentChat'
+import { cn } from '@/lib/utils'
 
 function shortlistPinColor(stage: string | undefined): [number, number, number, number] {
   if (stage === 'Expansion') return [34, 197, 94, 255]
@@ -495,8 +496,6 @@ interface CommandMapProps {
   onLayersChange?: (snapshot: LayerState & { choroplethMetric: 'zori' | 'zhvi' }) => void
   /** Fired when user manually toggles a layer — clears agent override for that key */
   onClearAgentOverride?: (key: string) => void
-  /** Horizontal offset from right edge so the stack clears the data panel (px). */
-  reservedRightPx?: number
   /** Map camera tilt (0–67.5) — controlled from parent / 3D pill. */
   mapTilt: number
   /** Map camera heading (degrees). */
@@ -518,7 +517,6 @@ function CommandMap({
   agentFlyTo,
   onLayersChange,
   onClearAgentOverride,
-  reservedRightPx = 0,
   mapTilt,
   mapHeading = 0,
 }: CommandMapProps) {
@@ -1450,7 +1448,7 @@ function CommandMap({
   }, [onClearAgentOverride])
 
   return (
-    <div className="relative w-full h-full">
+    <div className="relative isolate h-full min-h-0 min-w-0 w-full">
       <APIProvider apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY!}>
         <Map
           mapId={mapId}
@@ -1538,47 +1536,24 @@ function CommandMap({
         </div>
       )}
 
-      {/* Layers: `flex-row-reverse` + `w-max` + chrome first in DOM so the stack is pinned to `right` with no phantom width (fixes large gap vs sidebar). */}
+      {/*
+        Layers chrome: map column already excludes the right data panel (flex sibling), so anchor `right-4` to this
+        root only — do NOT add extra horizontal offset when the panel is open (that shoved controls into the map).
+        DOM order = [sheet][dots column] with `flex-row` so the sheet sits immediately left of the dots/toggle.
+      */}
       <div
-        className="absolute top-4 z-40 flex w-max max-w-none flex-row-reverse items-start gap-2"
-        style={{ right: reservedRightPx > 0 ? reservedRightPx + 16 : 16, left: 'auto' }}
+        dir="ltr"
+        className={cn(
+          'absolute top-4 right-4 z-[60] box-border flex max-w-[calc(100%-1.5rem)] flex-row flex-nowrap items-start',
+          layerPanelOpen ? 'gap-1' : 'gap-0'
+        )}
+        style={{ width: 'max-content', margin: 0 }}
       >
-        <div className="flex shrink-0 flex-col items-center gap-2">
-          <div className="flex min-h-10 min-w-[2.25rem] flex-col items-center justify-start gap-2 rounded-lg border border-border/80 bg-card/90 p-2 shadow-lg shadow-black/40 backdrop-blur-xl">
-            {LAYER_DOT_INDICATORS.filter(({ key, needsClientMarkers }) => {
-              if (!(effectiveLayers[key] ?? false)) return false
-              if (needsClientMarkers && !uploadedMarkers?.length) return false
-              return true
-            }).map(({ key, color, label }) => (
-              <button
-                key={key}
-                type="button"
-                title={`Turn off ${label}`}
-                aria-label={`Turn off ${label} layer`}
-                onClick={() => handleToggle(key)}
-                className="h-3 w-3 shrink-0 cursor-pointer rounded-full transition-transform hover:scale-125 active:scale-95"
-                style={{ background: color }}
-              />
-            ))}
-          </div>
-
-          <button
-            type="button"
-            aria-expanded={layerPanelOpen}
-            aria-label={layerPanelOpen ? 'Close layers panel' : 'Open layers panel'}
-            onClick={() => setLayerPanelOpen((o) => !o)}
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-card/90 text-muted-foreground shadow-lg shadow-black/40 backdrop-blur-xl transition-colors hover:text-foreground"
-          >
-            <Layers className="h-[18px] w-[18px]" strokeWidth={1.75} />
-          </button>
-        </div>
-
         <div
-          className={`min-w-0 overflow-hidden transition-[max-width,opacity,transform] duration-300 ease-out motion-reduce:transition-none ${
-            layerPanelOpen
-              ? 'max-w-56 shrink-0 translate-x-0 opacity-100'
-              : 'max-w-0 -translate-x-1 opacity-0 pointer-events-none'
-          }`}
+          className={cn(
+            'min-w-0 overflow-hidden transition-[max-width,opacity] duration-200 ease-out motion-reduce:transition-none',
+            layerPanelOpen ? 'max-w-56 shrink-0 opacity-100' : 'max-w-0 opacity-0 pointer-events-none'
+          )}
         >
           <div className="flex max-h-[min(70vh,calc(100vh-7rem))] w-56 flex-col gap-0 overflow-y-auto overflow-x-hidden rounded-xl border border-border/90 bg-card/95 shadow-2xl shadow-black/40 backdrop-blur-xl">
 
@@ -1750,6 +1725,36 @@ function CommandMap({
           </div>
         )}
           </div>
+        </div>
+
+        <div className="flex shrink-0 flex-col items-center gap-2">
+          <div className="flex min-h-10 min-w-[2.25rem] flex-col items-center justify-start gap-2 rounded-lg border border-border/80 bg-card/90 p-2 shadow-lg shadow-black/40 backdrop-blur-xl">
+            {LAYER_DOT_INDICATORS.filter(({ key, needsClientMarkers }) => {
+              if (!(effectiveLayers[key] ?? false)) return false
+              if (needsClientMarkers && !uploadedMarkers?.length) return false
+              return true
+            }).map(({ key, color, label }) => (
+              <button
+                key={key}
+                type="button"
+                title={`Turn off ${label}`}
+                aria-label={`Turn off ${label} layer`}
+                onClick={() => handleToggle(key)}
+                className="h-3 w-3 shrink-0 cursor-pointer rounded-full transition-transform hover:scale-125 active:scale-95"
+                style={{ background: color }}
+              />
+            ))}
+          </div>
+
+          <button
+            type="button"
+            aria-expanded={layerPanelOpen}
+            aria-label={layerPanelOpen ? 'Close layers panel' : 'Open layers panel'}
+            onClick={() => setLayerPanelOpen((o) => !o)}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-card/90 text-muted-foreground shadow-lg shadow-black/40 backdrop-blur-xl transition-colors hover:text-foreground"
+          >
+            <Layers className="h-[18px] w-[18px]" strokeWidth={1.75} />
+          </button>
         </div>
       </div>
 
