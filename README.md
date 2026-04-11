@@ -27,9 +27,10 @@ HUD_API_TOKEN                    # optional, falls back to Census ACS rent data
 ### First-time data setup
 1. Download Zillow CSVs (see section below) into `zillow-csv's/` at repo root
 2. `cd projectr-analytics && npm install`
-3. `npm run ingest:zillow` — loads Zillow data into Supabase
-4. `npm run populate:centroids` — run 6-7 times until "All centroids already populated" (geocodes ~7,661 ZIPs)
-5. `npm run dev`
+3. In Supabase SQL Editor, run `projectr-analytics/supabase/migrations/20260411120000_zip_geocode_cache.sql` to create `zip_geocode_cache` (persists ZIP geocodes across deploys)
+4. `npm run ingest:zillow` — loads Zillow data into Supabase
+5. `npm run populate:centroids` — run 6-7 times until "All centroids already populated" (geocodes ~7,661 ZIPs)
+6. `npm run dev`
 
 ### Known setup issues
 - **Turbopack + Tailwind** — if you get `Can't resolve 'tailwindcss'`, kill any stale `next dev` processes and restart fresh. Stale processes hold onto old module resolution state.
@@ -51,7 +52,7 @@ _4.8.2026_
 - GTFS transit stop fetcher — Overpass API (OSM) for all markets with retry/backoff, direct BT GTFS zip fallback for Blacksburg
 - Google Trends fetcher — city-level search interest with automatic state-level fallback for small markets
 - Census TIGER ZIP boundary API (`/api/boundaries`) — returns GeoJSON polygon for any US zip, 30-day cache
-- Populated lat/lng centroids for 7,661 ZIPs in `zip_metro_lookup` via zippopotam + Census geocoder fallback
+- Populated lat/lng centroids for 7,661 ZIPs in `zip_metro_lookup` via zippopotam + Census 2020 ZCTA internal point (TigerWeb) when place lookup fails
 - Neighbor proximity API (`/api/neighbors`) — returns 20 closest ZIPs in same metro sorted by geographic distance
 
 _4.9.2026_
@@ -68,6 +69,9 @@ _4.8.2026_
 
 _4.9.2026_
 - Added `/api/city` — resolves city name to all ZIP codes with Zillow data; supports "City, ST" format with zippopotam fallback for smaller markets
+
+_4.11.2026_
+- ZIP geocoding now falls back to Census TigerWeb 2020 ZCTA internal points instead of a synthetic `1 Main St` address match; successful lookups upsert into Supabase `zip_geocode_cache` (365-day refresh) so cold starts reuse coordinates
 
 **Map & Visualization**
 
