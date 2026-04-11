@@ -7,6 +7,7 @@ import { GeoJsonLayer, ScatterplotLayer, ColumnLayer, PathLayer } from '@deck.gl
 import { HeatmapLayer } from '@deck.gl/aggregation-layers'
 import type { Layer, PickingInfo } from '@deck.gl/core'
 import type { GeoJSON, Feature, FeatureCollection, Geometry } from 'geojson'
+import { Layers } from 'lucide-react'
 import { dedupedFetchJson } from '@/lib/request-cache'
 import type { Site } from '@/lib/sites-store'
 import type { AnalysisSite } from '@/components/AgentChat'
@@ -134,6 +135,26 @@ export interface LayerState {
   clientData: boolean
 }
 
+/** Pill colors — reused for collapsed layer “active” dot stack (CommandMap chrome). */
+const LAYER_DOT_INDICATORS: Array<{
+  key: keyof LayerState
+  color: string
+  label: string
+  needsClientMarkers?: boolean
+}> = [
+  { key: 'zipBoundary', color: '#a1a1aa', label: 'ZIP boundaries' },
+  { key: 'transitStops', color: '#38bdf8', label: 'Transit' },
+  { key: 'rentChoropleth', color: '#a78bfa', label: 'Rent/value fill' },
+  { key: 'parcels', color: '#fbbf24', label: 'Parcels' },
+  { key: 'tracts', color: '#2dd4bf', label: 'Tracts' },
+  { key: 'amenityHeatmap', color: '#facc15', label: 'Amenity' },
+  { key: 'floodRisk', color: '#f87171', label: 'Flood' },
+  { key: 'nycPermits', color: '#D76B3D', label: 'Permits' },
+  { key: 'pois', color: '#f59e0b', label: 'POIs' },
+  { key: 'momentum', color: '#d946ef', label: 'Momentum' },
+  { key: 'clientData', color: '#D76B3D', label: 'Client markers', needsClientMarkers: true },
+]
+
 interface MapViewState {
   lat: number
   lng: number
@@ -205,9 +226,8 @@ function hasFeatures(value: unknown): value is { features: unknown[] } {
 
 const DATA_LAYER_REGISTRY = [
   { label: 'ZIP Boundary', source: 'Census TIGER', visualized: true, layerType: 'GeoJsonLayer (outline)' },
-  { label: 'ZORI Rent Index', source: 'Zillow Research', visualized: true, layerType: 'GeoJsonLayer (choropleth — multi-ZIP)' },
+  { label: 'Rent/value fill', source: 'Zillow Research', visualized: true, layerType: 'GeoJsonLayer choropleth — ZORI or ZHVI (metric toggle)' },
   { label: 'Transit Stops', source: 'GTFS / OSM', visualized: true, layerType: 'ScatterplotLayer (cyan dots)' },
-  { label: 'ZHVI Home Value', source: 'Zillow Research', visualized: true, layerType: 'GeoJsonLayer (choropleth — multi-ZIP)' },
   { label: 'Census Tracts', source: 'Census TIGER + ACS', visualized: true, layerType: 'GeoJsonLayer (rent/income choropleth)' },
   { label: 'Amenity Heatmap', source: 'OpenStreetMap', visualized: true, layerType: 'HeatmapLayer (weighted by amenity type)' },
   { label: 'Flood Risk Zones', source: 'FEMA NFHL', visualized: true, layerType: 'GeoJsonLayer (red = high risk)' },
@@ -470,12 +490,17 @@ interface CommandMapProps {
   agentPermitFilter?: string[] | null
   agentLayerOverrides?: Record<string, boolean>
   agentMetric?: 'zori' | 'zhvi' | null
-  agentTilt?: number | null
   agentFlyTo?: { lat: number; lng: number } | null
   /** Fired when toggles or agent overrides change — used for PDF export layer legend. */
   onLayersChange?: (snapshot: LayerState & { choroplethMetric: 'zori' | 'zhvi' }) => void
   /** Fired when user manually toggles a layer — clears agent override for that key */
   onClearAgentOverride?: (key: string) => void
+  /** Horizontal offset from right edge so the stack clears the data panel (px). */
+  reservedRightPx?: number
+  /** Map camera tilt (0–67.5) — controlled from parent / 3D pill. */
+  mapTilt: number
+  /** Map camera heading (degrees). */
+  mapHeading?: number
 }
 
 function CommandMap({
@@ -490,10 +515,12 @@ function CommandMap({
   agentPermitFilter,
   agentLayerOverrides,
   agentMetric,
-  agentTilt,
   agentFlyTo,
   onLayersChange,
   onClearAgentOverride,
+  reservedRightPx = 0,
+  mapTilt,
+  mapHeading = 0,
 }: CommandMapProps) {
   const perfDebug = process.env.NEXT_PUBLIC_PERF_DEBUG === '1'
 
@@ -531,8 +558,7 @@ function CommandMap({
   const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null)
   const [activeMetric, setActiveMetric] = useState<'zori' | 'zhvi'>('zori')
   const [parcelColorMode, setParcelColorMode] = useState<'landuse' | 'airRights'>('landuse')
-  const [tilt, setTilt] = useState(0)
-  const [heading, setHeading] = useState(0)
+  const [layerPanelOpen, setLayerPanelOpen] = useState(false)
   const mapId = process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID ?? process.env.NEXT_PUBLIC_GOOGLE_MAPS_ID ?? undefined
 
   const setTooltipStable = useCallback((next: { x: number; y: number; text: string } | null) => {
@@ -821,10 +847,6 @@ function CommandMap({
     })
   }, [effectiveLayers, effectiveMetric, onLayersChange])
 
-  // Agent can override tilt
-  useEffect(() => {
-    if (agentTilt != null) setTilt(agentTilt)
-  }, [agentTilt])
   const allMetricValues = useMemo(() => {
     const primaryValue = effectiveMetric === 'zhvi'
       ? marketData?.zillow?.zhvi_latest ?? null
@@ -1440,7 +1462,7 @@ function CommandMap({
           style={{ width: '100%', height: '100%' }}
         >
           <MapFitter boundary={primaryBoundary ?? (cityBoundaries[0]?.geojson ?? null)} zip={zip ?? cityZips?.[0]?.zip ?? null} />
-          <TiltController tilt={tilt} heading={heading} />
+          <TiltController tilt={mapTilt} heading={mapHeading} />
           <ZoomTracker onZoomChange={handleZoomChange} />
           <FlyToController target={agentFlyTo} />
           <DeckGlOverlay layers={deckLayers} />
@@ -1516,8 +1538,49 @@ function CommandMap({
         </div>
       )}
 
-      {/* Layer toggles */}
-      <div className="absolute top-4 right-4 z-40 flex w-56 flex-col gap-0 overflow-hidden rounded-xl border border-border/90 bg-card/90 shadow-2xl shadow-black/40 backdrop-blur-xl">
+      {/* Layers: `flex-row-reverse` + `w-max` + chrome first in DOM so the stack is pinned to `right` with no phantom width (fixes large gap vs sidebar). */}
+      <div
+        className="absolute top-4 z-40 flex w-max max-w-none flex-row-reverse items-start gap-2"
+        style={{ right: reservedRightPx > 0 ? reservedRightPx + 16 : 16, left: 'auto' }}
+      >
+        <div className="flex shrink-0 flex-col items-center gap-2">
+          <div className="flex min-h-10 min-w-[2.25rem] flex-col items-center justify-start gap-2 rounded-lg border border-border/80 bg-card/90 p-2 shadow-lg shadow-black/40 backdrop-blur-xl">
+            {LAYER_DOT_INDICATORS.filter(({ key, needsClientMarkers }) => {
+              if (!(effectiveLayers[key] ?? false)) return false
+              if (needsClientMarkers && !uploadedMarkers?.length) return false
+              return true
+            }).map(({ key, color, label }) => (
+              <button
+                key={key}
+                type="button"
+                title={`Turn off ${label}`}
+                aria-label={`Turn off ${label} layer`}
+                onClick={() => handleToggle(key)}
+                className="h-3 w-3 shrink-0 cursor-pointer rounded-full transition-transform hover:scale-125 active:scale-95"
+                style={{ background: color }}
+              />
+            ))}
+          </div>
+
+          <button
+            type="button"
+            aria-expanded={layerPanelOpen}
+            aria-label={layerPanelOpen ? 'Close layers panel' : 'Open layers panel'}
+            onClick={() => setLayerPanelOpen((o) => !o)}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-card/90 text-muted-foreground shadow-lg shadow-black/40 backdrop-blur-xl transition-colors hover:text-foreground"
+          >
+            <Layers className="h-[18px] w-[18px]" strokeWidth={1.75} />
+          </button>
+        </div>
+
+        <div
+          className={`min-w-0 overflow-hidden transition-[max-width,opacity,transform] duration-300 ease-out motion-reduce:transition-none ${
+            layerPanelOpen
+              ? 'max-w-56 shrink-0 translate-x-0 opacity-100'
+              : 'max-w-0 -translate-x-1 opacity-0 pointer-events-none'
+          }`}
+        >
+          <div className="flex max-h-[min(70vh,calc(100vh-7rem))] w-56 flex-col gap-0 overflow-y-auto overflow-x-hidden rounded-xl border border-border/90 bg-card/95 shadow-2xl shadow-black/40 backdrop-blur-xl">
 
         {/* Layer pills */}
         <div className="px-3 pt-3 pb-2">
@@ -1526,7 +1589,12 @@ function CommandMap({
             {([
               { key: 'zipBoundary' as const, label: 'ZIP', color: '#a1a1aa' },
               { key: 'transitStops' as const, label: 'Transit', color: '#38bdf8' },
-              { key: 'rentChoropleth' as const, label: 'Rent', color: '#a78bfa' },
+              {
+                key: 'rentChoropleth' as const,
+                label: 'Rent/value fill',
+                color: '#a78bfa',
+                title: 'Color ZIP polygons by rent (ZORI) or home value (ZHVI) from Zillow. Turn on, then choose Fill metric below.',
+              },
               { key: 'parcels' as const, label: 'Parcels', color: '#fbbf24', zipOnly: true },
               { key: 'tracts' as const, label: 'Tracts', color: '#2dd4bf' },
               { key: 'amenityHeatmap' as const, label: 'Amenity', color: '#facc15' },
@@ -1539,11 +1607,13 @@ function CommandMap({
               if (showWhen === false) return false
               if (zipOnly) return (!cityZips?.length) || parcelData !== null
               return true
-            }).map(({ key, label, color }) => {
+            }).map(({ key, label, color, title }) => {
               const active = effectiveLayers[key] ?? false
               return (
                 <button
                   key={key}
+                  type="button"
+                  title={title}
                   onClick={() => handleToggle(key)}
                   className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium transition-all"
                   style={{
@@ -1647,57 +1717,40 @@ function CommandMap({
           </>
         )}
 
-        {/* Metric */}
-        <div className="px-3 py-2">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-500 mb-1.5">Metric</p>
-          <div className="flex overflow-hidden rounded-lg border border-border/80 bg-muted/25">
-            {(['zori', 'zhvi'] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => setActiveMetric(m)}
-                className={`flex-1 py-1.5 text-[10px] font-medium transition-all ${
-                  activeMetric === m ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                {m === 'zori' ? 'Rent' : 'Value'}
-              </button>
-            ))}
-          </div>
-        </div>
+        {/* ZORI vs ZHVI — only applies when rent/value fill choropleth is on */}
+        {effectiveLayers.rentChoropleth && (
+          <>
+            <div className="px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-500 mb-0.5">Fill metric</p>
+              <p className="text-[9px] text-zinc-600 mb-1.5 leading-snug">Zillow index used for ZIP polygon colors</p>
+              <div className="flex overflow-hidden rounded-lg border border-border/80 bg-muted/25">
+                {(['zori', 'zhvi'] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    title={m === 'zori' ? 'Zillow Observed Rent Index' : 'Zillow Home Value Index'}
+                    onClick={() => setActiveMetric(m)}
+                    className={`flex-1 py-1.5 text-[10px] font-medium transition-all ${
+                      activeMetric === m ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {m === 'zori' ? 'ZORI' : 'ZHVI'}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-        <div className="mx-3 h-px bg-border/70" />
-
-        {/* Tilt & Rotation */}
-        <div className="px-3 py-2">
-          <div className="flex items-center justify-between mb-1">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-500">Tilt</p>
-            <span className="text-[10px] text-zinc-600 font-mono">{tilt}°</span>
-          </div>
-          <input type="range" min={0} max={67.5} step={1} value={tilt}
-            onChange={(e) => setTilt(Number(e.target.value))}
-            className="h-1 w-full cursor-pointer appearance-none rounded-full bg-muted accent-primary"
-          />
-          <div className="mt-2 mb-1 flex items-center justify-between">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-500">Rotation</p>
-            <span className="font-mono text-[10px] text-zinc-600">{heading}°</span>
-          </div>
-          <input type="range" min={0} max={360} step={1} value={heading}
-            onChange={(e) => setHeading(Number(e.target.value))}
-            className="h-1 w-full cursor-pointer appearance-none rounded-full bg-muted accent-primary"
-          />
-          <button
-            onClick={() => { setTilt(0); setHeading(0) }}
-            className="mt-2 w-full rounded border border-border/60 py-1 text-[10px] text-muted-foreground transition-colors hover:border-border hover:text-foreground"
-          >
-            Reset View
-          </button>
-        </div>
+            <div className="mx-3 h-px bg-border/70" />
+          </>
+        )}
 
         {neighborBoundaries.length > 0 && (
           <div className="px-3 pb-2">
             <p className="text-[10px] text-zinc-600">{neighborBoundaries.length} nearby ZIPs</p>
           </div>
         )}
+          </div>
+        </div>
       </div>
 
     </div>
