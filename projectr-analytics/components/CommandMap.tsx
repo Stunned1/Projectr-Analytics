@@ -6,7 +6,7 @@ import { GoogleMapsOverlay } from '@deck.gl/google-maps'
 import { GeoJsonLayer, ScatterplotLayer, PolygonLayer, ColumnLayer } from '@deck.gl/layers'
 import { HeatmapLayer } from '@deck.gl/aggregation-layers'
 import type { Layer, PickingInfo } from '@deck.gl/core'
-import type { GeoJSON } from 'geojson'
+import type { GeoJSON, Feature, FeatureCollection, Geometry } from 'geojson'
 import { dedupedFetchJson } from '@/lib/request-cache'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -727,7 +727,7 @@ function CommandMap({ zip, marketData, transitData }: CommandMapProps) {
     // Census Tracts — rent/income choropleth (replaces block groups as primary sub-ZIP layer)
     if (layers.tracts && tractData) {
       const tractFeatures = tractData.features ?? []
-      const rents = tractFeatures.map((f) => f.properties.median_rent ?? 0).filter((v) => v > 0)
+      const rents = tractFeatures.map((f: TractFeature) => f.properties.median_rent ?? 0).filter((v: number) => v > 0)
       const minRent = rents.length ? Math.min(...rents) : 0
       const maxRent = rents.length ? Math.max(...rents) : 1
 
