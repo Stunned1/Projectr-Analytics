@@ -5,7 +5,6 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { BookOpen } from 'lucide-react'
 import AgenticNormalizer from '@/components/AgenticNormalizer'
-import { ClearLocalWorkspaceButton } from '@/components/clear-local-workspace-button'
 import CommandCenterSidebar from '@/components/CommandCenterSidebar'
 import SitesBootstrap from '@/components/SitesBootstrap'
 import { useClientUploadMarkersStore } from '@/lib/client-upload-markers-store'
@@ -110,7 +109,6 @@ export default function ClientUploadPage() {
               </div>
             </div>
           )}
-          <ClearLocalWorkspaceButton variant="panel" />
         </div>
         </main>
       </div>

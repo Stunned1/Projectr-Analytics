@@ -22,6 +22,11 @@ export interface TransitRoute {
   type: 'subway' | 'rail' | 'bus' | 'tram'
   /** Same shape as Transitland `/api/transit` — one or more line segments [lng, lat][]. */
   paths: [number, number][][]
+  /**
+   * First segment only — mirrors legacy OSM payloads that used singular `path` before PathLayer
+   * was wired to `paths`; keeps OSM fallback aligned with Transitland consumers.
+   */
+  path: [number, number][]
   color: [number, number, number]
 }
 
@@ -142,11 +147,13 @@ out geom;`
       const ring = el.geometry.map((pt) => [pt.lon, pt.lat] as [number, number])
       if (ring.length < 2) continue
 
+      const path = downsamplePath(ring, MAX_POINTS_PER_WAY)
       routes.push({
         id: String(el.id),
         name: tags.name ?? tags.ref ?? routeType,
         type: routeType,
-        paths: [downsamplePath(ring, MAX_POINTS_PER_WAY)],
+        paths: [path],
+        path,
         color: OSM_ROUTE_COLORS[routeType],
       })
     }

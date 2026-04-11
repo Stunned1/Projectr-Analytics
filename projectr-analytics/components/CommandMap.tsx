@@ -380,16 +380,25 @@ function DeckGlOverlay({ layers }: { layers: Layer[] }) {
   useEffect(() => {
     if (!map) return
     setOverlayReady(false)
-    const timer = setTimeout(() => {
+    let cancelled = false
+    let attached = false
+    const attach = () => {
+      if (cancelled || attached) return
       try {
         deck.setMap(map)
+        attached = true
         setOverlayReady(true)
       } catch {
         /* map not ready */
       }
-    }, 100)
+    }
+    // First `idle` is more reliable than a fixed delay for vector maps + deck interleaved attach
+    const once = google.maps.event.addListenerOnce(map, 'idle', attach)
+    const fallback = window.setTimeout(attach, 400)
     return () => {
-      clearTimeout(timer)
+      cancelled = true
+      google.maps.event.removeListener(once)
+      window.clearTimeout(fallback)
       try {
         deck.setMap(null)
       } catch {
@@ -784,7 +793,12 @@ function CommandMap({
 
   // Fetch primary boundary + transit + neighbors when zip changes
   useEffect(() => {
-    if (!zip) return
+    if (!zip) {
+      // Aggregate / cold map: drop single-ZIP polygons so they do not sit under city choropleth
+      setPrimaryBoundary(null)
+      setNeighborBoundaries([])
+      return
+    }
     // Clear city mode layers when switching to ZIP mode
     setCityBoundaries([])
     // Skip neighbor loading when city mode is active - city ZIPs provide the context
@@ -815,7 +829,7 @@ function CommandMap({
         setNeighborBoundaries(loaded)
       })
       .catch(() => {})
-  }, [zip])
+  }, [zip, cityZips])
 
   // Fetch block groups + parcels when we have geo data
   useEffect(() => {
@@ -900,7 +914,20 @@ function CommandMap({
 
   const transitRoutes = useMemo(() => {
     if (!transitData) return []
-    return transitData.routes ?? transitData.geojson?.routes ?? []
+    const raw = transitData.routes ?? transitData.geojson?.routes ?? []
+    /** Normalize Transitland (`paths`) vs legacy OSM (`path`) so PathLayer always gets segments. */
+    return raw.map((r) => {
+      const fromPaths = Array.isArray(r.paths)
+        ? r.paths.filter((p) => Array.isArray(p) && p.length >= 2)
+        : []
+      const paths =
+        fromPaths.length > 0
+          ? fromPaths
+          : r.path && r.path.length >= 2
+            ? [r.path]
+            : []
+      return { ...r, paths }
+    })
   }, [transitData])
 
   // Merge agent layer overrides into local layer state (`permits` is agent JSON alias for nycPermits)
@@ -1082,15 +1109,9 @@ function CommandMap({
 
     // Transit routes - PathLayer for subway/rail/bus lines with brand colors
     if (effectiveLayers.transitStops && transitRoutes.length > 0) {
-      const segments = transitRoutes.flatMap((r: TransitRoute) => {
-        const pathList =
-          r.paths && r.paths.length > 0
-            ? r.paths
-            : r.path && r.path.length > 0
-              ? [r.path]
-              : []
-        return pathList.map((path: [number, number][]) => ({ path, route: r }))
-      })
+      const segments = transitRoutes.flatMap((r: TransitRoute) =>
+        (r.paths ?? []).map((path: [number, number][]) => ({ path, route: r }))
+      )
 
       const MAX_TRANSIT_PATH_SEGMENTS = 400
       if (segments.length > MAX_TRANSIT_PATH_SEGMENTS) {
