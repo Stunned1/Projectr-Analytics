@@ -128,7 +128,21 @@ const DATA_LAYER_REGISTRY = [
   { label: 'Permit Pin Locations', source: 'ArcGIS REST', visualized: false, layerType: null, note: 'DEFERRED — jurisdiction-specific feeds required' },
 ]
 
-// ── Color scale: blue (low rent) → red (high rent) ───────────────────────────
+const MAP_STYLE = [
+  { featureType: 'all', elementType: 'labels.text.fill', stylers: [{ saturation: 36 }, { color: '#000000' }, { lightness: 40 }] },
+  { featureType: 'all', elementType: 'labels.text.stroke', stylers: [{ visibility: 'on' }, { color: '#000000' }, { lightness: 16 }] },
+  { featureType: 'all', elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
+  { featureType: 'administrative', elementType: 'geometry.fill', stylers: [{ color: '#000000' }, { lightness: 20 }] },
+  { featureType: 'administrative', elementType: 'geometry.stroke', stylers: [{ color: '#000000' }, { lightness: 17 }, { weight: 1.2 }] },
+  { featureType: 'landscape', elementType: 'geometry', stylers: [{ color: '#000000' }, { lightness: 20 }] },
+  { featureType: 'poi', elementType: 'geometry', stylers: [{ color: '#000000' }, { lightness: 21 }] },
+  { featureType: 'road.highway', elementType: 'geometry.fill', stylers: [{ color: '#000000' }, { lightness: 17 }] },
+  { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#000000' }, { lightness: 29 }, { weight: 0.2 }] },
+  { featureType: 'road.arterial', elementType: 'geometry', stylers: [{ color: '#000000' }, { lightness: 18 }] },
+  { featureType: 'road.local', elementType: 'geometry', stylers: [{ color: '#000000' }, { lightness: 16 }] },
+  { featureType: 'transit', elementType: 'geometry', stylers: [{ color: '#000000' }, { lightness: 19 }] },
+  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#000000' }, { lightness: 17 }] },
+]
 // Normalized across the set of loaded ZIPs for relative contrast
 
 function buildColorScale(values: (number | null)[]) {
@@ -194,7 +208,7 @@ function MapFitter({ boundary, zip }: { boundary: GeoJSON | null; zip: string | 
 // ── DeckGL overlay ────────────────────────────────────────────────────────────
 
 function DeckGlOverlay({ layers }: { layers: Layer[] }) {
-  const deck = useMemo(() => new GoogleMapsOverlay({ interleaved: true }), [])
+  const deck = useMemo(() => new GoogleMapsOverlay({ interleaved: false }), [])
   const map = useMap()
   const attachedMapRef = useRef<google.maps.Map | null>(null)
   const isAttachedRef = useRef(false)
@@ -276,7 +290,6 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
   const [activeMetric, setActiveMetric] = useState<'zori' | 'zhvi'>('zori')
   const [tilt, setTilt] = useState(0)
   const [heading, setHeading] = useState(0)
-  const mapId = process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID ?? process.env.NEXT_PUBLIC_GOOGLE_MAPS_ID ?? undefined
 
   // Fetch primary boundary + transit + neighbors when zip changes
   useEffect(() => {
@@ -469,7 +482,7 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
           data: transitStops,
           getPosition: (d: TransitStop) => d.position,
           getRadius: 35,
-          getFillColor: [0, 210, 255, 200],
+          getFillColor: [215, 107, 61, 220], // #D76B3D orange
           pickable: true,
           onHover: (info: PickingInfo) => {
             const d = info.object as TransitStop | undefined
@@ -708,7 +721,7 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
     <div className="relative w-full h-full">
       <APIProvider apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY!}>
         <Map
-          mapId={mapId}
+          mapId={process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID ?? undefined}
           defaultCenter={{ lat: 37.2563, lng: -80.4347 }}
           defaultZoom={11}
           colorScheme="DARK"
@@ -747,7 +760,7 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
           { key: 'floodRisk' as const, label: '⚠️ Flood Risk' },
         ]).map(({ key, label }) => (
           <label key={key} className="flex items-center gap-2 cursor-pointer mb-1">
-            <input type="checkbox" checked={layers[key]} onChange={() => handleToggle(key)} className="accent-blue-500" />
+            <input type="checkbox" checked={layers[key]} onChange={() => handleToggle(key)} className="accent-orange-500" />
             <span className="text-zinc-300 text-xs">{label}</span>
           </label>
         ))}
@@ -770,7 +783,7 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
           <input
             type="range" min={0} max={67.5} step={1} value={tilt}
             onChange={(e) => setTilt(Number(e.target.value))}
-            className="w-full accent-blue-500"
+            className="w-full accent-orange-500"
           />
           <div className="flex justify-between text-zinc-600 text-xs mt-0.5">
             <span>0°</span><span>{tilt}°</span><span>67.5°</span>
@@ -779,7 +792,7 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
           <input
             type="range" min={0} max={360} step={1} value={heading}
             onChange={(e) => setHeading(Number(e.target.value))}
-            className="w-full accent-blue-500"
+            className="w-full accent-orange-500"
           />
           <div className="flex justify-between text-zinc-600 text-xs mt-0.5">
             <span>N</span><span>{heading}°</span>
@@ -798,7 +811,7 @@ export default function CommandMap({ zip, marketData, transitData }: CommandMapP
               <span className="text-zinc-200 text-xs font-medium">{item.label}</span>
             </div>
             <p className="text-zinc-500 text-xs ml-4">{item.source}</p>
-            {item.layerType && <p className="text-blue-400 text-xs ml-4">{item.layerType}</p>}
+            {item.layerType && <p className="text-[#D76B3D] text-xs ml-4">{item.layerType}</p>}
             {item.note && <p className="text-yellow-600 text-xs ml-4">{item.note}</p>}
           </div>
         ))}
