@@ -30,7 +30,8 @@ HUD_API_TOKEN                    # optional, falls back to Census ACS rent data
 3. In Supabase SQL Editor, run `projectr-analytics/supabase/migrations/20260411120000_zip_geocode_cache.sql` to create `zip_geocode_cache` (persists ZIP geocodes across deploys)
 4. `npm run ingest:zillow` — loads Zillow data into Supabase
 5. `npm run populate:centroids` — run 6-7 times until "All centroids already populated" (geocodes ~7,661 ZIPs)
-6. `npm run dev`
+6. `npm run ingest:permits` — ingests NYC DOB building permits into `nyc_permits` table (all 5 boroughs, NB/A1/A2/DM, 2022+); takes ~10-20 min
+7. `npm run dev`
 
 ### Known setup issues
 - **Turbopack + Tailwind** — if you get `Can't resolve 'tailwindcss'`, kill any stale `next dev` processes and restart fresh. Stale processes hold onto old module resolution state.
@@ -71,12 +72,30 @@ _4.9.2026_
 - Added `/api/city` — resolves city name to all ZIP codes with Zillow data; supports "City, ST" format with zippopotam fallback for smaller markets
 
 _4.11.2026_
+- Added `/api/borough` — resolves NYC borough name to all ZIPs + Census TIGER county boundary + Zillow aggregates
+- Added `/api/aggregate` — POST endpoint that computes weighted-average stats (rent, income, vacancy, FRED, metro velocity) across a list of ZIPs for city/borough mode
+- Added `/api/agent` — Gemini 2.5 Flash AI agent endpoint; returns structured JSON with `message`, `action`, and `insight` fields for map control
+- Added `/api/memo` — server-side Gemini 2.5 Flash executive memo generation (fallback for client-side key errors)
+- Added `/api/permits` — serves pre-ingested NYC DOB permit data from Supabase; supports borough, ZIP, and job-type filters
+- Added `npm run ingest:permits` script — pulls NYC DOB job filings (Socrata `ic3t-wcy2`) for all 5 boroughs, job types NB/A1/A2/DM, 2022+; deduplicates within batches to avoid Supabase conflict errors
+- Fixed `/api/agent` 500 error caused by corrupted template literal dollar-sign formatting in `contextStr`
 - ZIP geocoding now falls back to Census TigerWeb 2020 ZCTA internal points instead of a synthetic `1 Main St` address match; successful lookups upsert into Supabase `zip_geocode_cache` (365-day refresh) so cold starts reuse coordinates
 
 **Map & Visualization**
 
 _4.9.2026_
 - Removed OSM 3D Buildings layer — deleted `PolygonLayer`, `BuildingFeature`/`BuildingCollection` interfaces, `CameraSampler` component, all buildings fetch/debounce logic, and `/api/buildings` route
+
+_4.11.2026_
+- NYC PLUTO parcels now support borough mode — auto-detects borough from city ZIP range and fetches all parcels via `/api/parcels?borough=`
+- NYC permits `ScatterplotLayer` added — colored by job type (NB=orange, A1=yellow, A2=blue, DM=red), clickable with detail panel showing address, cost, stories, units, filing date
+- Permits layer fetched automatically on ZIP and borough search; toggle added to layer panel
+- Layer panel redesigned as pill buttons with colored dot indicators — removed all emojis and default HTML styling
+- Added map tilt and heading sliders to layer panel
+- Disabled Google Maps default UI controls (map/satellite toggle, zoom buttons, fullscreen, street view)
+- Removed Data Layer Status dev sidebar
+- Borough boundary rendered as orange (`#D76B3D`) outline `GeoJsonLayer` on top of city ZIP choropleth
+- AI agent layer overrides wired to map — `agentLayerOverrides` and `agentMetric` props merge into effective layer/metric state
 
 _4.8.2026_
 - Google Maps + deck.gl map with `GoogleMapsOverlay` (interleaved vector mode)
@@ -105,6 +124,20 @@ _4.9.2026_
 _4.8.2026_
 - Basic data visualization page — stat cards, sparklines, transit stop table, Google Trends sparkline
 - Search bar with zip validation
+
+_4.11.2026_
+- Full layout overhaul — fixed left sidebar (200px) with logo, search, and nav; map fills remaining space; sliding right data panel (300px); bottom stats bar (60px) with key market metrics
+- Sidebar nav reduced to "Map" and "Case Studies" only — removed Analytics and AI Agent nav items
+- Active market badge in sidebar bottom — shows city/ZIP name, state, ZIP count for city mode; click to toggle data panel
+- Bottom stats bar shows contextual metrics: single-ZIP mode shows rent, home value, listings, days to pending, price cuts, transit, trends; city/borough mode shows aggregated equivalents
+- Right data panel shows full market breakdown for single-ZIP and aggregated city/borough views including FRED sparklines
+- Executive Memo component in right panel — Gemini 2.5 Flash generates 3-paragraph investment memo; print/PDF export via `window.open`
+- Agentic Normalizer in right panel — drag-and-drop CSV upload, Gemini triage (GEOSPATIAL/TEMPORAL/TABULAR), ingests to Supabase, renders marker pins on map; in-memory hash cache prevents repeat Gemini calls for same file structure
+- AI Agent chat — translucent glassmorphism panel (bottom-right), no header, floating × close button; agent messages plain text, user messages get orange bubble; suggestion chips on first open; dynamically offsets above stats bar via `hasStatsBar` prop
+- Switched entire page font to Gill Sans with system fallbacks
+- Projectr logo in sidebar with correct `width="auto"` aspect ratio and `loading="eager"` LCP optimization
+- Google Maps custom dark vector map style via `NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID`
+- NYC PLUTO parcel columns: height = total assessed value (log scale), color = land use type with distinct colors per type (residential, commercial, mixed, industrial, etc.)
 
 ## Known Bugs
 
@@ -148,4 +181,4 @@ npm run ingest:zillow
 
 ## Deferred
 
-- **Permit Pin Locations (ArcGIS REST)** — Individual building permit pins require a jurisdiction-specific ArcGIS FeatureServer URL (e.g. Montgomery County VA, Prince William County VA). There is no universal national feed. Not feasible for a multi-market tool without a paid aggregator (Regrid, BuildZoom). For now, permit data is shown as county-level counts/values from Census BPS. Revisit if scoping to a single demo market only.
+- **Multi-market permit comparison** — Permit visualization is currently NYC-only (Socrata DOB feed). Expanding to other cities would require per-jurisdiction ArcGIS FeatureServer URLs or a paid aggregator (Regrid, BuildZoom). Revisit if scoping to additional demo markets.

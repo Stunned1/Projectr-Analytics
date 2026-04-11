@@ -1,14 +1,6 @@
 /**
  * Projectr AI Agent API
  * Takes a user message + current map context → returns text response + optional map action
- *
- * Action schema:
- * { type: "toggle_layer", layer: string, value: boolean }
- * { type: "set_metric", metric: "zori" | "zhvi" }
- * { type: "search", query: string }
- * { type: "generate_memo" }
- * { type: "set_tilt", tilt: number }
- * { type: "none" }
  */
 import { type NextRequest, NextResponse } from 'next/server'
 import { GoogleGenerativeAI } from '@google/generative-ai'
@@ -20,7 +12,7 @@ const SYSTEM_PROMPT = `You are the Projectr Analytics AI Agent — a spatial int
 You can control the entire dashboard: navigate to markets, toggle data layers, analyze conditions, and respond to case studies or briefs.
 
 AVAILABLE LAYERS (exact key names):
-- zipBoundary, transitStops, rentChoropleth, blockGroups, parcels, tracts, amenityHeatmap, floodRisk, clientData
+- zipBoundary, transitStops, rentChoropleth, blockGroups, parcels, tracts, amenityHeatmap, floodRisk, clientData, permits
 
 AVAILABLE ACTIONS:
 - Navigate to a market: {"type":"search","query":"manhattan"} or {"type":"search","query":"10001"}
@@ -40,6 +32,7 @@ INTELLIGENCE RULES:
 - If user mentions "demographics" or "population" → toggle tracts or blockGroups
 - If user pastes a case study or brief → extract the market, enable relevant layers, navigate there
 - If user mentions "parcels" or "property values" → toggle parcels (NYC only)
+- If user mentions "permits" or "construction" or "development activity" → toggle permits layer
 - If user says "show everything" or "full analysis" → toggle all relevant layers on
 
 RESPONSE FORMAT — CRITICAL: You MUST respond with ONLY valid JSON. No prose, no markdown, no explanation outside the JSON. Return exactly this structure:
@@ -56,6 +49,9 @@ export async function POST(request: NextRequest) {
   try {
     const { message, context } = await request.json()
 
+    const fmt = (n: number | null | undefined, prefix = '', suffix = '') =>
+      n != null ? `${prefix}${n.toLocaleString()}${suffix}` : 'N/A'
+
     const contextStr = context ? `
 CURRENT MAP STATE:
 - Active market: ${context.label ?? 'None'}
@@ -64,14 +60,14 @@ CURRENT MAP STATE:
 - Choropleth metric: ${context.activeMetric ?? 'zori'}
 
 MARKET DATA:
-- Median Rent (ZORI): ${context.zori ? '$' + context.zori.toLocaleString() + '/mo' : 'N/A'}${context.zoriGrowth != null ? ` (${context.zoriGrowth > 0 ? '+' : ''}${context.zoriGrowth.toFixed(2)}% YoY)` : ''}
-- Home Value (ZHVI): ${context.zhvi ? '$' + context.zhvi.toLocaleString() : 'N/A'}${context.zhviGrowth != null ? ` (${context.zhviGrowth > 0 ? '+' : ''}${context.zhviGrowth.toFixed(2)}% YoY)` : ''}
+- Median Rent (ZORI): ${fmt(context.zori, '$', '/mo')}${context.zoriGrowth != null ? ` (${context.zoriGrowth > 0 ? '+' : ''}${context.zoriGrowth.toFixed(2)}% YoY)` : ''}
+- Home Value (ZHVI): ${fmt(context.zhvi, '$')}${context.zhviGrowth != null ? ` (${context.zhviGrowth > 0 ? '+' : ''}${context.zhviGrowth.toFixed(2)}% YoY)` : ''}
 - Vacancy Rate: ${context.vacancyRate != null ? context.vacancyRate + '%' : 'N/A'}
 - Days to Pending: ${context.dozPending != null ? context.dozPending + ' days' : 'N/A'}
 - Price Cuts: ${context.priceCuts != null ? context.priceCuts + '%' : 'N/A'}
-- Active Inventory: ${context.inventory != null ? context.inventory.toLocaleString() : 'N/A'}
-- Transit Stops: ${context.transitStops != null ? context.transitStops.toLocaleString() : 'N/A'}
-- Population: ${context.population != null ? context.population.toLocaleString() : 'N/A'}
+- Active Inventory: ${fmt(context.inventory)}
+- Transit Stops: ${fmt(context.transitStops)}
+- Population: ${fmt(context.population)}
 ` : ''
 
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
@@ -89,12 +85,10 @@ MARKET DATA:
     // Parse JSON response — try multiple extraction strategies
     let parsed: { message: string; action: { type: string; [key: string]: unknown }; insight?: string | null }
     try {
-      // Strategy 1: direct parse
       const cleaned = raw.replace(/^```json\n?/, '').replace(/\n?```$/, '').trim()
       parsed = JSON.parse(cleaned)
     } catch {
       try {
-        // Strategy 2: extract JSON object from text
         const match = raw.match(/\{[\s\S]*\}/)
         if (match) {
           parsed = JSON.parse(match[0])
@@ -102,7 +96,6 @@ MARKET DATA:
           throw new Error('no JSON found')
         }
       } catch {
-        // Strategy 3: treat as plain text, extract action if mentioned
         parsed = { message: raw.replace(/\{[\s\S]*\}/g, '').trim().slice(0, 300), action: { type: 'none' }, insight: null }
       }
     }
