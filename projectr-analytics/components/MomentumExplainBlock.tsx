@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { MetricKey } from '@/lib/metric-definitions'
 import { MetricTooltip } from '@/components/MetricTooltip'
 
@@ -27,19 +27,28 @@ export function MomentumExplainBlock({
   aggregateZips: string[] | null
   metricKey?: MetricKey
 }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(true)
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState<MomentumApiResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
-    if (data || loading) return
+  const aggregateZipsKey = JSON.stringify(
+    [...new Set((aggregateZips ?? []).filter((z) => /^\d{5}$/.test(z)))].sort()
+  )
+  const zipContextKey = useMemo(() => {
+    const agg = JSON.parse(aggregateZipsKey) as string[]
+    if (agg.length > 0) return `a:${agg.join(',')}`
+    if (anchorZip && /^\d{5}$/.test(anchorZip)) return `z:${anchorZip}`
+    return ''
+  }, [anchorZip, aggregateZipsKey])
+
+  const fetchMomentum = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
       let zips: string[] = []
       if (aggregateZips && aggregateZips.length > 0) {
-        zips = [...new Set(aggregateZips)].slice(0, 40)
+        zips = [...new Set(aggregateZips.filter((z) => /^\d{5}$/.test(z)))].slice(0, 40)
       } else if (anchorZip && /^\d{5}$/.test(anchorZip)) {
         const nRes = await fetch(`/api/neighbors?zip=${encodeURIComponent(anchorZip)}`)
         const nJson = (await nRes.json()) as { zips?: Array<{ zip: string }> }
@@ -66,12 +75,22 @@ export function MomentumExplainBlock({
     } finally {
       setLoading(false)
     }
-  }, [aggregateZips, anchorZip, data, loading])
+  }, [aggregateZips, anchorZip])
+
+  useEffect(() => {
+    setData(null)
+    setError(null)
+  }, [zipContextKey])
+
+  useEffect(() => {
+    if (!zipContextKey) return
+    void fetchMomentum()
+  }, [zipContextKey, fetchMomentum])
 
   const toggle = () => {
     const next = !open
     setOpen(next)
-    if (next && !data && !loading) void load()
+    if (next && !data && !loading) void fetchMomentum()
   }
 
   if (!anchorZip && !(aggregateZips && aggregateZips.length)) return null

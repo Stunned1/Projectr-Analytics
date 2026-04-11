@@ -384,7 +384,7 @@ function CommandMap({
   const lastPermitFetchKey = useRef<string>('')
   const [selectedPermit, setSelectedPermit] = useState<PermitPayload | null>(null)
   const [layers, setLayers] = useState<LayerState>({
-    zipBoundary: true,
+    zipBoundary: false,
     transitStops: true,
     rentChoropleth: true,
     blockGroups: false,
@@ -393,7 +393,7 @@ function CommandMap({
     amenityHeatmap: false,
     floodRisk: false,
     nycPermits: false,
-    clientData: true,
+    clientData: false,
   })
   const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null)
   const [activeMetric, setActiveMetric] = useState<'zori' | 'zhvi'>('zori')

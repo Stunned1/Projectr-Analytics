@@ -27,7 +27,7 @@ export function CycleExplainCard({
   cycle: CycleAnalysis
   subtitle?: string
 }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(true)
   const phaseKey = PHASE_TO_KEY[cycle.cyclePosition]
 
   const rows = [

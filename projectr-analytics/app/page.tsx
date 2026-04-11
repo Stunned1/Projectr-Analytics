@@ -1,9 +1,7 @@
 'use client'
 
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect } from 'react'
 import dynamic from 'next/dynamic'
-import Image from 'next/image'
-import AgenticNormalizer from '@/components/AgenticNormalizer'
 import ExecutiveMemo from '@/components/ExecutiveMemo'
 import MarketReportExport from '@/components/MarketReportExport'
 import AgentChat, { type AgentAction } from '@/components/AgentChat'
@@ -11,8 +9,10 @@ import type { CycleAnalysis } from '@/lib/cycle/types'
 import type { MapLayersSnapshot } from '@/lib/report/types'
 import { parseCycleAnalysisField } from '@/lib/report/validate-cycle'
 import { useSitesStore } from '@/lib/sites-store'
+import { useClientUploadMarkersStore } from '@/lib/client-upload-markers-store'
 import SitesBootstrap from '@/components/SitesBootstrap'
-import ShortlistPanel from '@/components/ShortlistPanel'
+import CommandCenterSidebar from '@/components/CommandCenterSidebar'
+import { takePendingNav } from '@/lib/pending-navigation'
 import { MetricTooltip } from '@/components/MetricTooltip'
 import { MomentumExplainBlock } from '@/components/MomentumExplainBlock'
 import { CycleExplainCard } from '@/components/CycleExplainCard'
@@ -196,24 +196,6 @@ function formatMetricValue(name: string, value: number) {
 }
 
 // ── Small components ──────────────────────────────────────────────────────────
-
-function NavItem({ icon, label, active, onClick }: {
-  icon: React.ReactNode; label: string; active?: boolean; onClick?: () => void
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
-        active
-          ? 'bg-[#D76B3D]/15 text-[#D76B3D] border-l-2 border-[#D76B3D]'
-          : 'text-zinc-400 hover:text-white hover:bg-white/5 border-l-2 border-transparent'
-      }`}
-    >
-      <span className="w-4 h-4 flex-shrink-0">{icon}</span>
-      <span className="font-medium tracking-wide">{label}</span>
-    </button>
-  )
-}
 
 function BottomStat({ label, value, sub, accent, metricKey }: {
   label: string; value: string; sub?: string | null; accent?: 'green' | 'red' | null
@@ -404,15 +386,8 @@ function MetricRow({ label, value, sub, metricKey }: { label: string; value: str
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
 
-const MapIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21" /><line x1="9" y1="3" x2="9" y2="18" /><line x1="15" y1="6" x2="15" y2="21" /></svg>
-const AnalyticsIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4"><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /></svg>
-const AgentIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4"><circle cx="12" cy="12" r="3" /><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83" /></svg>
-const ReportsIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></svg>
-const SearchIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-3.5 h-3.5"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
-const ChevronRight = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3 h-3"><polyline points="9 18 15 12 9 6" /></svg>
-
 const DEFAULT_MAP_LAYERS: MapLayersSnapshot = {
-  zipBoundary: true,
+  zipBoundary: false,
   transitStops: true,
   rentChoropleth: true,
   blockGroups: false,
@@ -421,21 +396,20 @@ const DEFAULT_MAP_LAYERS: MapLayersSnapshot = {
   amenityHeatmap: false,
   floodRisk: false,
   nycPermits: false,
-  clientData: true,
+  clientData: false,
   choroplethMetric: 'zori',
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function Home() {
-  const [zip, setZip] = useState('')
   const [searchInput, setSearchInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<MarketData | null>(null)
   const [cityZips, setCityZips] = useState<CityZip[] | null>(null)
   const [boroughBoundary, setBoroughBoundary] = useState<object | null>(null)
   const [aggregateData, setAggregateData] = useState<AggregateData | null>(null)
-  const [uploadedMarkers, setUploadedMarkers] = useState<Array<{ lat: number; lng: number; label: string; value: number | null }> | null>(null)
+  const uploadedMarkers = useClientUploadMarkersStore((s) => s.markers)
   const [agentOpen, setAgentOpen] = useState(false)
   const [agentLayerOverrides, setAgentLayerOverrides] = useState<Record<string, boolean>>({})
   const [agentMetric, setAgentMetric] = useState<'zori' | 'zhvi' | null>(null)
@@ -444,7 +418,6 @@ export default function Home() {
   const [trends, setTrends] = useState<TrendsData | null>(null)
   const [cycleData, setCycleData] = useState<CycleAnalysis | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [activeNav, setActiveNav] = useState<'map' | 'analytics' | 'agent' | 'reports'>('map')
   const [panelOpen, setPanelOpen] = useState(false)
   const [mapLayersSnapshot, setMapLayersSnapshot] = useState<MapLayersSnapshot>(DEFAULT_MAP_LAYERS)
 
@@ -464,12 +437,6 @@ export default function Home() {
       value: s.momentumScore ?? null,
     }))
   }, [sitesForMap, selectedComparisonIds])
-
-  async function handleNormalizerIngested(result: { triage: { bucket: string }; marker_points?: Array<{ lat: number; lng: number; value: number | null; label: string }> }) {
-    if (result.triage.bucket === 'GEOSPATIAL' && result.marker_points?.length) {
-      setUploadedMarkers(result.marker_points)
-    }
-  }
 
   function handleAgentAction(action: AgentAction) {
     switch (action.type) {
@@ -593,7 +560,6 @@ export default function Home() {
       setAggregateData(null)
       setTrends(null)
       setCycleData(null)
-      setZip(zipInput)
       try {
         const [marketRes, transitRes, trendsRes, cycleRes] = await Promise.all([
           fetch(`/api/market?zip=${zipInput}`),
@@ -661,7 +627,6 @@ export default function Home() {
     setTrends(null)
     setCycleData(null)
     setResult(null)
-    setZip('')
     setTransit(null)
     try {
       const lowerInput = trimmed.toLowerCase().replace(/,.*$/, '').trim()
@@ -676,7 +641,6 @@ export default function Home() {
           setCityZips(data.zips)
           setBoroughBoundary(data.boundary ?? null)
           setResult(null)
-          setZip('')
           setTransit(null)
           setPanelOpen(true)
           fetchAggregate(data.zips.map((z: CityZip) => z.zip), data.borough)
@@ -702,7 +666,6 @@ export default function Home() {
           setCityZips(data.zips)
           setBoroughBoundary(null)
           setResult(null)
-          setZip('')
           setTransit(null)
           setPanelOpen(true)
           const st =
@@ -737,6 +700,19 @@ export default function Home() {
     await runAggregateSearch(input)
   }
 
+  useEffect(() => {
+    const nav = takePendingNav()
+    if (!nav) return
+    if (nav.type === 'zip') {
+      setSearchInput(nav.zip)
+      void loadZipMarket(nav.zip)
+    } else {
+      setSearchInput(nav.query)
+      void runAggregateSearch(nav.query)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot session handoff from /upload
+  }, [])
+
   const fredSeries: Record<string, Array<{ date: string; value: number }>> = {}
   result?.data
     .filter((r) => (r.data_source === 'FRED' || r.data_source === 'Census BPS') && r.time_period)
@@ -751,88 +727,45 @@ export default function Home() {
     ? result.metro_velocity.doz_pending_latest < 30 ? 'Active' : 'Moderate'
     : null
 
+  const sidebarActiveMarket =
+    result != null
+      ? {
+          kind: 'zip' as const,
+          title: result.zillow?.city ?? result.zip,
+          subtitle: `${result.zip} · ${result.geo?.state ?? '—'}`,
+        }
+      : cityZips != null && cityZips.length > 0
+        ? {
+            kind: 'aggregate' as const,
+            title: cityZips[0]?.city ?? '',
+            subtitle: `${cityZips.length} ZIPs · ${cityZips[0]?.state ?? '—'}`,
+          }
+        : null
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-black text-white">
       <SitesBootstrap />
 
-      {/* ── Left Sidebar ── */}
-      <aside className="w-[200px] flex-shrink-0 flex flex-col bg-[#0a0a0a] border-r border-white/8 z-20">
-
-        {/* Logo */}
-        <div className="px-4 py-4 border-b border-white/8">
-          <Image src="/Projectr_Logo.png" alt="Projectr" width={120} height={32} loading="eager" style={{ width: 'auto', height: '32px' }} />
-        </div>
-
-        {/* Search */}
-        <div className="px-3 py-3 border-b border-white/8">
-          <form onSubmit={fetchMarket}>
-            <div className="relative">
-              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none">
-                <SearchIcon />
-              </span>
-              <input
-                type="text"
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                placeholder="ZIP, City, ST, or Borough..."
-                className="w-full bg-white/5 border border-white/10 rounded-md pl-7 pr-3 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-[#D76B3D]/50 transition-colors"
-              />
-            </div>
-            {error && <p className="text-red-400 text-[10px] mt-1 px-0.5">{error}</p>}
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full mt-2 bg-[#D76B3D] hover:bg-[#c45e32] text-white text-xs font-semibold py-2 rounded-md transition-colors disabled:opacity-50"
-            >
-              {loading ? 'Analyzing...' : 'Analyze Market'}
-            </button>
-          </form>
-        </div>
-
-        {/* Nav */}
-        <nav className="flex-1 px-2 py-3 flex flex-col gap-0.5 min-h-0">
-          <NavItem icon={<MapIcon />} label="Map" active={activeNav === 'map'} onClick={() => setActiveNav('map')} />
-          <NavItem icon={<ReportsIcon />} label="Case Studies" active={activeNav === 'reports'} onClick={() => setActiveNav('reports')} />
-          <ShortlistPanel
-            onOpenSite={(site) => {
-              if (site.isAggregate && site.savedSearch?.trim()) {
-                const q = site.savedSearch.trim()
-                setSearchInput(q)
-                void runAggregateSearch(q)
-                return
-              }
-              setSearchInput(site.zip)
-              void loadZipMarket(site.zip)
-            }}
-          />
-        </nav>
-
-        {/* Active market badge */}
-        {(result || cityZips) && (
-          <div className="px-3 py-3 border-t border-white/8">
-            <div
-              className="bg-white/5 border border-white/8 rounded-lg p-3 cursor-pointer hover:border-[#D76B3D]/30 transition-colors"
-              onClick={() => setPanelOpen(!panelOpen)}
-            >
-              <div className="flex items-center justify-between mb-1">
-                <p className="text-[9px] text-zinc-500 uppercase tracking-widest">Active Market</p>
-                <ChevronRight />
-              </div>
-              {result ? (
-                <>
-                  <p className="text-white text-sm font-semibold">{result.zillow?.city ?? result.zip}</p>
-                  <p className="text-zinc-500 text-[10px]">{result.zip} · {result.geo?.state}</p>
-                </>
-              ) : cityZips ? (
-                <>
-                  <p className="text-white text-sm font-semibold">{cityZips[0]?.city}</p>
-                  <p className="text-zinc-500 text-[10px]">{cityZips.length} ZIPs · {cityZips[0]?.state}</p>
-                </>
-              ) : null}
-            </div>
-          </div>
-        )}
-      </aside>
+      <CommandCenterSidebar
+        searchInput={searchInput}
+        setSearchInput={setSearchInput}
+        error={error}
+        loading={loading}
+        onAnalyzeSubmit={fetchMarket}
+        activeMarket={sidebarActiveMarket}
+        panelOpen={panelOpen}
+        onTogglePanel={() => setPanelOpen(!panelOpen)}
+        onShortlistOpenSite={(site) => {
+          if (site.isAggregate && site.savedSearch?.trim()) {
+            const q = site.savedSearch.trim()
+            setSearchInput(q)
+            void runAggregateSearch(q)
+            return
+          }
+          setSearchInput(site.zip)
+          void loadZipMarket(site.zip)
+        }}
+      />
 
       {/* ── Map ── */}
       <div className="flex-1 relative overflow-hidden">
@@ -935,6 +868,18 @@ export default function Home() {
               <button onClick={() => setPanelOpen(false)} className="text-zinc-600 hover:text-white text-xl leading-none mt-0.5">×</button>
             </div>
 
+            <MomentumExplainBlock
+              anchorZip={cityZips?.find((z) => /^\d{5}$/.test(z.zip))?.zip ?? null}
+              aggregateZips={cityZips?.map((z) => z.zip).filter((z) => /^\d{5}$/.test(z)) ?? null}
+            />
+            {cycleData && (
+              <CycleExplainCard
+                marketLabel={aggregateData.label}
+                cycle={cycleData}
+                subtitle="Cycle geography uses the first ZIP in this area; county-level signals (BPS, FRED) follow that anchor."
+              />
+            )}
+
             <PanelSection title="Market Pricing (Zillow)">
               <MetricRow metricKey="zori" label="Avg Median Rent (ZORI)" value={fmtMoney(aggregateData.zillow.avg_zori)} sub={aggregateData.zillow.zori_growth_12m != null ? `${fmtGrowth(aggregateData.zillow.zori_growth_12m)} YoY avg` : undefined} />
               <MetricRow metricKey="zhvi" label="Avg Home Value (ZHVI)" value={fmtMoney(aggregateData.zillow.avg_zhvi)} sub={aggregateData.zillow.zhvi_growth_12m != null ? `${fmtGrowth(aggregateData.zillow.zhvi_growth_12m)} YoY avg` : undefined} />
@@ -1031,20 +976,9 @@ export default function Home() {
           </div>
         )}
 
-        {/* Aggregate panel memo + normalizer */}
+        {/* Aggregate panel memo + export */}
         {aggregateData && panelOpen && !result && (
           <div className="px-4 pb-4 min-w-[300px]">
-            <MomentumExplainBlock
-              anchorZip={cityZips?.find((z) => /^\d{5}$/.test(z.zip))?.zip ?? null}
-              aggregateZips={cityZips?.map((z) => z.zip).filter((z) => /^\d{5}$/.test(z)) ?? null}
-            />
-            {cycleData && (
-              <CycleExplainCard
-                marketLabel={aggregateData.label}
-                cycle={cycleData}
-                subtitle="Cycle geography uses the first ZIP in this area; county-level signals (BPS, FRED) follow that anchor."
-              />
-            )}
             {cityZips && cityZips.length > 0 && (
               <AggregateShortlistToggle
                 aggregateData={aggregateData}
@@ -1085,9 +1019,6 @@ export default function Home() {
                 }}
               />
             </PanelSection>
-            <PanelSection title="Agentic Normalizer">
-              <AgenticNormalizer onIngested={handleNormalizerIngested} />
-            </PanelSection>
           </div>
         )}
 
@@ -1101,6 +1032,11 @@ export default function Home() {
               </div>
               <button onClick={() => setPanelOpen(false)} className="text-zinc-600 hover:text-white text-xl leading-none mt-0.5">×</button>
             </div>
+
+            <MomentumExplainBlock anchorZip={/^\d{5}$/.test(result.zip) ? result.zip : null} aggregateZips={null} />
+            {cycleData && (
+              <CycleExplainCard marketLabel={result.zillow?.city ?? result.zip} cycle={cycleData} />
+            )}
 
             {/* Zillow pricing */}
             {result.zillow && (
@@ -1206,10 +1142,6 @@ export default function Home() {
               </PanelSection>
             )}
 
-            <MomentumExplainBlock anchorZip={/^\d{5}$/.test(result.zip) ? result.zip : null} aggregateZips={null} />
-            {cycleData && (
-              <CycleExplainCard marketLabel={result.zillow?.city ?? result.zip} cycle={cycleData} />
-            )}
             {result?.geo && /^\d{5}$/.test(result.zip) && (
               <ShortlistToggleButton market={result} cycle={cycleData} />
             )}
@@ -1249,10 +1181,6 @@ export default function Home() {
               />
             </PanelSection>
 
-            {/* Agentic Normalizer */}
-            <PanelSection title="Agentic Normalizer">
-              <AgenticNormalizer currentZip={result.zip} onIngested={handleNormalizerIngested} />
-            </PanelSection>
           </div>
         )}
       </aside>
