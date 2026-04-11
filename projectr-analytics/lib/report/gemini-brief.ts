@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import { stripGeminiStringWrappers } from '@/lib/sanitize-gemini-string'
 import type { ClientReportPayload, GeminiBriefResult, SignalIndicator } from './types'
 
 const FALLBACK: GeminiBriefResult = {
@@ -56,7 +57,7 @@ Return JSON shape:
   "confidenceEcho": "short optional echo of agreement line"
 }
 
-Use confidenceEcho to restate agreement in one short clause (e.g. "Three of four signals align with late-cycle rent strength.") or null.
+Use confidenceEcho to restate agreement in one short clause, or null. Write plain text only — do not wrap confidenceEcho in quotation marks (no leading or trailing " characters).
 
 Context:
 ${ctx}`
@@ -75,17 +76,19 @@ ${ctx}`
       confidenceEcho?: string | null
     }
 
-    const phase = typeof parsed.cyclePhase === 'string' ? parsed.cyclePhase.trim() : 'Market Assessment'
+    const phase = stripGeminiStringWrappers(
+      typeof parsed.cyclePhase === 'string' ? parsed.cyclePhase.trim() : 'Market Assessment'
+    )
     const narrative =
       typeof parsed.narrative === 'string' && parsed.narrative.length > 20
-        ? parsed.narrative.trim()
+        ? stripGeminiStringWrappers(parsed.narrative.trim())
         : FALLBACK.narrative
 
     const headline = `${payload.marketLabel} is in ${phase}`
 
     const conf =
       typeof parsed.confidenceEcho === 'string' && parsed.confidenceEcho.length > 5
-        ? parsed.confidenceEcho.trim()
+        ? stripGeminiStringWrappers(parsed.confidenceEcho.trim())
         : confidenceLine
 
     return {

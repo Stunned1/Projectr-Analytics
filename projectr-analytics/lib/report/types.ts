@@ -1,5 +1,7 @@
 /** Client → POST /api/report/pdf */
 
+import type { CycleAnalysis } from '@/lib/cycle/types'
+
 export type ChoroplethMetric = 'zori' | 'zhvi'
 
 export interface MapLayersSnapshot {
@@ -62,6 +64,8 @@ export interface ClientReportPayload {
   pins: ClientReportPin[]
   /** City/borough mode: ZIPs used to average monthly ZORI for the PDF chart. */
   zori_peer_zips?: string[] | null
+  /** Deterministic cycle classifier + narrative (from GET /api/cycle); PDF uses when present. */
+  cycleAnalysis?: CycleAnalysis | null
 }
 
 export interface MetroBenchmark {

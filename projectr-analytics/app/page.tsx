@@ -7,7 +7,9 @@ import AgenticNormalizer from '@/components/AgenticNormalizer'
 import ExecutiveMemo from '@/components/ExecutiveMemo'
 import MarketReportExport from '@/components/MarketReportExport'
 import AgentChat, { type AgentAction } from '@/components/AgentChat'
+import type { CycleAnalysis } from '@/lib/cycle/types'
 import type { MapLayersSnapshot } from '@/lib/report/types'
+import { parseCycleAnalysisField } from '@/lib/report/validate-cycle'
 
 const CommandMap = dynamic(() => import('@/components/CommandMap'), { ssr: false })
 
@@ -191,6 +193,27 @@ function PanelSection({ title, children }: { title: string; children: React.Reac
   )
 }
 
+function CycleHeadlineAboveMemo({
+  marketLabel,
+  cycle,
+  subtitle,
+}: {
+  marketLabel: string
+  cycle: CycleAnalysis
+  subtitle?: string
+}) {
+  return (
+    <div className="mb-4 rounded-lg border border-[#D76B3D]/30 bg-[#D76B3D]/10 px-3 py-3">
+      <p className="text-[9px] uppercase tracking-widest text-[#D76B3D] mb-1">Market cycle</p>
+      <p className="text-white text-[15px] font-bold leading-tight">
+        {marketLabel} is in {cycle.cycleStage} {cycle.cyclePosition}
+      </p>
+      <p className="text-zinc-500 text-[10px] mt-1.5 leading-snug">{cycle.confidenceLine}</p>
+      {subtitle && <p className="text-zinc-600 text-[9px] mt-2 leading-snug">{subtitle}</p>}
+    </div>
+  )
+}
+
 function MetricRow({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div className="flex justify-between items-start py-1.5 border-b border-white/5 last:border-0">
@@ -243,6 +266,7 @@ export default function Home() {
   const [agentTilt, setAgentTilt] = useState<number | null>(null)
   const [transit, setTransit] = useState<TransitData | null>(null)
   const [trends, setTrends] = useState<TrendsData | null>(null)
+  const [cycleData, setCycleData] = useState<CycleAnalysis | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [activeNav, setActiveNav] = useState<'map' | 'analytics' | 'agent' | 'reports'>('map')
   const [panelOpen, setPanelOpen] = useState(false)
@@ -312,7 +336,22 @@ export default function Home() {
         body: JSON.stringify({ zips, label }),
       })
       const data = await res.json()
-      if (!data.error) setAggregateData(data)
+      if (!data.error) {
+        setAggregateData(data)
+        const anchor = zips.find((z) => /^\d{5}$/.test(z))
+        if (anchor) {
+          void fetch(`/api/cycle?zip=${encodeURIComponent(anchor)}&label=${encodeURIComponent(label)}`)
+            .then((r) => r.json())
+            .then((j: unknown) => {
+              const rec = j as { error?: string }
+              if (rec.error) setCycleData(null)
+              else setCycleData(parseCycleAnalysisField(j))
+            })
+            .catch(() => setCycleData(null))
+        } else {
+          setCycleData(null)
+        }
+      }
     } catch { /* non-critical */ }
   }
 
@@ -393,6 +432,7 @@ export default function Home() {
     setBoroughBoundary(null)
     setAggregateData(null)
     setTrends(null)
+    setCycleData(null)
 
     if (/^\d{5}$/.test(input)) {
       // ZIP code search — clear city mode state
@@ -400,18 +440,23 @@ export default function Home() {
       setBoroughBoundary(null)
       setZip(input)
       try {
-        const [marketRes, transitRes, trendsRes] = await Promise.all([
+        // Parallel load: market + transit + trends + cycle classifier (GET /api/cycle uses cached Supabase + Gemini only).
+        const [marketRes, transitRes, trendsRes, cycleRes] = await Promise.all([
           fetch(`/api/market?zip=${input}`),
           fetch(`/api/transit?zip=${input}`),
           fetch(`/api/trends?zip=${input}`),
+          fetch(`/api/cycle?zip=${encodeURIComponent(input)}`),
         ])
         const data = await marketRes.json()
         const transitData = await transitRes.json()
         const trendsData = (await trendsRes.json()) as Record<string, unknown>
+        const cycleJson = await cycleRes.json()
         if (data.error) { setError(data.error); return }
         setResult(data)
         if (!transitData.error) setTransit(transitData)
         applyTrendsApiBody(trendsData, trendsRes.ok)
+        const parsedCycle = cycleRes.ok && !('error' in cycleJson && cycleJson.error) ? parseCycleAnalysisField(cycleJson) : null
+        setCycleData(parsedCycle)
         setPanelOpen(true)
       } catch {
         setError('Failed to fetch data')
@@ -745,11 +790,20 @@ export default function Home() {
                 aggregateData={aggregateData}
                 cityZips={cityZips}
                 trends={trendsShapeForReport(trends)}
+                cycleAnalysis={cycleData}
               />
             </PanelSection>
+            {cycleData && (
+              <CycleHeadlineAboveMemo
+                marketLabel={aggregateData.label}
+                cycle={cycleData}
+                subtitle="Cycle geography uses the first ZIP in this area; county-level signals (BPS, FRED) follow that anchor."
+              />
+            )}
             <PanelSection title="Executive Memo">
               <ExecutiveMemo
                 marketLabel={aggregateData.label}
+                cycle={cycleData}
                 data={{
                   avg_zori: aggregateData.zillow.avg_zori,
                   avg_zhvi: aggregateData.zillow.avg_zhvi,
@@ -889,11 +943,16 @@ export default function Home() {
                 aggregateData={null}
                 cityZips={null}
                 trends={trendsShapeForReport(trends)}
+                cycleAnalysis={cycleData}
               />
             </PanelSection>
+            {cycleData && (
+              <CycleHeadlineAboveMemo marketLabel={result.zillow?.city ?? result.zip} cycle={cycleData} />
+            )}
             <PanelSection title="Executive Memo">
               <ExecutiveMemo
                 marketLabel={result.zillow?.city ?? result.zip}
+                cycle={cycleData}
                 data={{
                   avg_zori: result.zillow?.zori_latest,
                   avg_zhvi: result.zillow?.zhvi_latest,

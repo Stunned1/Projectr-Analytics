@@ -1,5 +1,6 @@
 import React from 'react'
 import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/renderer'
+import type { CycleAnalysis } from '@/lib/cycle/types'
 import type {
   ClientReportPayload,
   GeminiBriefResult,
@@ -8,6 +9,7 @@ import type {
 } from './types'
 import { formatActiveLayersList } from './layer-labels'
 import { BarChartPdf, SparklinePdf } from './pdf-charts'
+import { CycleSignalTilesPdf, CycleWheelPdf } from './pdf-cycle-visual'
 import type { ZoriSeriesSource } from './fetch-zori-series'
 
 const accent = '#D76B3D'
@@ -100,18 +102,28 @@ function arrowChar(a: SignalIndicator['arrow']) {
   return '~'
 }
 
+function classifierMark(cycle: CycleAnalysis | null | undefined, key: 'rent' | 'vacancy' | 'permits' | 'employment'): string {
+  if (!cycle) return '—'
+  const s = cycle.signals[key].score
+  if (s === 1) return '+'
+  if (s === -1) return '-'
+  return '~'
+}
+
 export interface SiteCompareRow {
   label: string
   zip: string
   zori: number | null
   momentum: number | null
   signalLine: string
+  cyclePhase: string | null
 }
 
 export interface MarketReportPdfInput {
   payload: ClientReportPayload
   brief: GeminiBriefResult
   signals: SignalIndicator[]
+  cycleAnalysis: CycleAnalysis | null
   zoriSeries: { date: string; value: number }[]
   zoriSeriesSource: ZoriSeriesSource
   trendsSeries: { date: string; value: number }[]
@@ -122,8 +134,19 @@ export interface MarketReportPdfInput {
 }
 
 export function MarketReportDocument(props: MarketReportPdfInput) {
-  const { payload, brief, signals, zoriSeries, zoriSeriesSource, trendsSeries, metro, mapImageDataUri, logoDataUri, siteRows } =
-    props
+  const {
+    payload,
+    brief,
+    signals,
+    cycleAnalysis,
+    zoriSeries,
+    zoriSeriesSource,
+    trendsSeries,
+    metro,
+    mapImageDataUri,
+    logoDataUri,
+    siteRows,
+  } = props
   const dateStr = new Date(payload.generatedAt).toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'long',
@@ -136,21 +159,29 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
   const metroUnemp = metro?.avg_unemployment_rate ?? null
   const metroMig = metro?.avg_migration_movers ?? null
 
-  const tableRows: { label: string; sub: string; bench: string }[] = [
+  const tableRows: {
+    label: string
+    sub: string
+    bench: string
+    signalKey?: 'rent' | 'vacancy' | 'permits' | 'employment'
+  }[] = [
     {
       label: 'Median rent (ZORI index)',
       sub: fmtMoney(payload.zillow.zori),
       bench: fmtMoney(metroZori),
+      signalKey: 'rent',
     },
     {
       label: 'Vacancy rate',
       sub: payload.census.vacancy_rate != null ? `${payload.census.vacancy_rate.toFixed(1)}%` : '—',
       bench: metroVac != null ? `${metroVac.toFixed(1)}% avg` : '—',
+      signalKey: 'vacancy',
     },
     {
       label: 'Permits (county BPS, 2021–23 units)',
       sub: payload.permits.total_units_2021_2023 != null ? String(Math.round(payload.permits.total_units_2021_2023)) : '—',
       bench: 'County scope',
+      signalKey: 'permits',
     },
     {
       label: 'Median home value (ZHVI)',
@@ -169,6 +200,7 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
         metroUnemp != null
           ? `${metroUnemp.toFixed(1)}% unempl. (avg)`
           : '—',
+      signalKey: 'employment',
     },
     {
       label: 'Migration / mobility (ACS)',
@@ -207,16 +239,44 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
         <Text style={styles.h1}>{brief.cycleHeadline}</Text>
         <Text style={styles.narrative}>{brief.narrative}</Text>
 
-        <View style={styles.signalRow}>
-          {signals.map((s) => (
-            <View key={s.id} style={styles.signalCard}>
-              <Text style={styles.signalTitle}>{s.label}</Text>
-              <Text style={styles.signalArrow}>{arrowChar(s.arrow)}</Text>
-              <Text style={styles.signalLine}>{s.line}</Text>
+        {cycleAnalysis ? (
+          <>
+            <Text style={[styles.sectionTitle, { marginTop: 8 }]}>Cycle map</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 8 }}>
+              <CycleWheelPdf cycle={cycleAnalysis} />
+              <View style={{ flex: 1, paddingTop: 4, marginLeft: 14 }}>
+                <Text style={{ fontSize: 8, color: ink, fontFamily: 'Helvetica', fontWeight: 'bold' }}>
+                  {cycleAnalysis.cycleStage} {cycleAnalysis.cyclePosition}
+                </Text>
+                <Text style={{ fontSize: 7, color: muted, marginTop: 4, lineHeight: 1.35 }}>
+                  Quadrants: Recovery (upper-left), Expansion (upper-right), Hypersupply (lower-right), Recession
+                  (lower-left). Dot placement reflects stage within the phase; color reflects confidence (accent =
+                  stronger read, amber = medium, gray = cautious).
+                </Text>
+              </View>
             </View>
-          ))}
-        </View>
+            <Text style={[styles.sectionTitle, { marginTop: 4 }]}>Signals</Text>
+            <CycleSignalTilesPdf cycle={cycleAnalysis} />
+          </>
+        ) : (
+          <View style={styles.signalRow}>
+            {signals.map((s) => (
+              <View key={s.id} style={styles.signalCard}>
+                <Text style={styles.signalTitle}>{s.label}</Text>
+                <Text style={styles.signalArrow}>{arrowChar(s.arrow)}</Text>
+                <Text style={styles.signalLine}>{s.line}</Text>
+              </View>
+            ))}
+          </View>
+        )}
         <Text style={styles.confidence}>Confidence — {brief.confidenceLine}</Text>
+
+        {cycleAnalysis && (
+          <Text style={[styles.foot, { marginBottom: 6 }]}>
+            Analytical cycle classifier: {cycleAnalysis.signalsAgreement}/4 signals agree · data quality {cycleAnalysis.dataQuality}
+            {cycleAnalysis.transitional ? ' · transitional / mixed read' : ''}.
+          </Text>
+        )}
 
         <Text style={styles.foot}>
           Projectr Analytics · Data: Zillow Research (ZORI/ZHVI), Census ACS & BPS, FRED, Google Trends.
@@ -235,15 +295,19 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
 
         <Text style={styles.sectionTitle}>Key metrics vs. metro benchmark</Text>
         <View style={{ flexDirection: 'row', paddingBottom: 4 }}>
-          <Text style={[styles.th, { width: '44%' }]}>Metric</Text>
-          <Text style={[styles.th, { width: '28%' }]}>Submarket</Text>
-          <Text style={[styles.th, { width: '28%' }]}>Metro peer avg</Text>
+          <Text style={[styles.th, { width: '38%' }]}>Metric</Text>
+          <Text style={[styles.th, { width: '22%' }]}>Submarket</Text>
+          <Text style={[styles.th, { width: '10%' }]}>Signal</Text>
+          <Text style={[styles.th, { width: '30%' }]}>Metro peer avg</Text>
         </View>
         {tableRows.map((r) => (
           <View key={r.label} style={styles.tableRow} wrap={false}>
-            <Text style={[styles.td, { width: '44%' }]}>{r.label}</Text>
-            <Text style={[styles.td, { width: '28%', fontFamily: 'Helvetica', fontWeight: 'bold' }]}>{r.sub}</Text>
-            <Text style={[styles.td, { width: '28%', color: muted }]}>{r.bench}</Text>
+            <Text style={[styles.td, { width: '38%' }]}>{r.label}</Text>
+            <Text style={[styles.td, { width: '22%', fontFamily: 'Helvetica', fontWeight: 'bold' }]}>{r.sub}</Text>
+            <Text style={[styles.td, { width: '10%', fontFamily: 'Helvetica', fontWeight: 'bold' }]}>
+              {r.signalKey ? classifierMark(cycleAnalysis, r.signalKey) : '—'}
+            </Text>
+            <Text style={[styles.td, { width: '30%', color: muted }]}>{r.bench}</Text>
           </View>
         ))}
         {metro && (
@@ -282,8 +346,33 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
         </View>
 
         {mapImageDataUri ? (
-          <View style={styles.mapBox}>
-            <Image src={mapImageDataUri} style={{ width: 515, height: 290 }} />
+          <View style={{ width: 515, height: 290, position: 'relative' }}>
+            <View style={styles.mapBox}>
+              <Image src={mapImageDataUri} style={{ width: 515, height: 290 }} />
+            </View>
+            {cycleAnalysis && (
+              <View
+                style={{
+                  position: 'absolute',
+                  right: 8,
+                  bottom: 8,
+                  backgroundColor: 'rgba(255,255,255,0.94)',
+                  paddingVertical: 6,
+                  paddingHorizontal: 8,
+                  borderWidth: 1,
+                  borderColor: '#ddd',
+                  borderRadius: 3,
+                  maxWidth: 200,
+                }}
+              >
+                <Text style={{ fontSize: 9, fontFamily: 'Helvetica', fontWeight: 'bold', color: ink }}>
+                  {cycleAnalysis.cycleStage} {cycleAnalysis.cyclePosition}
+                </Text>
+                <Text style={{ fontSize: 7, color: muted, marginTop: 2 }}>
+                  {cycleAnalysis.confidence}% confidence · {cycleAnalysis.dataQuality} data
+                </Text>
+              </View>
+            )}
           </View>
         ) : (
           <View style={[styles.mapBox, { height: 200, justifyContent: 'center', alignItems: 'center', padding: 16 }]}>
@@ -330,26 +419,28 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
 
           <Text style={styles.sectionTitle}>Ranked by momentum score</Text>
           <View style={{ flexDirection: 'row', paddingBottom: 4 }}>
-            <Text style={[styles.th, { width: '8%' }]}>#</Text>
-            <Text style={[styles.th, { width: '22%' }]}>Site</Text>
-            <Text style={[styles.th, { width: '14%' }]}>ZIP</Text>
-            <Text style={[styles.th, { width: '14%' }]}>ZORI</Text>
-            <Text style={[styles.th, { width: '14%' }]}>Score</Text>
-            <Text style={[styles.th, { width: '28%' }]}>Read</Text>
+            <Text style={[styles.th, { width: '7%' }]}>#</Text>
+            <Text style={[styles.th, { width: '18%' }]}>Site</Text>
+            <Text style={[styles.th, { width: '12%' }]}>ZIP</Text>
+            <Text style={[styles.th, { width: '12%' }]}>ZORI</Text>
+            <Text style={[styles.th, { width: '10%' }]}>Mom.</Text>
+            <Text style={[styles.th, { width: '18%' }]}>Cycle</Text>
+            <Text style={[styles.th, { width: '23%' }]}>Read</Text>
           </View>
           {[...siteRows].sort((a, b) => (b.momentum ?? -1) - (a.momentum ?? -1)).map((r, i) => (
             <View key={r.label + r.zip} style={styles.tableRow} wrap={false}>
-              <Text style={[styles.td, { width: '8%' }]}>{i + 1}</Text>
-              <Text style={[styles.td, { width: '22%' }]}>{r.label}</Text>
-              <Text style={[styles.td, { width: '14%' }]}>{r.zip}</Text>
-              <Text style={[styles.td, { width: '14%' }]}>{fmtMoney(r.zori)}</Text>
-              <Text style={[styles.td, { width: '14%' }]}>{r.momentum != null ? String(r.momentum) : '—'}</Text>
-              <Text style={[styles.td, { width: '28%', fontSize: 7 }]}>{r.signalLine}</Text>
+              <Text style={[styles.td, { width: '7%' }]}>{i + 1}</Text>
+              <Text style={[styles.td, { width: '18%' }]}>{r.label}</Text>
+              <Text style={[styles.td, { width: '12%' }]}>{r.zip}</Text>
+              <Text style={[styles.td, { width: '12%' }]}>{fmtMoney(r.zori)}</Text>
+              <Text style={[styles.td, { width: '10%' }]}>{r.momentum != null ? String(r.momentum) : '—'}</Text>
+              <Text style={[styles.td, { width: '18%', fontSize: 7 }]}>{r.cyclePhase ?? '—'}</Text>
+              <Text style={[styles.td, { width: '23%', fontSize: 7 }]}>{r.signalLine}</Text>
             </View>
           ))}
 
           <Text style={styles.foot}>
-            Momentum blends normalized rent, permits, and unemployment proxies from cached county/ZIP data (see /api/momentum).
+            Momentum score from /api/momentum; cycle phase from the same cached inputs as the ZIP classifier (no extra API calls).
           </Text>
         </Page>
       )}

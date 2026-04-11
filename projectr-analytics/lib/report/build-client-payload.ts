@@ -1,3 +1,4 @@
+import type { CycleAnalysis } from '@/lib/cycle/types'
 import type { ClientReportPayload, ClientReportPin, MapLayersSnapshot } from './types'
 
 type DataRow = {
@@ -102,8 +103,9 @@ export function buildClientReportPayloadFromZip(args: {
   trends: TrendsShape | null
   layers: MapLayersSnapshot
   pins: ClientReportPin[]
+  cycleAnalysis?: CycleAnalysis | null
 }): ClientReportPayload {
-  const { result, trends, layers, pins } = args
+  const { result, trends, layers, pins, cycleAnalysis } = args
   const rows = result.data
   const byYear = permitsByYear(rows)
 
@@ -145,6 +147,7 @@ export function buildClientReportPayloadFromZip(args: {
     },
     pins,
     zori_peer_zips: null,
+    cycleAnalysis: cycleAnalysis ?? null,
   }
 }
 
@@ -154,8 +157,9 @@ export function buildClientReportPayloadFromAggregate(args: {
   layers: MapLayersSnapshot
   pins: ClientReportPin[]
   trends: TrendsShape | null
+  cycleAnalysis?: CycleAnalysis | null
 }): ClientReportPayload {
-  const { aggregate, cityZips, layers, pins, trends } = args
+  const { aggregate, cityZips, layers, pins, trends, cycleAnalysis } = args
   const fredRows: DataRow[] = aggregate.fred.map((r) => ({
     metric_name: r.metric_name,
     metric_value: r.metric_value,
@@ -213,5 +217,6 @@ export function buildClientReportPayloadFromAggregate(args: {
     zori_peer_zips: (cityZips ?? [])
       .map((z) => z.zip)
       .filter((z): z is string => typeof z === 'string' && /^\d{5}$/.test(z)),
+    cycleAnalysis: cycleAnalysis ?? null,
   }
 }

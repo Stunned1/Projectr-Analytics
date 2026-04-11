@@ -4,13 +4,17 @@ import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { renderToBuffer } from '@react-pdf/renderer'
 import { supabase } from '@/lib/supabase'
-import type { ClientReportPayload, MetroBenchmark } from '@/lib/report/types'
+import type { ClientReportPayload, MetroBenchmark, SignalIndicator } from '@/lib/report/types'
+import { analyzeCycleForZip, cycleHeadline } from '@/lib/cycle/run-analysis'
+import { cycleAnalysisToSignalIndicators } from '@/lib/report/cycle-signals'
 import { buildSignalIndicators, confidenceFromSignals } from '@/lib/report/signals'
 import { resolveZoriSeriesForReport } from '@/lib/report/fetch-zori-series'
 import { generateBriefWithGemini } from '@/lib/report/gemini-brief'
+import { parseCycleAnalysisField } from '@/lib/report/validate-cycle'
 import { encodeZipBoundaryPolyline } from '@/lib/report/boundary-encode'
 import { fetchStaticMapPng } from '@/lib/report/static-map'
 import { MarketReportDocument, type SiteCompareRow } from '@/lib/report/pdf-document'
+import type { CycleAnalysis } from '@/lib/cycle/types'
 import { resolveZctaFromCoordinates } from '@/lib/upload/resolve-zcta'
 
 export const dynamic = 'force-dynamic'
@@ -101,14 +105,29 @@ async function buildSiteRows(
 
   const zoriByZip = new Map((snaps ?? []).map((s) => [s.zip, s.zori_latest]))
 
+  const cycleByZip = new Map<string, CycleAnalysis>()
+  await Promise.all(
+    zips.map(async (z) => {
+      try {
+        const row = resolved.find((r) => r.zip === z)
+        const a = await analyzeCycleForZip(z, row?.label ?? z, { skipGemini: true })
+        cycleByZip.set(z, a)
+      } catch {
+        /* skip */
+      }
+    })
+  )
+
   const rows: SiteCompareRow[] = resolved.map((r) => {
     const z = /^\d{5}$/.test(r.zip) ? r.zip : null
+    const cycle = z ? cycleByZip.get(z) ?? null : null
     return {
       label: r.label,
       zip: r.zip,
       zori: z ? zoriByZip.get(z) ?? null : null,
       momentum: z ? momentumMap.get(z) ?? null : null,
       signalLine: signalLineForScore(z ? momentumMap.get(z) ?? null : null),
+      cyclePhase: cycle ? `${cycle.cycleStage} ${cycle.cyclePosition}` : null,
     }
   })
 
@@ -132,7 +151,9 @@ function validatePayload(body: unknown): ClientReportPayload | null {
   if (!b.layers || typeof b.layers !== 'object') return null
   if (!b.zillow || !b.census || !b.permits || !b.employment || !b.fred || !b.trends) return null
   if (!Array.isArray(b.pins)) return null
-  return b as unknown as ClientReportPayload
+  const cycle = parseCycleAnalysisField(b.cycleAnalysis)
+  const payload = { ...b, cycleAnalysis: cycle } as unknown as ClientReportPayload
+  return payload
 }
 
 export async function POST(request: NextRequest) {
@@ -144,9 +165,31 @@ export async function POST(request: NextRequest) {
     }
 
     const origin = appOrigin(request)
-    const signals = buildSignalIndicators(payload)
-    const confidenceLine = confidenceFromSignals(signals)
-    const brief = await generateBriefWithGemini(payload, signals, confidenceLine)
+
+    let cycle = payload.cycleAnalysis ?? null
+    if (!cycle && payload.primaryZip && /^\d{5}$/.test(payload.primaryZip)) {
+      try {
+        cycle = await analyzeCycleForZip(payload.primaryZip, payload.marketLabel)
+      } catch {
+        cycle = null
+      }
+    }
+
+    let brief: { cycleHeadline: string; narrative: string; confidenceLine: string }
+    let signals: SignalIndicator[]
+
+    if (cycle) {
+      brief = {
+        cycleHeadline: cycleHeadline(payload.marketLabel, cycle),
+        narrative: cycle.narrative,
+        confidenceLine: `${cycle.confidenceLine} Data quality: ${cycle.dataQuality}.`,
+      }
+      signals = cycleAnalysisToSignalIndicators(cycle)
+    } else {
+      signals = buildSignalIndicators(payload)
+      const confidenceLine = confidenceFromSignals(signals)
+      brief = await generateBriefWithGemini(payload, signals, confidenceLine)
+    }
 
     const { series: zoriSeries, source: zoriSeriesSource } = await resolveZoriSeriesForReport(payload)
     const trendsSeries = payload.trends.series ?? []
@@ -180,6 +223,7 @@ export async function POST(request: NextRequest) {
         payload={payload}
         brief={brief}
         signals={signals}
+        cycleAnalysis={cycle}
         zoriSeries={zoriSeries}
         zoriSeriesSource={zoriSeriesSource}
         trendsSeries={trendsSeries}

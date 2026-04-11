@@ -2,9 +2,13 @@
 
 import { useState } from 'react'
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import type { CycleAnalysis } from '@/lib/cycle/types'
+import { stripGeminiStringWrappers } from '@/lib/sanitize-gemini-string'
 
 interface MemoProps {
   marketLabel: string
+  /** When set, the memo is anchored to the deterministic cycle classifier output. */
+  cycle?: CycleAnalysis | null
   data: {
     avg_zori?: number | null
     avg_zhvi?: number | null
@@ -22,7 +26,20 @@ interface MemoProps {
   }
 }
 
-export default function ExecutiveMemo({ marketLabel, data }: MemoProps) {
+function cycleBlock(cycle: CycleAnalysis): string {
+  return `
+Analytical cycle (classifier — do not contradict this phase in your narrative):
+- Phase: ${cycle.cycleStage} ${cycle.cyclePosition}
+- Confidence: ${cycle.confidence}/100. ${cycle.confidenceLine}
+- Data quality: ${cycle.dataQuality}
+- Rent: ${cycle.signals.rent.direction} — ${cycle.signals.rent.value} (${cycle.signals.rent.source})
+- Vacancy: ${cycle.signals.vacancy.direction} — ${cycle.signals.vacancy.value} (${cycle.signals.vacancy.source})
+- Permits: ${cycle.signals.permits.direction} — ${cycle.signals.permits.value} (${cycle.signals.permits.source})
+- Employment: ${cycle.signals.employment.direction} — ${cycle.signals.employment.value} (${cycle.signals.employment.source})
+`
+}
+
+export default function ExecutiveMemo({ marketLabel, cycle, data }: MemoProps) {
   const [memo, setMemo] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -34,7 +51,7 @@ export default function ExecutiveMemo({ marketLabel, data }: MemoProps) {
 
     const context = `
 Market: ${marketLabel}
-
+${cycle ? cycleBlock(cycle) : ''}
 Key Metrics:
 - Median Rent (ZORI): ${data.avg_zori ? '$' + data.avg_zori.toLocaleString() + '/mo' : 'N/A'}${data.zori_growth != null ? ` (${data.zori_growth > 0 ? '+' : ''}${data.zori_growth.toFixed(2)}% YoY)` : ''}
 - Home Value (ZHVI): ${data.avg_zhvi ? '$' + data.avg_zhvi.toLocaleString() : 'N/A'}${data.zhvi_growth != null ? ` (${data.zhvi_growth > 0 ? '+' : ''}${data.zhvi_growth.toFixed(2)}% YoY)` : ''}
@@ -57,26 +74,27 @@ Key Metrics:
 
 Write a concise 3-paragraph executive investment memo for the following market. 
 
-Paragraph 1: Market Overview — summarize the current state of the market using the data provided.
+Paragraph 1: Market Overview — summarize the current state of the market using the data provided.${cycle ? ' Open with the classified cycle phase (stage + position) and interpret what it means for supply and demand.' : ''}
 Paragraph 2: Opportunity & Risk — identify the key investment opportunity and the primary risk signal.
 Paragraph 3: Recommendation — provide a clear, actionable recommendation for a real estate developer or investor.
 
 Use specific numbers from the data. Be direct and professional. No bullet points, no headers — just three clean paragraphs.
+${cycle ? 'The analytical cycle block is authoritative for phase naming — align your wording with it.' : ''}
 
 ${context}`
 
       const result = await model.generateContent(prompt)
-      setMemo(result.response.text())
+      setMemo(stripGeminiStringWrappers(result.response.text()))
     } catch {
       // Fallback: call server-side to avoid exposing key
       try {
         const res = await fetch('/api/memo', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ marketLabel, data }),
+          body: JSON.stringify({ marketLabel, data, cycle: cycle ?? undefined }),
         })
         const d = await res.json()
-        if (d.memo) setMemo(d.memo)
+        if (d.memo) setMemo(stripGeminiStringWrappers(String(d.memo)))
         else setError(d.error ?? 'Failed to generate memo')
       } catch {
         setError('Failed to generate memo')

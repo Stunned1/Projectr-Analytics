@@ -1,14 +1,26 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import { stripGeminiStringWrappers } from '@/lib/sanitize-gemini-string'
 
 export const dynamic = 'force-dynamic'
 
 export async function POST(request: NextRequest) {
   try {
-    const { marketLabel, data } = await request.json()
+    const { marketLabel, data, cycle } = await request.json()
+
+    const cycleCtx =
+      cycle && typeof cycle === 'object' && typeof cycle.cycleStage === 'string' && typeof cycle.cyclePosition === 'string'
+        ? `
+Analytical cycle (authoritative phase — align narrative):
+- ${cycle.cycleStage} ${cycle.cyclePosition} (confidence ${typeof cycle.confidence === 'number' ? cycle.confidence : 'N/A'}/100)
+- ${typeof cycle.confidenceLine === 'string' ? cycle.confidenceLine : ''}
+- Data quality: ${typeof cycle.dataQuality === 'string' ? cycle.dataQuality : 'N/A'}
+`
+        : ''
 
     const context = `
 Market: ${marketLabel}
+${cycleCtx}
 - Median Rent (ZORI): ${data.avg_zori ? '$' + data.avg_zori.toLocaleString() + '/mo' : 'N/A'}${data.zori_growth != null ? ` (${data.zori_growth > 0 ? '+' : ''}${data.zori_growth.toFixed(2)}% YoY)` : ''}
 - Home Value (ZHVI): ${data.avg_zhvi ? '$' + data.avg_zhvi.toLocaleString() : 'N/A'}${data.zhvi_growth != null ? ` (${data.zhvi_growth > 0 ? '+' : ''}${data.zhvi_growth.toFixed(2)}% YoY)` : ''}
 - Vacancy Rate: ${data.vacancy_rate != null ? data.vacancy_rate + '%' : 'N/A'}
@@ -24,7 +36,7 @@ Market: ${marketLabel}
 
 Write a concise 3-paragraph executive investment memo for the following market.
 
-Paragraph 1: Market Overview — summarize the current state using the data.
+Paragraph 1: Market Overview — summarize the current state using the data.${cycleCtx ? ' Lead with the classified cycle phase when the analytical cycle block is present.' : ''}
 Paragraph 2: Opportunity & Risk — identify the key investment opportunity and primary risk signal.
 Paragraph 3: Recommendation — provide a clear, actionable recommendation for a developer or investor.
 
@@ -36,7 +48,8 @@ ${context}`
     const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
     const result = await model.generateContent(prompt)
 
-    return NextResponse.json({ memo: result.response.text() })
+    return NextResponse.json({ memo: stripGeminiStringWrappers(result.response.text()) })
+
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unexpected error'
     return NextResponse.json({ error: message }, { status: 500 })
