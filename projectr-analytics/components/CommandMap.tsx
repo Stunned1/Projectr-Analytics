@@ -1226,7 +1226,7 @@ function CommandMap({
       )}
 
       {/* Layer toggles */}
-      <div className="absolute top-4 right-4 z-40 w-56 flex flex-col gap-0 bg-black/70 backdrop-blur-md border border-white/10 rounded-xl overflow-hidden shadow-xl">
+      <div className="absolute top-4 right-4 z-40 flex w-56 flex-col gap-0 overflow-hidden rounded-xl border border-border/90 bg-card/90 shadow-2xl shadow-black/40 backdrop-blur-xl">
 
         {/* Layer pills */}
         <div className="px-3 pt-3 pb-2">
@@ -1268,7 +1268,7 @@ function CommandMap({
           </div>
         </div>
 
-        <div className="h-px bg-white/6 mx-3" />
+        <div className="mx-3 h-px bg-border/70" />
 
         {/* Permit type filter — only shown when permits layer is on */}
         {effectiveLayers.nycPermits && (
@@ -1301,20 +1301,20 @@ function CommandMap({
                 {mapZoom < 13 ? 'Heatmap' : mapZoom >= 16 ? 'Street view' : 'Scatter'} · zoom {Math.round(mapZoom)}
               </p>
             </div>
-            <div className="h-px bg-white/6 mx-3" />
+            <div className="mx-3 h-px bg-border/70" />
           </>
         )}
 
         {/* Metric */}
         <div className="px-3 py-2">
           <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-500 mb-1.5">Metric</p>
-          <div className="flex rounded-lg overflow-hidden border border-white/8">
+          <div className="flex overflow-hidden rounded-lg border border-border/80 bg-muted/25">
             {(['zori', 'zhvi'] as const).map((m) => (
               <button
                 key={m}
                 onClick={() => setActiveMetric(m)}
                 className={`flex-1 py-1.5 text-[10px] font-medium transition-all ${
-                  activeMetric === m ? 'bg-[#D76B3D]/20 text-[#D76B3D]' : 'text-zinc-500 hover:text-zinc-300'
+                  activeMetric === m ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
                 {m === 'zori' ? 'Rent' : 'Value'}
@@ -1323,7 +1323,7 @@ function CommandMap({
           </div>
         </div>
 
-        <div className="h-px bg-white/6 mx-3" />
+        <div className="mx-3 h-px bg-border/70" />
 
         {/* Tilt & Rotation */}
         <div className="px-3 py-2">
@@ -1333,19 +1333,19 @@ function CommandMap({
           </div>
           <input type="range" min={0} max={67.5} step={1} value={tilt}
             onChange={(e) => setTilt(Number(e.target.value))}
-            className="w-full h-1 rounded-full appearance-none bg-white/10 accent-[#D76B3D] cursor-pointer"
+            className="h-1 w-full cursor-pointer appearance-none rounded-full bg-muted accent-primary"
           />
-          <div className="flex items-center justify-between mt-2 mb-1">
+          <div className="mt-2 mb-1 flex items-center justify-between">
             <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-500">Rotation</p>
-            <span className="text-[10px] text-zinc-600 font-mono">{heading}°</span>
+            <span className="font-mono text-[10px] text-zinc-600">{heading}°</span>
           </div>
           <input type="range" min={0} max={360} step={1} value={heading}
             onChange={(e) => setHeading(Number(e.target.value))}
-            className="w-full h-1 rounded-full appearance-none bg-white/10 accent-[#D76B3D] cursor-pointer"
+            className="h-1 w-full cursor-pointer appearance-none rounded-full bg-muted accent-primary"
           />
           <button
             onClick={() => { setTilt(0); setHeading(0) }}
-            className="mt-2 w-full text-[10px] text-zinc-600 hover:text-zinc-300 transition-colors py-1 rounded border border-white/6 hover:border-white/12"
+            className="mt-2 w-full rounded border border-border/60 py-1 text-[10px] text-muted-foreground transition-colors hover:border-border hover:text-foreground"
           >
             Reset View
           </button>

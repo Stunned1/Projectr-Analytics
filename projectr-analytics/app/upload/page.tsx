@@ -44,7 +44,7 @@ export default function ClientUploadPage() {
   }
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-black text-white">
+    <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
       <SitesBootstrap />
       <CommandCenterSidebar
         searchInput={searchInput}
@@ -69,23 +69,23 @@ export default function ClientUploadPage() {
           </div>
           <AgenticNormalizer onIngested={handleIngested} />
           {markers != null && markers.length > 0 && (
-            <div className="flex flex-col gap-3 rounded-lg border border-white/10 bg-white/5 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-xs text-zinc-400">
-                <span className="text-white font-medium">{markers.length}</span> pin{markers.length === 1 ? '' : 's'} saved
+            <div className="flex flex-col gap-3 rounded-xl border border-border/80 bg-card/80 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">{markers.length}</span> pin{markers.length === 1 ? '' : 's'} saved
                 for the map
               </p>
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
                   onClick={() => router.push('/')}
-                  className="text-xs text-[#D76B3D] border border-[#D76B3D]/35 bg-[#D76B3D]/10 hover:bg-[#D76B3D]/20 px-3 py-1.5 rounded-md transition-colors"
+                  className="rounded-lg border border-primary/35 bg-primary/10 px-3 py-1.5 text-xs text-primary transition-colors hover:bg-primary/20"
                 >
                   Open map
                 </button>
                 <button
                   type="button"
                   onClick={() => clearMarkers()}
-                  className="text-[10px] text-zinc-500 hover:text-white border border-white/15 rounded px-2 py-1.5 transition-colors"
+                  className="rounded border border-border px-2 py-1.5 text-[10px] text-muted-foreground transition-colors hover:border-border hover:text-foreground"
                 >
                   Clear pins
                 </button>

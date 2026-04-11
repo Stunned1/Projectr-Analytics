@@ -133,11 +133,11 @@ ${context}`
         <button
           onClick={generateMemo}
           disabled={loading}
-          className="w-full flex items-center justify-center gap-2 bg-[#D76B3D]/15 hover:bg-[#D76B3D]/25 border border-[#D76B3D]/30 text-[#D76B3D] text-xs font-semibold py-2.5 rounded-lg transition-colors disabled:opacity-50"
+          className="flex w-full items-center justify-center gap-2 rounded-xl border border-primary/35 bg-primary/12 py-2.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/22 disabled:opacity-50"
         >
           {loading ? (
             <>
-              <div className="w-3 h-3 border border-[#D76B3D] border-t-transparent rounded-full animate-spin" />
+              <div className="h-3 w-3 animate-spin rounded-full border border-primary border-t-transparent" />
               Generating memo...
             </>
           ) : (
@@ -154,19 +154,19 @@ ${context}`
       )}
 
       {memo && (
-        <div className="bg-white/3 border border-white/8 rounded-lg p-4">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-[#D76B3D] text-[10px] uppercase tracking-widest font-semibold">Executive Memo</p>
+        <div className="rounded-xl border border-border/80 bg-muted/20 p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-[10px] font-semibold tracking-widest text-primary uppercase">Executive Memo</p>
             <div className="flex gap-2">
               <button
                 onClick={() => setMemo(null)}
-                className="text-zinc-600 hover:text-white text-[10px] transition-colors"
+                className="text-[10px] text-muted-foreground transition-colors hover:text-foreground"
               >
                 Regenerate
               </button>
               <button
                 onClick={printMemo}
-                className="text-[#D76B3D] hover:text-[#c45e32] text-[10px] font-medium transition-colors"
+                className="text-[10px] font-medium text-primary transition-colors hover:text-primary/85"
               >
                 Print / PDF →
               </button>

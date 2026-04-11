@@ -10,11 +10,12 @@ import type { Site } from '@/lib/sites-store'
 import { cn } from '@/lib/utils'
 
 const navBtnClass = (active: boolean) =>
-  `w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors border-l-2 ${
+  cn(
+    'w-full flex items-center gap-3 border-l-2 px-3 py-2.5 text-sm transition-colors rounded-lg',
     active
-      ? 'bg-[#D76B3D]/15 text-[#D76B3D] border-[#D76B3D]'
-      : 'text-zinc-400 hover:text-white hover:bg-white/5 border-transparent'
-  }`
+      ? 'border-primary bg-primary/15 text-primary'
+      : 'border-transparent text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground'
+  )
 
 function NavLink({ href, icon, label }: { href: string; icon: React.ReactNode; label: string }) {
   const pathname = usePathname()
@@ -84,8 +85,8 @@ export default function CommandCenterSidebar({
   onShortlistOpenSite,
 }: CommandCenterSidebarProps) {
   return (
-    <aside className="w-[200px] flex-shrink-0 flex flex-col bg-[#0a0a0a] border-r border-white/8 z-20">
-      <div className="px-4 py-4 border-b border-white/8">
+    <aside className="z-20 flex w-[200px] flex-shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
+      <div className="border-b border-sidebar-border px-4 py-4">
         <Image
           src="/Projectr_Logo.png"
           alt="Projectr"
@@ -96,10 +97,10 @@ export default function CommandCenterSidebar({
         />
       </div>
 
-      <div className="px-3 py-3 border-b border-white/8">
+      <div className="border-b border-sidebar-border px-3 py-3">
         <form onSubmit={onAnalyzeSubmit}>
           <div className="relative">
-            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none">
+            <span className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground">
               <SearchIcon />
             </span>
             <Input
@@ -108,8 +109,8 @@ export default function CommandCenterSidebar({
               onChange={(e) => setSearchInput(e.target.value)}
               placeholder="ZIP, City, ST, or Borough..."
               className={cn(
-                'h-8 rounded-md pl-7 pr-3 text-xs text-white placeholder:text-zinc-600',
-                'border-white/10 bg-white/5 focus-visible:border-[#D76B3D]/50 focus-visible:ring-[#D76B3D]/25'
+                'h-8 rounded-md border-input bg-input/40 pl-7 pr-3 text-xs text-sidebar-foreground placeholder:text-muted-foreground',
+                'focus-visible:border-primary focus-visible:ring-primary/25'
               )}
             />
           </div>
@@ -118,7 +119,7 @@ export default function CommandCenterSidebar({
             type="submit"
             disabled={loading}
             size="sm"
-            className="mt-2 h-8 w-full rounded-md bg-[#D76B3D] text-xs font-semibold text-white hover:bg-[#c45e32] disabled:opacity-50"
+            className="mt-2 h-8 w-full text-xs font-semibold shadow-sm shadow-black/25"
           >
             {loading ? 'Analyzing...' : 'Analyze Market'}
           </Button>
@@ -132,9 +133,9 @@ export default function CommandCenterSidebar({
       </nav>
 
       {activeMarket && (
-        <div className="px-3 py-3 border-t border-white/8">
+        <div className="border-t border-sidebar-border px-3 py-3">
           <div
-            className="bg-white/5 border border-white/8 rounded-lg p-3 cursor-pointer hover:border-[#D76B3D]/30 transition-colors"
+            className="cursor-pointer rounded-xl border border-sidebar-border bg-sidebar-accent/50 p-3 transition-colors hover:border-primary/40"
             onClick={onTogglePanel}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
@@ -146,11 +147,11 @@ export default function CommandCenterSidebar({
             tabIndex={0}
           >
             <div className="flex items-center justify-between mb-1">
-              <p className="text-[9px] text-zinc-500 uppercase tracking-widest">Active Market</p>
+              <p className="text-[9px] tracking-widest text-muted-foreground uppercase">Active Market</p>
               <ChevronRight />
             </div>
-            <p className="text-white text-sm font-semibold">{activeMarket.title}</p>
-            <p className="text-zinc-500 text-[10px]">{activeMarket.subtitle}</p>
+            <p className="text-sm font-semibold text-sidebar-foreground">{activeMarket.title}</p>
+            <p className="text-[10px] text-muted-foreground">{activeMarket.subtitle}</p>
           </div>
         </div>
       )}

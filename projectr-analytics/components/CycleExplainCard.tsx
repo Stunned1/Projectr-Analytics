@@ -38,7 +38,7 @@ export function CycleExplainCard({
   ] as const
 
   return (
-    <div className="mb-4 rounded-lg border border-[#D76B3D]/30 bg-[#D76B3D]/10 px-3 py-3">
+    <div className="mb-4 rounded-xl border border-primary/35 bg-primary/10 px-3 py-3 shadow-sm shadow-black/20">
       <button
         type="button"
         onClick={() => setOpen(!open)}
@@ -46,10 +46,10 @@ export function CycleExplainCard({
       >
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
-            <p className="text-[9px] uppercase tracking-widest text-[#D76B3D] mb-1">
+            <p className="mb-1 text-[9px] tracking-widest text-primary uppercase">
               <MetricTooltip metricKey="cycleClassifier">Market cycle</MetricTooltip>
             </p>
-            <p className="text-white text-[15px] font-bold leading-tight">
+            <p className="text-[15px] leading-tight font-bold text-foreground">
               {marketLabel} is in {cycle.cycleStage}{' '}
               <MetricTooltip metricKey={phaseKey}>{cycle.cyclePosition}</MetricTooltip>
             </p>
@@ -60,7 +60,7 @@ export function CycleExplainCard({
         </div>
       </button>
       {open && (
-        <div className="mt-3 border-t border-[#D76B3D]/20 pt-3 space-y-2">
+        <div className="mt-3 space-y-2 border-t border-primary/25 pt-3">
           <p className="text-[10px] text-zinc-500 leading-snug">
             {cycle.signalsAgreement}/4 classifier signals agree with{' '}
             <span className="text-zinc-300">

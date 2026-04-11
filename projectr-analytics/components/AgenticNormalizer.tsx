@@ -106,14 +106,14 @@ export default function AgenticNormalizer({ currentZip, onIngested }: AgenticNor
         onClick={() => fileRef.current?.click()}
         className={`relative border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-all ${
           dragging
-            ? 'border-[#D76B3D] bg-[#D76B3D]/10'
+            ? 'border-primary bg-primary/10'
             : 'border-white/15 hover:border-white/30 hover:bg-white/3'
         }`}
       >
         <input ref={fileRef} type="file" accept=".csv,.txt" className="hidden" onChange={onFileChange} />
         {loading ? (
           <div className="flex flex-col items-center gap-2">
-            <div className="w-6 h-6 border-2 border-[#D76B3D] border-t-transparent rounded-full animate-spin" />
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
             <p className="text-zinc-400 text-xs">Analyzing with Gemini...</p>
             <p className="text-zinc-600 text-[10px]">{fileName}</p>
           </div>
@@ -173,7 +173,7 @@ export default function AgenticNormalizer({ currentZip, onIngested }: AgenticNor
           </div>
 
           {result.triage.bucket === 'GEOSPATIAL' && (
-            <p className="text-[#D76B3D] text-[10px] mt-2">✓ Rendered on map as {VISUAL_LABELS[result.triage.visual_bucket]}</p>
+            <p className="mt-2 text-[10px] text-primary">✓ Rendered on map as {VISUAL_LABELS[result.triage.visual_bucket]}</p>
           )}
           {result.triage.bucket === 'TEMPORAL' && (
             <p className="text-blue-400 text-[10px] mt-2">✓ Routed to sidebar chart</p>

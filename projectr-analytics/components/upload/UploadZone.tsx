@@ -67,7 +67,7 @@ export default function UploadZone({ disabled, onParsed, onError }: UploadZonePr
         }}
         className={`w-full text-left border rounded-md px-3 py-3 transition-colors ${
           dragActive
-            ? 'border-[#D76B3D] bg-[#D76B3D]/10'
+            ? 'border-primary bg-primary/10'
             : 'border-white/10 bg-white/5 hover:bg-white/[0.07]'
         } disabled:opacity-50`}
       >

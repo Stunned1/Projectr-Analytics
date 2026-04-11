@@ -47,7 +47,7 @@ function SiteLabelInput({
         }
         if (t !== label) void updateLabel(siteId, t)
       }}
-      className="h-6 rounded border border-white/15 bg-black/30 px-1.5 text-[11px] font-medium text-white placeholder:text-zinc-600 focus-visible:border-[#D76B3D]/50"
+      className="h-6 rounded border border-sidebar-border bg-sidebar-accent/40 px-1.5 text-[11px] font-medium text-sidebar-foreground placeholder:text-muted-foreground focus-visible:border-primary"
       title="Site name — shown in PDF and map"
       aria-label="Site name"
     />
@@ -72,19 +72,19 @@ export default function ShortlistPanel({ onOpenSite }: { onOpenSite: (site: Site
     <Collapsible
       open={panelOpen}
       onOpenChange={setPanelOpen}
-      className="mt-1 border-t border-white/8 pt-2"
+      className="mt-1 border-t border-sidebar-border pt-2"
     >
       <CollapsibleTrigger asChild>
         <Button
           type="button"
           variant="ghost"
           size="sm"
-          className="h-auto w-full justify-between px-2 py-1.5 text-left font-normal hover:bg-white/5"
+          className="h-auto w-full justify-between px-2 py-1.5 text-left font-normal hover:bg-sidebar-accent"
         >
-          <span className="text-[10px] font-semibold tracking-wider text-zinc-300 uppercase">
+          <span className="text-[10px] font-semibold tracking-wider text-sidebar-foreground/90 uppercase">
             Shortlist ({sites.length})
           </span>
-          <span className="text-[10px] text-zinc-500">{panelOpen ? '▾' : '▸'}</span>
+          <span className="text-[10px] text-muted-foreground">{panelOpen ? '▾' : '▸'}</span>
         </Button>
       </CollapsibleTrigger>
 
@@ -104,13 +104,13 @@ export default function ShortlistPanel({ onOpenSite }: { onOpenSite: (site: Site
             {sites.map((s: Site) => (
               <div
                 key={s.id}
-                className="space-y-1 rounded-md border border-white/10 bg-white/[0.03] p-1.5"
+                className="space-y-1 rounded-lg border border-sidebar-border bg-sidebar-accent/30 p-1.5"
               >
                 <div className="flex items-start gap-1">
                   <Checkbox
                     checked={selectedForComparison.includes(s.id)}
                     onCheckedChange={() => toggleComparison(s.id)}
-                    className="mt-1 border-white/20 data-checked:border-[#D76B3D] data-checked:bg-[#D76B3D]"
+                    className="mt-1 border-sidebar-border data-checked:border-primary data-checked:bg-primary"
                     title="Include in PDF site comparison (pick 2+)"
                   />
                   <div className="min-w-0 flex-1 space-y-0.5">
@@ -119,7 +119,7 @@ export default function ShortlistPanel({ onOpenSite }: { onOpenSite: (site: Site
                       type="button"
                       variant="link"
                       size="xs"
-                      className="h-auto w-full justify-start p-0 text-[8px] font-normal tracking-wide text-zinc-600 hover:text-[#D76B3D] hover:no-underline"
+                      className="h-auto w-full justify-start p-0 text-[8px] font-normal tracking-wide text-muted-foreground hover:text-primary hover:no-underline"
                       onClick={() => onOpenSite(s)}
                     >
                       {s.isAggregate ? 'Load area' : 'Load market data'}
@@ -166,14 +166,14 @@ export default function ShortlistPanel({ onOpenSite }: { onOpenSite: (site: Site
                     if (next !== prev) void updateNotes(s.id, next)
                   }}
                   placeholder="Analyst note…"
-                  className="ml-5 h-auto max-w-[calc(100%-1.25rem)] rounded border border-white/10 bg-black/40 px-1.5 py-1 text-[9px] text-zinc-300 placeholder:text-zinc-600 focus-visible:border-[#D76B3D]/40"
+                  className="ml-5 h-auto max-w-[calc(100%-1.25rem)] rounded border border-sidebar-border bg-sidebar-accent/50 px-1.5 py-1 text-[9px] text-sidebar-foreground/90 placeholder:text-muted-foreground focus-visible:border-primary/60"
                 />
               </div>
             ))}
 
             {compareCount >= 2 && (
               <div className="flex items-center justify-between gap-1 px-1 pt-1">
-                <p className="text-[9px] text-[#D76B3D]">
+                <p className="text-[9px] text-primary">
                   PDF site comparison: {compareCount} selected
                 </p>
                 <Button

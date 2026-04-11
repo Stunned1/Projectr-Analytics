@@ -202,11 +202,11 @@ function BottomStat({ label, value, sub, accent, metricKey }: {
   metricKey?: MetricKey
 }) {
   return (
-    <div className="flex flex-col gap-0.5 px-5 border-r border-white/5 last:border-0 min-w-[100px]">
+    <div className="flex min-w-[100px] flex-col gap-0.5 border-r border-border/60 px-5 last:border-0">
       <p className="text-[9px] uppercase tracking-widest text-zinc-500">
         {metricKey ? <MetricTooltip metricKey={metricKey}>{label}</MetricTooltip> : label}
       </p>
-      <p className="text-white font-semibold text-sm">{value}</p>
+      <p className="text-sm font-semibold text-foreground">{value}</p>
       {sub && (
         <p className={`text-[10px] ${accent === 'green' ? 'text-emerald-400' : accent === 'red' ? 'text-red-400' : 'text-zinc-500'}`}>
           {sub}
@@ -219,7 +219,7 @@ function BottomStat({ label, value, sub, accent, metricKey }: {
 function PanelSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="mb-5">
-      <p className="text-[9px] uppercase tracking-widest text-zinc-500 mb-2 pb-1.5 border-b border-white/5">{title}</p>
+      <p className="mb-2 border-b border-border/70 pb-1.5 text-[9px] tracking-widest text-muted-foreground uppercase">{title}</p>
       {children}
     </div>
   )
@@ -743,7 +743,7 @@ export default function Home() {
         : null
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-black text-white">
+    <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
       <SitesBootstrap />
 
       <CommandCenterSidebar
@@ -785,7 +785,7 @@ export default function Home() {
 
         {/* Bottom stats bar */}
         {(result || aggregateData) && (
-          <div className="absolute bottom-0 left-0 right-0 z-30 bg-black/85 backdrop-blur-sm border-t border-white/8 flex items-center h-[60px] px-3 overflow-x-auto">
+          <div className="absolute right-0 bottom-0 left-0 z-30 flex h-[60px] items-center overflow-x-auto border-t border-border/80 bg-background/90 px-3 shadow-[0_-12px_40px_-16px_rgba(0,0,0,0.55)] backdrop-blur-md">
             {result ? (<>
             <BottomStat label="Market Status" value={marketStatus ?? '—'} sub={marketStatus === 'Active' ? '● Live' : marketStatus === 'Moderate' ? '● Moderate' : null} accent={marketStatus === 'Active' ? 'green' : null} />
             <BottomStat label="Median Rent" value={fmtMoney(result.zillow?.zori_latest)} sub={zoriGrowth ? `▲ ${zoriGrowth} YoY` : null} accent={result.zillow?.zori_growth_12m != null && result.zillow.zori_growth_12m > 0 ? 'green' : null} metricKey="zori" />
@@ -835,7 +835,11 @@ export default function Home() {
             )}
             </>) : null}
             <div className="ml-auto pl-4 flex-shrink-0">
-              <button onClick={() => setPanelOpen(!panelOpen)} className="text-xs text-[#D76B3D] border border-[#D76B3D]/30 bg-[#D76B3D]/10 hover:bg-[#D76B3D]/20 px-3 py-1.5 rounded-md transition-colors whitespace-nowrap">
+              <button
+                type="button"
+                onClick={() => setPanelOpen(!panelOpen)}
+                className="rounded-lg border border-primary/35 bg-primary/10 px-3 py-1.5 text-xs whitespace-nowrap text-primary transition-colors hover:bg-primary/20"
+              >
                 {panelOpen ? 'Hide Panel' : 'Show Data'}
               </button>
             </div>
@@ -854,7 +858,7 @@ export default function Home() {
 
       {/* ── Right Data Panel ── */}
       <aside
-        className={`flex-shrink-0 bg-[#0a0a0a] border-l border-white/8 overflow-y-auto transition-all duration-300 z-20 ${
+        className={`z-20 flex-shrink-0 overflow-y-auto border-l border-border/80 bg-card transition-all duration-300 ${
           panelOpen && (result || aggregateData) ? 'w-[300px]' : 'w-0 overflow-hidden'
         }`}
       >
@@ -965,7 +969,7 @@ export default function Home() {
                       <div className="flex items-end gap-px h-7">
                         {sorted.map((p, i) => {
                           const height = max === min ? 50 : ((p.metric_value - min) / (max - min)) * 100
-                          return <div key={i} className="flex-1 bg-[#D76B3D]/40 rounded-sm" style={{ height: `${Math.max(height, 6)}%` }} />
+                          return <div key={i} className="flex-1 rounded-sm bg-primary/45" style={{ height: `${Math.max(height, 6)}%` }} />
                         })}
                       </div>
                     </div>
@@ -1100,7 +1104,7 @@ export default function Home() {
                       <div className="flex items-end gap-px h-7">
                         {sorted.map((p, i) => {
                           const height = max === min ? 50 : ((p.value - min) / (max - min)) * 100
-                          return <div key={i} className="flex-1 bg-[#D76B3D]/40 rounded-sm" style={{ height: `${Math.max(height, 6)}%` }} />
+                          return <div key={i} className="flex-1 rounded-sm bg-primary/45" style={{ height: `${Math.max(height, 6)}%` }} />
                         })}
                       </div>
                     </div>

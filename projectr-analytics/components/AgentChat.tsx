@@ -123,8 +123,7 @@ export default function AgentChat({ mapContext, onAction, isOpen, onToggle, hasS
     return (
       <button
         onClick={onToggle}
-        className={`absolute ${bottomOffset} right-4 z-40 w-10 h-10 rounded-full flex items-center justify-center shadow-lg transition-all hover:scale-105`}
-        style={{ background: 'linear-gradient(135deg, #D76B3D, #b85a30)' }}
+        className={`absolute ${bottomOffset} right-4 z-40 flex h-10 w-10 items-center justify-center rounded-full bg-gradient-primary shadow-lg shadow-black/40 transition-all hover:scale-105`}
         title="Open AI Agent"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={1.5} className="w-4 h-4">
@@ -137,18 +136,12 @@ export default function AgentChat({ mapContext, onAction, isOpen, onToggle, hasS
 
   return (
     <div
-      className={`absolute ${bottomOffset} right-4 z-40 w-[340px] flex flex-col rounded-2xl overflow-hidden shadow-2xl`}
-      style={{
-        background: 'rgba(6, 6, 6, 0.2)',
-        backdropFilter: 'blur(0px)',
-        WebkitBackdropFilter: 'blur(2px)',
-        border: '1px solid rgba(255,255,255,0.07)',
-      }}
+      className={`absolute ${bottomOffset} right-4 z-40 flex w-[340px] flex-col overflow-hidden rounded-2xl border border-border/80 bg-popover/85 shadow-2xl shadow-black/50 backdrop-blur-xl`}
     >
       {/* Close button — no header, just a floating × in the corner */}
       <button
         onClick={onToggle}
-        className="absolute top-2.5 right-3 z-10 text-zinc-600 hover:text-zinc-300 transition-colors text-lg leading-none w-6 h-6 flex items-center justify-center rounded-md hover:bg-white/5"
+        className="absolute top-2.5 right-3 z-10 flex h-6 w-6 items-center justify-center rounded-md text-lg leading-none text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
       >×</button>
 
       {/* Messages */}
@@ -156,26 +149,19 @@ export default function AgentChat({ mapContext, onAction, isOpen, onToggle, hasS
         {messages.map((msg, i) => (
           <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
             {msg.role === 'user' ? (
-              <div
-                className="max-w-[88%] rounded-xl px-3.5 py-2.5 text-[13px] leading-relaxed text-white"
-                style={{
-                  background: 'rgba(215, 107, 61, 0.18)',
-                  border: '1px solid rgba(215, 107, 61, 0.28)',
-                }}
-              >
+              <div className="max-w-[88%] rounded-xl border border-primary/30 bg-primary/18 px-3.5 py-2.5 text-[13px] leading-relaxed text-foreground">
                 {msg.text}
               </div>
             ) : (
-              <p className="max-w-[95%] text-[13px] leading-relaxed text-zinc-300 px-0.5">
+              <p className="max-w-[95%] px-0.5 text-[13px] leading-relaxed text-muted-foreground">
                 {msg.text}
               </p>
             )}
             {msg.action && (
-              <p className="text-[10px] text-[#D76B3D]/60 mt-0.5 px-0.5">{ACTION_LABELS[msg.action.type]}</p>
+              <p className="mt-0.5 px-0.5 text-[10px] text-primary/65">{ACTION_LABELS[msg.action.type]}</p>
             )}
             {msg.insight && (
-              <div className="mt-1 max-w-[88%] px-3 py-1.5 rounded-lg text-[11px] text-[#D76B3D]"
-                style={{ background: 'rgba(215,107,61,0.07)', border: '1px solid rgba(215,107,61,0.12)' }}>
+              <div className="mt-1 max-w-[88%] rounded-lg border border-primary/20 bg-primary/8 px-3 py-1.5 text-[11px] text-primary">
                 {msg.insight}
               </div>
             )}
@@ -198,8 +184,7 @@ export default function AgentChat({ mapContext, onAction, isOpen, onToggle, hasS
             <button
               key={s}
               onClick={() => sendMessage(s)}
-              className="text-[11px] text-zinc-400 px-3 py-1 rounded-full transition-all hover:text-white"
-              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}
+              className="rounded-full border border-border/80 bg-muted/30 px-3 py-1 text-[11px] text-muted-foreground transition-all hover:border-border hover:text-foreground"
             >
               {s}
             </button>
@@ -211,8 +196,7 @@ export default function AgentChat({ mapContext, onAction, isOpen, onToggle, hasS
       <div className="px-3 pb-3 pt-1">
         <form
           onSubmit={(e) => { e.preventDefault(); sendMessage(input) }}
-          className="flex gap-2 items-center rounded-xl px-3 py-2"
-          style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}
+          className="flex items-center gap-2 rounded-xl border border-border/80 bg-muted/25 px-3 py-2"
         >
           <input
             ref={inputRef}
@@ -220,13 +204,12 @@ export default function AgentChat({ mapContext, onAction, isOpen, onToggle, hasS
             onChange={(e) => setInput(e.target.value)}
             placeholder="Ask about this market..."
             disabled={loading}
-            className="flex-1 bg-transparent text-[13px] text-white placeholder-zinc-600 focus:outline-none disabled:opacity-50"
+            className="flex-1 bg-transparent text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
           />
           <button
             type="submit"
             disabled={loading || !input.trim()}
-            className="w-7 h-7 rounded-lg flex items-center justify-center transition-all disabled:opacity-30 flex-shrink-0"
-            style={{ background: input.trim() ? 'linear-gradient(135deg, #D76B3D, #b85a30)' : 'rgba(255,255,255,0.05)' }}
+            className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg transition-all disabled:opacity-30 ${input.trim() ? 'bg-gradient-primary' : 'bg-muted/40'}`}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2} className="w-3.5 h-3.5">
               <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
