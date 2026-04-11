@@ -19,7 +19,7 @@ const dmMono = DM_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Projectr Command Center",
+  title: "Scout Command Center",
   description: "ZIP-level real estate market intelligence and mapping.",
 };
 

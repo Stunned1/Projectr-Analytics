@@ -38,7 +38,7 @@ ${signalSummary}
 Confidence (deterministic): ${confidenceLine}
 `
 
-  const prompt = `You are a senior real estate analyst at Projectr Analytics. Output ONLY valid JSON (no markdown).
+  const prompt = `You are a senior real estate analyst at Scout. Output ONLY valid JSON (no markdown).
 
 Choose ONE cycle phase for the headline sentence fragment (after the submarket name):
 - Early Recovery

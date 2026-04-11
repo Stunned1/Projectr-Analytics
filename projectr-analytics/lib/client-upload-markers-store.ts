@@ -17,7 +17,7 @@ export const useClientUploadMarkersStore = create<ClientUploadMarkersState>()(
       clearMarkers: () => set({ markers: null }),
     }),
     {
-      name: 'projectr-client-upload-markers',
+      name: 'scout-client-upload-markers',
       storage: createJSONStorage(() => sessionStorage),
     }
   )

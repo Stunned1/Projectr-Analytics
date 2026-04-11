@@ -14,7 +14,7 @@ export interface CaseBriefSitePayload {
   momentum: number | null
 }
 
-export const CASE_BRIEF_SYSTEM_PROMPT = `You are a senior real estate investment analyst at Projectr Analytics.
+export const CASE_BRIEF_SYSTEM_PROMPT = `You are a senior real estate investment analyst at Scout.
 The user ran a geospatial case study in the dashboard; you receive their original brief, optional agent lead copy, ranked sites with metrics, and current map/market context.
 
 Return ONLY valid JSON (no markdown) matching this shape:
@@ -51,7 +51,7 @@ Return ONLY valid JSON (no markdown) matching this shape:
   "recommendedNextSteps": [ "4–6 actionable steps for acquisitions / design / community / capital." ],
   "assumptionsAndLimits": "2–4 sentences: data vintage, NYC-only PLUTO/DOB scope, model simplifications, what would change with better data.",
   "methodology": "2 short paragraphs: (1) scoring inputs and weights at a high level, (2) what the model does NOT optimize for.",
-  "footer": "Projectr Analytics · Data: Zillow (ZORI/ZHVI), NYC PLUTO, NYC DOB permits where applicable."
+  "footer": "Scout · Data: Zillow (ZORI/ZHVI), NYC PLUTO, NYC DOB permits where applicable."
 }
 
 Rules:

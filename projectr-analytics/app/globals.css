@@ -87,7 +87,7 @@ body {
 }
 
 .dark {
-  /* Cool graphite base + warm Projectr orange primary (~#D76B3D) */
+  /* Cool graphite base + warm Scout orange primary (~#D76B3D) */
   --background: oklch(0.11 0.014 265);
   --foreground: oklch(0.97 0.006 265);
   --card: oklch(0.155 0.018 265);

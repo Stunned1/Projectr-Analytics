@@ -292,7 +292,7 @@ export default function AgentChat({
       }
       const blob = await res.blob()
       const cd = res.headers.get('Content-Disposition')
-      let filename = 'Projectr-Case-Brief.pdf'
+      let filename = 'Scout-Case-Brief.pdf'
       const m = cd?.match(/filename="([^"]+)"/)
       if (m?.[1]) filename = m[1]
       const url = URL.createObjectURL(blob)

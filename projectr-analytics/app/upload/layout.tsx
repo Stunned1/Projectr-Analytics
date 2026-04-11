@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'CSV Upload· Projectr',
+  title: 'CSV Upload · Scout',
   description: 'Upload CSV files for Gemini triage and map pins on the command center.',
 }
 

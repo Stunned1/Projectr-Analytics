@@ -1,6 +1,6 @@
 /** Cross-route navigation: `/upload` sidebar → `/` runs the same analyze flow. */
 
-export const PENDING_NAV_KEY = 'projectr_pending_nav'
+export const PENDING_NAV_KEY = 'scout_pending_nav'
 
 export type PendingNav =
   | { type: 'zip'; zip: string }

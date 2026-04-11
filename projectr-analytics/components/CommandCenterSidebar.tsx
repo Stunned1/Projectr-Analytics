@@ -139,8 +139,8 @@ export default function CommandCenterSidebar({
       >
         {!collapsed && (
           <Image
-            src="/Projectr_Logo.png"
-            alt="Projectr"
+            src="/Scout_Logo.png"
+            alt="Scout"
             width={120}
             height={32}
             loading="eager"

@@ -310,7 +310,7 @@ function BriefPageHeader({
       {logoDataUri ? (
         <Image src={logoDataUri} style={{ width: 108, height: 28 }} />
       ) : (
-        <Text style={styles.brand}>PROJECTR</Text>
+        <Text style={styles.brand}>SCOUT</Text>
       )}
       <Text style={styles.meta}>Case study brief · {formatBriefDate(generatedAt)}</Text>
     </View>
@@ -431,7 +431,7 @@ export function CaseBriefPdfDocument({
     : []
   const assumptions = safeStr(brief.assumptionsAndLimits)
   const methodology = safeStr(brief.methodology)
-  const footer = safeStr(brief.footer, 'Projectr Analytics')
+  const footer = safeStr(brief.footer, 'Scout')
 
   const scoreBars = sitesRaw.map((s, i) => ({
     label: `${i + 1}`,

@@ -18,7 +18,7 @@ const ACTION_LOG: Record<string, string> = {
 }
 
 /** Shared with legacy `AgentChat` so history survives terminal migration. */
-export const AGENT_CHAT_STORAGE_KEY = 'projectr-agent-chat-v1'
+export const AGENT_CHAT_STORAGE_KEY = 'scout-agent-chat-v1'
 
 export interface CaseStudyBundle {
   userText: string
@@ -251,7 +251,7 @@ export function useAgentIntelligence(
       }
       const blob = await res.blob()
       const cd = res.headers.get('Content-Disposition')
-      let filename = 'Projectr-Case-Brief.pdf'
+      let filename = 'Scout-Case-Brief.pdf'
       const m = cd?.match(/filename="([^"]+)"/)
       if (m?.[1]) filename = m[1]
       const url = URL.createObjectURL(blob)

@@ -1,4 +1,4 @@
-# Projectr Analytics - Agent Instructions
+# Scout - Agent Instructions
 
 This file applies to all agents working anywhere in this repository.
 For Next.js-specific rules, also read `projectr-analytics/AGENTS.md`.

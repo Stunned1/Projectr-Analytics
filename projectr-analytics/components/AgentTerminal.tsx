@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils'
 const STREAM_MS = 72
 const SUGGESTIONS = ['Show flood risk', 'Transit + amenities on', 'Run Manhattan site analysis']
 
-/** Projectr orange / narrative / system / chrome */
+/** Scout orange / narrative / system / chrome */
 const C_USER_GT = '#D76B3D'
 const C_USER_TEXT = '#ffffff'
 const C_TS = '#4b5563'
@@ -265,7 +265,7 @@ export default function AgentTerminal({
             </span>
           ) : (
             <span className="truncate text-[9px] font-medium tracking-wide text-zinc-500">
-              PROJECTR INTELLIGENCE ENGINE <span className="text-zinc-600">v1.0</span>
+              SCOUT INTELLIGENCE ENGINE <span className="text-zinc-600">v1.0</span>
               <span className="text-primary/80"> [{contextSubtitle}]</span>
             </span>
           )}

@@ -329,12 +329,12 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
     .slice(-12)
 
   return (
-    <Document title={`Projectr Brief - ${payload.marketLabel}`} author="Projectr Analytics">
+    <Document title={`Scout Brief - ${payload.marketLabel}`} author="Scout">
       {/* Page 1 - Brief */}
       <Page size="A4" style={styles.page}>
         <View style={styles.headerBand}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>PROJECTR</Text>}
+            {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>SCOUT</Text>}
           </View>
           <View>
             <Text style={styles.meta}>Market Report</Text>
@@ -436,7 +436,7 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
           )}
 
           <Text style={[styles.foot, { width: PDF_CONTENT_WIDTH_PT }]} wrap hyphenationCallback={(word) => [word]}>
-            Projectr Analytics · Data: Zillow Research (ZORI/ZHVI), Census ACS & BPS, FRED, Google Trends.
+            Scout · Data: Zillow Research (ZORI/ZHVI), Census ACS & BPS, FRED, Google Trends.
             {zoriSeriesSource === 'zillow_monthly'
               ? ' ZORI trend uses monthly index values from ingested Zillow Research data.'
               : ' ZORI trend is modeled from latest index and YoY until the zillow_zori_monthly table is populated (npm run ingest:zillow).'}
@@ -447,7 +447,7 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
       {/* Dossier p1 - Gemini whole-market narrative */}
       <Page size="A4" style={styles.page}>
         <View style={styles.headerBand}>
-          {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>PROJECTR</Text>}
+          {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>SCOUT</Text>}
           <View>
             <Text style={styles.meta}>Market intelligence dossier</Text>
             <Text style={styles.meta}>{payload.marketLabel}</Text>
@@ -500,7 +500,7 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
       {/* Dossier p2 - peer read, risks, opportunities, scenarios */}
       <Page size="A4" style={styles.page}>
         <View style={styles.headerBand}>
-          {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>PROJECTR</Text>}
+          {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>SCOUT</Text>}
           <Text style={styles.meta}>Dossier (continued) · {payload.marketLabel}</Text>
         </View>
         <Text style={styles.sectionTitle}>Peer & benchmark read</Text>
@@ -543,7 +543,7 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
       {/* Dossier p3 - monitoring & limitations (keeps p2 from overflowing) */}
       <Page size="A4" style={styles.page}>
         <View style={styles.headerBand}>
-          {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>PROJECTR</Text>}
+          {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>SCOUT</Text>}
           <Text style={styles.meta}>Dossier (continued) · {payload.marketLabel}</Text>
         </View>
         <Text style={styles.dossierListTitle}>Monitoring checklist</Text>
@@ -565,7 +565,7 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
       {/* Data page 1 - table + rent & permits charts */}
       <Page size="A4" style={styles.page}>
         <View style={styles.headerBand}>
-          {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>PROJECTR</Text>}
+          {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>SCOUT</Text>}
           <Text style={styles.meta}>Market data · {payload.marketLabel}</Text>
         </View>
 
@@ -623,7 +623,7 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
       {/* Data page 2 - trends + data footnotes (avoids chart stack overflow) */}
       <Page size="A4" style={styles.page}>
         <View style={styles.headerBand}>
-          {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>PROJECTR</Text>}
+          {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>SCOUT</Text>}
           <Text style={styles.meta}>Market data (continued) · {payload.marketLabel}</Text>
         </View>
 
@@ -645,7 +645,7 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
       {siteRows && siteRows.length >= 2 && (
         <Page size="A4" style={styles.page}>
           <View style={styles.headerBand}>
-            {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>PROJECTR</Text>}
+            {logoDataUri ? <Image src={logoDataUri} style={{ width: 100, height: 26 }} /> : <Text style={styles.brand}>SCOUT</Text>}
             <Text style={styles.meta}>Site comparison</Text>
           </View>
 

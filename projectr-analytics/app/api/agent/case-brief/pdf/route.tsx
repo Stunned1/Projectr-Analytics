@@ -3,7 +3,7 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { renderToBuffer } from '@react-pdf/renderer'
 import { generateCaseBriefJson, type CaseBriefSitePayload } from '@/lib/report/case-brief-shared'
 import { CaseBriefPdfDocument, type CaseBriefPdfBriefShape } from '@/lib/report/case-brief-pdf-document'
-import { loadProjectrLogoDataUri } from '@/lib/report/load-projectr-logo'
+import { loadScoutLogoDataUri } from '@/lib/report/load-scout-logo'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
     })
 
     const mapLabel = typeof ctx.label === 'string' ? ctx.label : null
-    const logoDataUri = loadProjectrLogoDataUri()
+    const logoDataUri = loadScoutLogoDataUri()
     const buffer = await renderToBuffer(
       <CaseBriefPdfDocument
         brief={brief as CaseBriefPdfBriefShape}
@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
       />
     )
 
-    const filename = `Projectr-Case-Brief-${mapLabel ? slugify(mapLabel) : 'report'}.pdf`
+    const filename = `Scout-Case-Brief-${mapLabel ? slugify(mapLabel) : 'report'}.pdf`
 
     return new NextResponse(new Uint8Array(buffer), {
       status: 200,

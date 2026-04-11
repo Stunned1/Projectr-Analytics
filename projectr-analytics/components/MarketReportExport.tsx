@@ -100,7 +100,7 @@ export default function MarketReportExport({
       const a = document.createElement('a')
       a.href = url
       const label = built.payload.marketLabel.replace(/[^\w\s-]/g, '').trim().slice(0, 48) || 'brief'
-      a.download = `Projectr-${label}.pdf`
+      a.download = `Scout-${label}.pdf`
       a.click()
       URL.revokeObjectURL(url)
     } catch {

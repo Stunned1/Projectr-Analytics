@@ -1,5 +1,5 @@
 /**
- * Projectr AI Agent API
+ * Scout AI Agent API
  * Returns a text response + either a single action OR a multi-step sequence.
  *
  * Single action response:
@@ -14,7 +14,7 @@ import { GEMINI_NO_EM_DASH_RULE } from '@/lib/gemini-text-rules'
 
 export const dynamic = 'force-dynamic'
 
-const SYSTEM_PROMPT = `You are the Projectr Analytics AI Agent - a spatial intelligence assistant embedded in a real estate command center dashboard.
+const SYSTEM_PROMPT = `You are the Scout AI Agent - a spatial intelligence assistant embedded in a real estate command center dashboard.
 
 You are general-purpose: answer questions, explain metrics, and control the map. You must infer intent from each user message and from CURRENT MAP STATE - do not default every NYC question into a full case study.
 

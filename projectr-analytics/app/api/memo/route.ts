@@ -33,7 +33,7 @@ ${cycleCtx}
 - Population: ${data.population != null ? data.population.toLocaleString() : 'N/A'}
 `
 
-    const prompt = `You are a senior real estate investment analyst at Projectr Analytics.
+    const prompt = `You are a senior real estate investment analyst at Scout.
 
 Write a concise 3-paragraph executive investment memo for the following market.
 

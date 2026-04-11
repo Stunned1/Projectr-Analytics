@@ -11,7 +11,7 @@ import { generateBriefWithGemini } from '@/lib/report/gemini-brief'
 import { generateMarketDossierWithGemini } from '@/lib/report/gemini-market-dossier'
 import { parseCycleAnalysisField } from '@/lib/report/validate-cycle'
 import { MarketReportDocument, type SiteCompareRow } from '@/lib/report/pdf-document'
-import { loadProjectrLogoDataUri } from '@/lib/report/load-projectr-logo'
+import { loadScoutLogoDataUri } from '@/lib/report/load-scout-logo'
 import type { CycleAnalysis } from '@/lib/cycle/types'
 import { resolveZctaFromCoordinates } from '@/lib/upload/resolve-zcta'
 
@@ -197,7 +197,7 @@ export async function POST(request: NextRequest) {
       trendsSeries,
     })
 
-    const logoDataUri = loadProjectrLogoDataUri()
+    const logoDataUri = loadScoutLogoDataUri()
 
     const doc = (
       <MarketReportDocument
@@ -222,7 +222,7 @@ export async function POST(request: NextRequest) {
       status: 200,
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="Projectr-${safeName}.pdf"`,
+        'Content-Disposition': `attachment; filename="Scout-${safeName}.pdf"`,
         'Cache-Control': 'no-store',
       },
     })
