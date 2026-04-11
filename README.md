@@ -1,5 +1,4 @@
-# Projectr-Analytics
-um haha yes!!
+# Projectr Analytics
 
 ## Setup
 
@@ -105,6 +104,7 @@ _4.12.2026_
 **Bug Fixes**
 
 _4.11.2026_
+- Agent `fly_to` from analysis cards: fixed camera animation failing or zooming out endlessly (React Strict Mode + per-frame `setCenter`/`setZoom`); `FlyToController` now uses `moveCamera`, linear eased zoom, and `[lat, lng]` effect deps.
 - Map layers chrome used `flex` inside an absolutely positioned box, so the row stretched across the full map width and left a large empty gap between the layers sheet and the dots/toggle; fixed with `w-max`, `left: auto`, and `flex-row-reverse` so dots/toggle are first in DOM and sit flush to `right`, with the sheet immediately to their left.
 - PDF cycle classifier tiles and Page 2 metrics “Signal” column again use Unicode arrows (↑/↓/→) instead of ASCII `+` / `-` / `~` now that Standard font rendering is verified in `@react-pdf`.
 - PDF brief signal tiles could render as label-only boxes (narrow column + missing string fields); reverted to horizontal signal row, added `wrap` on narrative and tile lines, and hardened sanitizer / score coercion so direction/value/source and table arrows render reliably.
@@ -138,6 +138,7 @@ _4.11.2026_
 - Borough boundary rendered as orange (`#D76B3D`) outline `GeoJsonLayer` on top of city ZIP choropleth
 - AI agent layer overrides wired to map — `agentLayerOverrides` and `agentMetric` props merge into effective layer/metric state
 - Default layer preset: rent choropleth and transit on; ZIP outline, client pins, permits, tracts, blocks, amenities, flood, and parcels off until the analyst enables them (matches `MapLayersSnapshot` defaults on the home page).
+- Case-study analysis site cards (`fly_to`): map camera eases ~1.6s via `moveCamera` (center + zoom + preserved tilt/heading); effect keys on lat/lng only and avoids Strict Mode skip / runaway zoom from the prior `setCenter`+`setZoom` loop.
 
 _4.8.2026_
 - Google Maps + deck.gl map with `GoogleMapsOverlay` (interleaved vector mode)

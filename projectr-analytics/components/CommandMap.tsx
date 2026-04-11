@@ -364,19 +364,99 @@ function ZoomTracker({ onZoomChange }: { onZoomChange: (zoom: number) => void })
 
 // ── Tilt controller ───────────────────────────────────────────────────────────
 
-// ── Fly-to controller — pans map to a lat/lng when agentFlyTo changes ──────────
+// ── Fly-to controller — eased camera flight when agentFlyTo changes ────────────
+// Vector maps: use moveCamera({ center, zoom, tilt, heading }) each frame (Google’s
+// recommended pattern). Avoid lastTarget “dedupe” — it breaks React Strict Mode
+// (first effect cleanup cancels RAF; second run would bail and never fly).
+
+const FLY_DURATION_MS = 1600
+
+function easeInOutCubic(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+}
+
+type MapWithMoveCamera = google.maps.Map & {
+  moveCamera?: (cameraOptions: google.maps.CameraOptions) => void
+}
+
+function applyCameraFrame(
+  map: google.maps.Map,
+  center: google.maps.LatLngLiteral,
+  zoom: number,
+  tilt: number,
+  heading: number
+): void {
+  const m = map as MapWithMoveCamera
+  if (typeof m.moveCamera === 'function') {
+    m.moveCamera({ center, zoom, tilt, heading })
+  } else {
+    map.setCenter(center)
+    map.setZoom(zoom)
+    map.setTilt(tilt)
+    map.setHeading(heading)
+  }
+}
 
 function FlyToController({ target }: { target: { lat: number; lng: number } | null | undefined }) {
   const map = useMap()
-  const lastTarget = useRef<string>('')
+  const rafRef = useRef<number | null>(null)
+
+  const lat = target?.lat
+  const lng = target?.lng
+
   useEffect(() => {
-    if (!map || !target) return
-    const key = `${target.lat},${target.lng}`
-    if (key === lastTarget.current) return
-    lastTarget.current = key
-    map.panTo({ lat: target.lat, lng: target.lng })
-    map.setZoom(17)
-  }, [map, target])
+    if (!map || lat == null || lng == null) return
+
+    if (rafRef.current != null) {
+      cancelAnimationFrame(rafRef.current)
+      rafRef.current = null
+    }
+
+    const startCenter = map.getCenter()
+    const startZoom = map.getZoom() ?? 11
+    if (!startCenter) return
+
+    const endLat = lat
+    const endLng = lng
+    const endZoom = 17
+    const startLat = startCenter.lat()
+    const startLng = startCenter.lng()
+    const tilt = map.getTilt() ?? 0
+    const heading = map.getHeading() ?? 0
+
+    const startTime = performance.now()
+    let cancelled = false
+
+    const tick = (now: number) => {
+      if (cancelled) return
+      const elapsed = now - startTime
+      const t = Math.min(1, elapsed / FLY_DURATION_MS)
+      const e = easeInOutCubic(t)
+
+      const clat = startLat + (endLat - startLat) * e
+      const clng = startLng + (endLng - startLng) * e
+      const zoom = startZoom + (endZoom - startZoom) * e
+
+      applyCameraFrame(map, { lat: clat, lng: clng }, zoom, tilt, heading)
+
+      if (t < 1) {
+        rafRef.current = requestAnimationFrame(tick)
+      } else {
+        rafRef.current = null
+        applyCameraFrame(map, { lat: endLat, lng: endLng }, endZoom, tilt, heading)
+      }
+    }
+
+    rafRef.current = requestAnimationFrame(tick)
+    return () => {
+      cancelled = true
+      if (rafRef.current != null) {
+        cancelAnimationFrame(rafRef.current)
+        rafRef.current = null
+      }
+    }
+  }, [map, lat, lng])
+
   return null
 }
 
