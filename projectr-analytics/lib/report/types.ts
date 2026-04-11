@@ -1,0 +1,85 @@
+/** Client → POST /api/report/pdf */
+
+export type ChoroplethMetric = 'zori' | 'zhvi'
+
+export interface MapLayersSnapshot {
+  zipBoundary: boolean
+  transitStops: boolean
+  rentChoropleth: boolean
+  blockGroups: boolean
+  parcels: boolean
+  tracts: boolean
+  amenityHeatmap: boolean
+  floodRisk: boolean
+  nycPermits: boolean
+  clientData: boolean
+  choroplethMetric: ChoroplethMetric
+}
+
+export interface ClientReportPin {
+  lat: number
+  lng: number
+  label: string
+  value?: number | null
+}
+
+export interface ClientReportPayload {
+  marketLabel: string
+  primaryZip: string | null
+  metroName: string | null
+  generatedAt: string
+  layers: MapLayersSnapshot
+  geo: { lat: number; lng: number; city?: string; state?: string } | null
+  zillow: {
+    zori: number | null
+    zori_growth_yoy: number | null
+    zhvi: number | null
+    zhvi_growth_yoy: number | null
+  }
+  census: {
+    vacancy_rate: number | null
+    median_income: number | null
+    total_population: number | null
+    median_gross_rent_acs: number | null
+    migration_movers: number | null
+    population_growth_3yr: number | null
+  }
+  permits: {
+    total_units_2021_2023: number | null
+    by_year: { year: string; units: number }[]
+  }
+  employment: {
+    unemployment_rate: number | null
+    employment_rate: number | null
+  }
+  fred: {
+    unemployment_monthly: { date: string; value: number }[]
+  }
+  trends: {
+    series: { date: string; value: number }[]
+    keyword_scope: string
+  }
+  pins: ClientReportPin[]
+  /** City/borough mode: ZIPs used to average monthly ZORI for the PDF chart. */
+  zori_peer_zips?: string[] | null
+}
+
+export interface MetroBenchmark {
+  avg_zori: number | null
+  avg_zhvi: number | null
+  zip_count: number
+}
+
+export interface SignalIndicator {
+  id: 'rent' | 'vacancy' | 'permits' | 'employment'
+  label: string
+  arrow: 'up' | 'down' | 'flat'
+  line: string
+  positiveForInvestor: boolean
+}
+
+export interface GeminiBriefResult {
+  cycleHeadline: string
+  narrative: string
+  confidenceLine: string
+}

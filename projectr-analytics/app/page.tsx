@@ -1,11 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import dynamic from 'next/dynamic'
 import Image from 'next/image'
 import AgenticNormalizer from '@/components/AgenticNormalizer'
 import ExecutiveMemo from '@/components/ExecutiveMemo'
+import MarketReportExport from '@/components/MarketReportExport'
 import AgentChat, { type AgentAction } from '@/components/AgentChat'
+import type { MapLayersSnapshot } from '@/lib/report/types'
 
 const CommandMap = dynamic(() => import('@/components/CommandMap'), { ssr: false })
 
@@ -180,6 +182,20 @@ const ReportsIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentCo
 const SearchIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-3.5 h-3.5"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
 const ChevronRight = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3 h-3"><polyline points="9 18 15 12 9 6" /></svg>
 
+const DEFAULT_MAP_LAYERS: MapLayersSnapshot = {
+  zipBoundary: true,
+  transitStops: true,
+  rentChoropleth: true,
+  blockGroups: false,
+  parcels: false,
+  tracts: false,
+  amenityHeatmap: false,
+  floodRisk: false,
+  nycPermits: false,
+  clientData: true,
+  choroplethMetric: 'zori',
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function Home() {
@@ -200,6 +216,11 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null)
   const [activeNav, setActiveNav] = useState<'map' | 'analytics' | 'agent' | 'reports'>('map')
   const [panelOpen, setPanelOpen] = useState(false)
+  const [mapLayersSnapshot, setMapLayersSnapshot] = useState<MapLayersSnapshot>(DEFAULT_MAP_LAYERS)
+
+  const handleMapLayersChange = useCallback((snapshot: MapLayersSnapshot) => {
+    setMapLayersSnapshot(snapshot)
+  }, [])
 
   async function handleNormalizerIngested(result: { triage: { bucket: string }; marker_points?: Array<{ lat: number; lng: number; value: number | null; label: string }> }) {
     if (result.triage.bucket === 'GEOSPATIAL' && result.marker_points?.length) {
@@ -435,7 +456,7 @@ export default function Home() {
 
       {/* ── Map ── */}
       <div className="flex-1 relative overflow-hidden">
-        <CommandMap zip={result?.zip ?? null} marketData={result} transitData={transit} cityZips={cityZips} boroughBoundary={boroughBoundary} uploadedMarkers={uploadedMarkers} agentLayerOverrides={agentLayerOverrides} agentMetric={agentMetric} agentTilt={agentTilt} />
+        <CommandMap zip={result?.zip ?? null} marketData={result} transitData={transit} cityZips={cityZips} boroughBoundary={boroughBoundary} uploadedMarkers={uploadedMarkers} agentLayerOverrides={agentLayerOverrides} agentMetric={agentMetric} agentTilt={agentTilt} onLayersChange={handleMapLayersChange} />
 
         {/* Bottom stats bar */}
         {(result || aggregateData) && (
@@ -559,6 +580,16 @@ export default function Home() {
         {/* Aggregate panel memo + normalizer */}
         {aggregateData && panelOpen && !result && (
           <div className="px-4 pb-4 min-w-[300px]">
+            <PanelSection title="Market brief (PDF)">
+              <MarketReportExport
+                mapLayersSnapshot={mapLayersSnapshot}
+                uploadedMarkers={uploadedMarkers}
+                result={null}
+                aggregateData={aggregateData}
+                cityZips={cityZips}
+                trends={null}
+              />
+            </PanelSection>
             <PanelSection title="Executive Memo">
               <ExecutiveMemo
                 marketLabel={aggregateData.label}
@@ -684,7 +715,21 @@ export default function Home() {
               </PanelSection>
             )}
 
-            {/* Executive Memo */}
+            {/* PDF + Executive Memo */}
+            <PanelSection title="Market brief (PDF)">
+              <MarketReportExport
+                mapLayersSnapshot={mapLayersSnapshot}
+                uploadedMarkers={uploadedMarkers}
+                result={result}
+                aggregateData={null}
+                cityZips={null}
+                trends={
+                  trends
+                    ? { series: trends.series, keyword_scope: trends.keyword_scope }
+                    : null
+                }
+              />
+            </PanelSection>
             <PanelSection title="Executive Memo">
               <ExecutiveMemo
                 marketLabel={result.zillow?.city ?? result.zip}

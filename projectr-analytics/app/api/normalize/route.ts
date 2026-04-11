@@ -66,6 +66,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    if (!triage) {
+      return NextResponse.json({ error: 'Data triage unavailable' }, { status: 500 })
+    }
+
     // Parse and ingest all rows into Supabase
     const headers = lines[0].split(',').map((h) => h.trim().replace(/"/g, ''))
     const rows = lines.slice(1)

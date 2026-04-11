@@ -5,6 +5,7 @@
  *
  * What it does:
  *  - Zip-level (ZORI, ZHVI, ZHVF): computes latest value + 12m growth, upserts into zillow_zip_snapshot
+ *  - ZORI: also upserts every monthly column into `zillow_zori_monthly` (zip, month, zori) for charts / PDF
  *  - Metro-level (Inventory, DoZ, Price Cuts): takes latest value, upserts into zillow_metro_snapshot
  *  - Builds zip_metro_lookup from the ZORI file (has City, Metro, CountyName columns)
  *
@@ -25,6 +26,7 @@ const supabase = createClient(
 
 const CSV_DIR = path.resolve(__dirname, '../../zillow-csv\'s')
 const BATCH_SIZE = 500
+const ZORI_MONTHLY_BATCH = 800
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -88,8 +90,14 @@ async function upsertBatch<T extends object>(table: string, batch: T[], retries 
 
 // ── ZIP-LEVEL: ZORI ───────────────────────────────────────────────────────────
 
+function monthDateFromZillowHeader(header: string): string | null {
+  const m = header.trim().match(/^(\d{4})-(\d{2})/)
+  if (!m) return null
+  return `${m[1]}-${m[2]}-01`
+}
+
 async function ingestZori() {
-  console.log('\n📊 ZORI (Rent Index) — zip level')
+  console.log('\n📊 ZORI (Rent Index) — zip level + monthly series')
   const { headers, rows } = parseCSV(path.join(CSV_DIR, 'Zip_zori_uc_sfrcondomfr_sm_month.csv'))
   const dateCols = getDateCols(headers)
   const zipIdx = headers.indexOf('RegionName')
@@ -101,6 +109,7 @@ async function ingestZori() {
 
   const snapshots: object[] = []
   const lookups: object[] = []
+  const monthlyRows: { zip: string; month: string; zori: number }[] = []
 
   for (const row of rows) {
     const zip = row[zipIdx]
@@ -116,6 +125,14 @@ async function ingestZori() {
       zori_growth_12m: growth,
       as_of_date: asOf,
     })
+
+    for (const { header, idx } of dateCols) {
+      const v = parseFloat(row[idx])
+      const month = monthDateFromZillowHeader(header)
+      if (month && !isNaN(v) && v > 0) {
+        monthlyRows.push({ zip, month, zori: v })
+      }
+    }
 
     // Build lookup entry
     const metro = row[metroIdx] ?? null
@@ -140,11 +157,31 @@ async function ingestZori() {
       await upsertBatch('zip_metro_lookup', lookups.splice(0))
       await sleep(200)
     }
+    while (monthlyRows.length >= ZORI_MONTHLY_BATCH) {
+      const chunk = monthlyRows.splice(0, ZORI_MONTHLY_BATCH)
+      const { error } = await supabase.from('zillow_zori_monthly').upsert(chunk as never[], {
+        onConflict: 'zip,month',
+        ignoreDuplicates: false,
+      })
+      if (error) console.error('  ✗ zillow_zori_monthly batch:', error.message)
+      await sleep(100)
+      process.stdout.write(',')
+    }
   }
 
   if (snapshots.length) await upsertBatch('zillow_zip_snapshot', snapshots)
   if (lookups.length) await upsertBatch('zip_metro_lookup', lookups)
-  console.log(`\n  ✓ Done`)
+  while (monthlyRows.length) {
+    const chunk = monthlyRows.splice(0, ZORI_MONTHLY_BATCH)
+    const { error } = await supabase.from('zillow_zori_monthly').upsert(chunk as never[], {
+      onConflict: 'zip,month',
+      ignoreDuplicates: false,
+    })
+    if (error) console.error('  ✗ zillow_zori_monthly batch:', error.message)
+    await sleep(100)
+  }
+
+  console.log(`\n  ✓ Done (snapshots + zillow_zori_monthly)`)
 }
 
 // ── ZIP-LEVEL: ZHVI ───────────────────────────────────────────────────────────

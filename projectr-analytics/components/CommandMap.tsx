@@ -86,7 +86,7 @@ type FloodProps = {
 type FloodFeature = Feature<Geometry, FloodProps>
 type FloodCollection = FeatureCollection<Geometry, FloodProps>
 
-interface LayerState {
+export interface LayerState {
   zipBoundary: boolean
   transitStops: boolean
   rentChoropleth: boolean
@@ -298,9 +298,11 @@ interface CommandMapProps {
   agentLayerOverrides?: Record<string, boolean>
   agentMetric?: 'zori' | 'zhvi' | null
   agentTilt?: number | null
+  /** Fired when toggles or agent overrides change — used for PDF export layer legend. */
+  onLayersChange?: (snapshot: LayerState & { choroplethMetric: 'zori' | 'zhvi' }) => void
 }
 
-function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, uploadedMarkers, agentLayerOverrides, agentMetric, agentTilt }: CommandMapProps) {
+function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, uploadedMarkers, agentLayerOverrides, agentMetric, agentTilt, onLayersChange }: CommandMapProps) {
   const perfDebug = process.env.NEXT_PUBLIC_PERF_DEBUG === '1'
 
   const [primaryBoundary, setPrimaryBoundary] = useState<GeoJSON | null>(null)
@@ -528,6 +530,14 @@ function CommandMap({ zip, marketData, transitData, cityZips, boroughBoundary, u
 
   // Agent can override the active metric
   const effectiveMetric = agentMetric ?? activeMetric
+
+  useEffect(() => {
+    if (!onLayersChange) return
+    onLayersChange({
+      ...effectiveLayers,
+      choroplethMetric: effectiveMetric,
+    })
+  }, [effectiveLayers, effectiveMetric, onLayersChange])
 
   // Agent can override tilt
   useEffect(() => {

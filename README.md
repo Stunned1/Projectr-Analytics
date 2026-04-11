@@ -21,13 +21,14 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY
 NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
 NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID   # must be a Vector map ID
 GEMINI_API_KEY
+GOOGLE_MAPS_STATIC_KEY           # optional; Static Maps API for PDF brief (falls back to NEXT_PUBLIC_GOOGLE_MAPS_API_KEY)
 HUD_API_TOKEN                    # optional, falls back to Census ACS rent data
 ```
 
 ### First-time data setup
 1. Download Zillow CSVs (see section below) into `zillow-csv's/` at repo root
 2. `cd projectr-analytics && npm install`
-3. In Supabase SQL Editor, run `projectr-analytics/supabase/migrations/20260411120000_zip_geocode_cache.sql` to create `zip_geocode_cache` (persists ZIP geocodes across deploys)
+3. In Supabase SQL Editor, run migrations under `projectr-analytics/supabase/migrations/`: `20260411120000_zip_geocode_cache.sql` (ZIP geocode cache) and `20260411180000_zillow_zori_monthly.sql` (monthly ZORI for PDF charts)
 4. `npm run ingest:zillow` — loads Zillow data into Supabase
 5. `npm run populate:centroids` — run 6-7 times until "All centroids already populated" (geocodes ~7,661 ZIPs)
 6. `npm run ingest:permits` — ingests NYC DOB building permits into `nyc_permits` table (all 5 boroughs, NB/A1/A2/DM, 2022+); takes ~10-20 min
@@ -37,6 +38,7 @@ HUD_API_TOKEN                    # optional, falls back to Census ACS rent data
 - **Turbopack + Tailwind** — if you get `Can't resolve 'tailwindcss'`, kill any stale `next dev` processes and restart fresh. Stale processes hold onto old module resolution state.
 - **Google Maps Map ID** — must be a Vector type map for deck.gl `interleaved: true` mode. Raster maps cause `fromLatLngToDivPixel` errors.
 - **Zillow CSVs are gitignored** — they exceed GitHub's 100MB file limit. Each teammate needs to download them locally and run `ingest:zillow` once.
+- **`ingest:zillow` runtime** — writing every ZIP × month into `zillow_zori_monthly` adds many upsert batches; expect a longer first run than snapshot-only ingests (on the order of tens of minutes depending on network and Supabase rate limits).
 
 ## Changelog
 
@@ -61,6 +63,9 @@ _4.9.2026_
 - Added OSM buildings API (`/api/buildings`) — building footprints with floor count via Overpass
 - Market API now returns `stateFips` and `countyFips` in geo object
 
+_4.12.2026_
+- Added `zillow_zori_monthly` table (ZIP + month + ZORI value) and migration; `ingest:zillow` upserts every historical month from the ZORI CSV for chart-quality rent trends
+
 **Infrastructure**
 
 _4.8.2026_
@@ -80,6 +85,9 @@ _4.11.2026_
 - Added `npm run ingest:permits` script — pulls NYC DOB job filings (Socrata `ic3t-wcy2`) for all 5 boroughs, job types NB/A1/A2/DM, 2022+; deduplicates within batches to avoid Supabase conflict errors
 - Fixed `/api/agent` 500 error caused by corrupted template literal dollar-sign formatting in `contextStr`
 - ZIP geocoding now falls back to Census TigerWeb 2020 ZCTA internal points instead of a synthetic `1 Main St` address match; successful lookups upsert into Supabase `zip_geocode_cache` (365-day refresh) so cold starts reuse coordinates
+- Multi-page **market brief PDF** — `POST /api/report/pdf` builds a designed analyst document with `@react-pdf/renderer` (cycle headline + Gemini narrative, four signal tiles, metrics vs metro, ZORI trend from `zillow_zori_monthly` when populated else modeled fallback, BPS bars, Trends line, Static Maps snapshot with ZIP polyline + pins, optional site comparison when 2+ client pins); city/borough exports average monthly ZORI across listed ZIPs when ≥2 peers
+- Added `GET /api/metro-benchmark` — metro peer average ZORI/ZHVI from `zip_metro_lookup` + `zillow_zip_snapshot`
+- `next.config.js` lists `@react-pdf/*` in `serverExternalPackages` for reliable server PDF rendering
 
 **Map & Visualization**
 
@@ -138,6 +146,7 @@ _4.11.2026_
 - Projectr logo in sidebar with correct `width="auto"` aspect ratio and `loading="eager"` LCP optimization
 - Google Maps custom dark vector map style via `NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID`
 - NYC PLUTO parcel columns: height = total assessed value (log scale), color = land use type with distinct colors per type (residential, commercial, mixed, industrial, etc.)
+- **Download market brief (PDF)** in the right panel — syncs live map layer toggles via `onLayersChange` on `CommandMap` for the PDF legend
 
 ## Known Bugs
 
@@ -158,6 +167,8 @@ _4.11.2026_
 - **Building permits are county-level, not zip-level** — Census BPS data is aggregated at the county level. A zip like 22193 (Woodbridge) shares permit counts with all of Prince William County. This overstates activity for individual zip codes. Noted for the demo script.
 
 - **Neighbor ZIPs only cover Zillow-tracked markets** — `zip_metro_lookup` is sourced from the ZORI CSV, which only covers ~7,700 ZIPs where Zillow has enough rental data. Rural ZIPs and non-rental markets won't have neighbor context on the map. This is acceptable for the target use case (active rental markets) but worth noting.
+
+- **PDF rent sparkline** — After `zillow_zori_monthly` exists and `ingest:zillow` has run, the brief uses **real** monthly ZORI. If the table is empty or a ZIP has too few points, the PDF falls back to a modeled series (footnoted).
 
 ## Zillow Research CSVs
 
