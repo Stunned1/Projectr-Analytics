@@ -134,12 +134,12 @@ body {
   }
 
   /**
-   * Native scrollbars (Firefox + WebKit) - graphite track + primary hover, app-wide in dark mode.
+   * Native scrollbars (Firefox + WebKit) - achromatic gray only (no hue 265 “purple” tint).
    * Use `.scrollbar-none` on elements that should stay chromeless (e.g. horizontal stats pill).
    */
   html.dark * {
     scrollbar-width: thin;
-    scrollbar-color: color-mix(in oklch, var(--primary) 30%, oklch(0.36 0.02 265)) oklch(0.16 0.016 265 / 0.88);
+    scrollbar-color: oklch(0.42 0 0) oklch(0.18 0 0 / 0.9);
   }
 
   html.dark *::-webkit-scrollbar {
@@ -150,18 +150,18 @@ body {
   html.dark *::-webkit-scrollbar-track {
     margin: 2px;
     border-radius: 4px;
-    background: oklch(0.15 0.014 265 / 0.75);
+    background: oklch(0.16 0 0 / 0.88);
   }
 
   html.dark *::-webkit-scrollbar-thumb {
     border-radius: 4px;
-    background: color-mix(in oklch, var(--muted-foreground) 42%, oklch(0.28 0.02 265));
+    background: oklch(0.4 0 0 / 0.92);
     border: 2px solid transparent;
     background-clip: padding-box;
   }
 
   html.dark *::-webkit-scrollbar-thumb:hover {
-    background: color-mix(in oklch, var(--primary) 40%, oklch(0.3 0.03 265));
+    background: oklch(0.52 0 0 / 0.95);
     background-clip: padding-box;
   }
 

@@ -72,7 +72,7 @@ export default function UploadZone({ disabled, onParsed, onError }: UploadZonePr
         } disabled:opacity-50`}
       >
         <p className="text-xs text-white font-medium">
-          {parsing ? 'Parsing file...' : 'Upload Client CSV/XLSX'}
+          {parsing ? 'Parsing file...' : 'Upload CSV/XLSX'}
         </p>
         <p className="text-[10px] text-zinc-500 mt-1">
           Drag and drop, or click to select

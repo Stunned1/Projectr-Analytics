@@ -1,34 +1,34 @@
 /**
- * Documentation copy and search index for `/guide`. Single source for feature bodies + outline anchors.
+ * Documentation copy and search index for `/Documentation`. Single source for feature bodies + outline anchors.
  */
 
 import { ANALYST_REFERENCE_CATEGORIES } from '@/lib/analyst-guide'
 
-export type GuideFeatureBlock = {
+export type DocumentationFeatureBlock = {
   id: string
   title: string
-  /** Visible paragraph(s) in the guide. */
+  /** Visible paragraph(s) in the Documentation. */
   body: string
   /** Extra tokens for search only (synonyms, acronyms). */
   searchAliases?: string
 }
 
-export type GuideOutlineNode = {
+export type DocumentationOutlineNode = {
   id: string
   label: string
-  children?: GuideOutlineNode[]
+  children?: DocumentationOutlineNode[]
 }
 
 /** Plain text for onboarding search (matches visible copy + common queries). */
-export const GUIDE_ONBOARDING_SEARCH_TEXT = `
+export const Documentation_ONBOARDING_SEARCH_TEXT = `
 FOR NEW USERS new users onboarding orientation quick command center product features metrics UI
 Load a market sidebar ZIP city state Austin borough NYC Enter map data panel Analysis Data tabs
 cycle momentum PDF brief memo tables trends exports Layers map layer control top-left choropleth
-transit tracts permits client CSV pins Intelligence terminal bottom agent natural language shortcuts
-Client CSV sidebar upload geocoded spreadsheets Client layer map pins Shortlist areas comparison market brief PDF exported
+transit tracts permits CSV Upload pins Intelligence terminal bottom agent natural language shortcuts
+CSV Upload sidebar upload geocoded spreadsheets Client layer map pins Shortlist areas comparison market brief PDF exported
 `.trim()
 
-export const GUIDE_FEATURES: GuideFeatureBlock[] = [
+export const Documentation_FEATURES: DocumentationFeatureBlock[] = [
   {
     id: 'feature-map-search',
     title: 'Map & search',
@@ -62,7 +62,7 @@ agent-driven actions. Session can persist across reloads in the browser.`,
   },
   {
     id: 'feature-client-csv',
-    title: 'Client CSV',
+    title: 'CSV Upload',
     body: `Dedicated upload page (sidebar) parses spreadsheets with Gemini triage; rows with latitude and longitude can
 appear as map pins when the Client layer is on. Pins can persist for your session when returning to the map.`,
     searchAliases: 'normalize upload spreadsheet lat lng coordinates pins',
@@ -84,17 +84,17 @@ analysis from the agent can open detail in the right panel instead of a map popo
 ]
 
 /** Section-level keywords so "what you can use" / "capabilities" still matches the whole block. */
-export const GUIDE_FEATURES_SECTION_SEARCH_BLOB = `
+export const Documentation_FEATURES_SECTION_SEARCH_BLOB = `
 what you can use capabilities features command center related pages walkthroughs scripts product
 documentation
 `.trim()
 
 /** Matches metric reference intro (category titles + metric keys still filter rows). */
-export const GUIDE_METRICS_INTRO_SEARCH_BLOB = `
+export const Documentation_METRICS_INTRO_SEARCH_BLOB = `
 metric reference glossary tooltips definitions source cadence update field same in-app
 `.trim()
 
-export const GUIDE_NEW_USERS_SEARCH_BLOB = GUIDE_ONBOARDING_SEARCH_TEXT
+export const Documentation_NEW_USERS_SEARCH_BLOB = Documentation_ONBOARDING_SEARCH_TEXT
 
 export function metricCategoryAnchorId(title: string): string {
   return `metrics-${title
@@ -103,17 +103,17 @@ export function metricCategoryAnchorId(title: string): string {
     .replace(/^-|-$/g, '')}`
 }
 
-export function getGuideDocOutline(): GuideOutlineNode[] {
+export function getDocumentationDocOutline(): DocumentationOutlineNode[] {
   return [
     { id: 'new-users', label: 'FOR NEW USERS' },
     {
       id: 'features',
-      label: 'What you can use',
-      children: GUIDE_FEATURES.map((f) => ({ id: f.id, label: f.title })),
+      label: 'Available Features',
+      children: Documentation_FEATURES.map((f) => ({ id: f.id, label: f.title })),
     },
     {
       id: 'metrics',
-      label: 'Metric reference',
+      label: 'Metric Reference',
       children: ANALYST_REFERENCE_CATEGORIES.map((c) => ({
         id: metricCategoryAnchorId(c.title),
         label: c.title,

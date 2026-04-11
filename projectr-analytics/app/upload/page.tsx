@@ -1,13 +1,16 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { BookOpen } from 'lucide-react'
 import AgenticNormalizer from '@/components/AgenticNormalizer'
 import CommandCenterSidebar from '@/components/CommandCenterSidebar'
 import SitesBootstrap from '@/components/SitesBootstrap'
 import { useClientUploadMarkersStore } from '@/lib/client-upload-markers-store'
 import { stashPendingNav } from '@/lib/pending-navigation'
 import type { Site } from '@/lib/sites-store'
+import { cn } from '@/lib/utils'
 
 export default function ClientUploadPage() {
   const router = useRouter()
@@ -57,14 +60,35 @@ export default function ClientUploadPage() {
         onTogglePanel={() => router.push('/')}
         onShortlistOpenSite={goMapWithPending}
       />
-      <main className="flex-1 overflow-y-auto">
-        <div className="max-w-lg mx-auto px-6 py-10 space-y-6">
+
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border bg-muted/20 px-5 py-3">
           <div>
-            <h1 className="text-2xl font-bold text-white">Client CSV</h1>
-            <p className="text-sm text-zinc-400 leading-relaxed mt-2">
+            <h1 className="text-base font-semibold tracking-tight text-foreground">Upload CSV</h1>
+          </div>
+          <div className="flex w-full max-w-[min(100%,280px)] shrink-0 items-center justify-end sm:max-w-[280px]">
+            <Link
+              href="/guide"
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-md border border-border/90 bg-background px-2.5 py-1.5 text-xs font-medium text-foreground/80 shadow-none transition-colors',
+                'hover:border-foreground/20 hover:bg-muted/50 hover:text-foreground',
+                'focus-visible:border-foreground/25 focus-visible:ring-1 focus-visible:ring-foreground/15 focus-visible:outline-none'
+              )}
+            >
+              <BookOpen className="h-3.5 w-3.5 text-foreground/50" strokeWidth={1.75} aria-hidden />
+              Documentation
+            </Link>
+          </div>
+        </header>
+
+        <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <div className="mx-auto max-w-lg space-y-6 px-5 py-8 pb-16 sm:px-6">
+          <div>
+            <h2 className="text-lg font-semibold tracking-tight text-foreground">Upload a file</h2>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
               Upload a CSV for Gemini triage. Geospatial rows with latitude and longitude columns appear as pins on the
-              map when you open <span className="text-zinc-300">Map</span> and enable the <span className="text-zinc-300">Client</span>{' '}
-              layer.
+              map when you open <span className="text-foreground/90">Map</span> and enable the{' '}
+              <span className="text-foreground/90">Client</span> layer.
             </p>
           </div>
           <AgenticNormalizer onIngested={handleIngested} />
@@ -93,7 +117,8 @@ export default function ClientUploadPage() {
             </div>
           )}
         </div>
-      </main>
+        </main>
+      </div>
     </div>
   )
 }

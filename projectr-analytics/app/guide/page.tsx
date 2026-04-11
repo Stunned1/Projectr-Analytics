@@ -13,20 +13,20 @@ import {
 } from '@/components/ui/collapsible'
 import { Input } from '@/components/ui/input'
 import {
-  GUIDE_FEATURES,
-  GUIDE_FEATURES_SECTION_SEARCH_BLOB,
-  GUIDE_METRICS_INTRO_SEARCH_BLOB,
-  GUIDE_NEW_USERS_SEARCH_BLOB,
-  getGuideDocOutline,
+  Documentation_FEATURES,
+  Documentation_FEATURES_SECTION_SEARCH_BLOB,
+  Documentation_METRICS_INTRO_SEARCH_BLOB,
+  Documentation_NEW_USERS_SEARCH_BLOB,
+  getDocumentationDocOutline,
   metricCategoryAnchorId,
-  type GuideFeatureBlock,
-  type GuideOutlineNode,
+  type DocumentationFeatureBlock,
+  type DocumentationOutlineNode,
 } from '@/lib/guide-content'
 import {
   ANALYST_METRIC_CADENCE,
   ANALYST_REFERENCE_CATEGORIES,
   metricSearchBlob,
-  textMatchesGuideSearch,
+  textMatchesDocumentationSearch,
 } from '@/lib/analyst-guide'
 import type { MetricKey } from '@/lib/metric-definitions'
 import { METRIC_DEFINITIONS } from '@/lib/metric-definitions'
@@ -34,7 +34,7 @@ import { stashPendingNav } from '@/lib/pending-navigation'
 import type { Site } from '@/lib/sites-store'
 import { cn } from '@/lib/utils'
 
-function flattenOutlineIds(nodes: GuideOutlineNode[]): string[] {
+function flattenOutlineIds(nodes: DocumentationOutlineNode[]): string[] {
   const out: string[] = []
   for (const n of nodes) {
     out.push(n.id)
@@ -45,18 +45,18 @@ function flattenOutlineIds(nodes: GuideOutlineNode[]): string[] {
   return out
 }
 
-function GuideOutlineNav({
+function DocumentationOutlineNav({
   outline,
   activeId,
   onJump,
 }: {
-  outline: GuideOutlineNode[]
+  outline: DocumentationOutlineNode[]
   activeId: string
   onJump: (id: string) => void
 }) {
   return (
-    <nav aria-label="On this page" className="space-y-5">
-      <p className="text-[10px] font-semibold tracking-[0.18em] text-primary uppercase">On this page</p>
+    <nav aria-label="Outline" className="space-y-5">
+      <p className="text-[10px] font-semibold tracking-[0.18em] text-primary uppercase">Outline</p>
       <ul className="space-y-4">
         {outline.map((node) => (
           <li key={node.id}>
@@ -139,7 +139,7 @@ function MetricBlock({ metricKey }: { metricKey: MetricKey }) {
   )
 }
 
-function renderFeatureBody(f: GuideFeatureBlock): ReactNode {
+function renderFeatureBody(f: DocumentationFeatureBlock): ReactNode {
   if (f.id === 'feature-data-panel') {
     const m = f.body.match(/^Analysis:\s*([\s\S]+?)\nData:\s*([\s\S]+)$/)
     if (m) {
@@ -178,11 +178,11 @@ function FeatureCard({ id, title, children }: { id: string; title: string; child
   )
 }
 
-function FeaturesSection({ blocks }: { blocks: GuideFeatureBlock[] }) {
+function FeaturesSection({ blocks }: { blocks: DocumentationFeatureBlock[] }) {
   return (
     <section className="scroll-mt-6">
       <DocSectionTitle id="features" kicker="Capabilities">
-        What you can use
+        Available Features
       </DocSectionTitle>
       <p className="mt-3 text-sm text-foreground/75">
         Everything below is available in the command center and related pages; there are no scripted walkthroughs.
@@ -198,7 +198,7 @@ function FeaturesSection({ blocks }: { blocks: GuideFeatureBlock[] }) {
   )
 }
 
-export default function GuidePage() {
+export default function DocumentationPage() {
   const router = useRouter()
   const mainRef = useRef<HTMLElement>(null)
   const [sidebarSearch, setSidebarSearch] = useState('')
@@ -206,7 +206,7 @@ export default function GuidePage() {
   const [forNewUsersOpen, setForNewUsersOpen] = useState(true)
   const [outlineActiveId, setOutlineActiveId] = useState('new-users')
 
-  const outline = useMemo(() => getGuideDocOutline(), [])
+  const outline = useMemo(() => getDocumentationDocOutline(), [])
   const outlineIds = useMemo(() => flattenOutlineIds(outline), [outline])
 
   function goMapWithPending(site: Site) {
@@ -229,13 +229,13 @@ export default function GuidePage() {
 
   const q = docSearch.trim()
 
-  const showNewUsers = useMemo(() => !q || textMatchesGuideSearch(q, GUIDE_NEW_USERS_SEARCH_BLOB), [q])
+  const showNewUsers = useMemo(() => !q || textMatchesDocumentationSearch(q, Documentation_NEW_USERS_SEARCH_BLOB), [q])
 
   const visibleFeatures = useMemo(() => {
-    if (!q) return GUIDE_FEATURES
-    if (textMatchesGuideSearch(q, GUIDE_FEATURES_SECTION_SEARCH_BLOB)) return GUIDE_FEATURES
-    return GUIDE_FEATURES.filter((f) =>
-      textMatchesGuideSearch(q, [f.title, f.body, f.searchAliases ?? ''].join(' '))
+    if (!q) return Documentation_FEATURES
+    if (textMatchesDocumentationSearch(q, Documentation_FEATURES_SECTION_SEARCH_BLOB)) return Documentation_FEATURES
+    return Documentation_FEATURES.filter((f) =>
+      textMatchesDocumentationSearch(q, [f.title, f.body, f.searchAliases ?? ''].join(' '))
     )
   }, [q])
 
@@ -243,10 +243,10 @@ export default function GuidePage() {
 
   const filteredCategories = useMemo(() => {
     if (!q) return ANALYST_REFERENCE_CATEGORIES
-    if (textMatchesGuideSearch(q, GUIDE_METRICS_INTRO_SEARCH_BLOB)) return ANALYST_REFERENCE_CATEGORIES
+    if (textMatchesDocumentationSearch(q, Documentation_METRICS_INTRO_SEARCH_BLOB)) return ANALYST_REFERENCE_CATEGORIES
     return ANALYST_REFERENCE_CATEGORIES.map((cat) => {
-      const titleMatch = textMatchesGuideSearch(q, cat.title)
-      const keyHits = cat.keys.filter((k) => textMatchesGuideSearch(q, metricSearchBlob(k)))
+      const titleMatch = textMatchesDocumentationSearch(q, cat.title)
+      const keyHits = cat.keys.filter((k) => textMatchesDocumentationSearch(q, metricSearchBlob(k)))
       if (titleMatch) return { ...cat, keys: [...cat.keys] }
       if (keyHits.length > 0) return { ...cat, keys: keyHits }
       return { ...cat, keys: [] as MetricKey[] }
@@ -313,9 +313,7 @@ export default function GuidePage() {
         <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border bg-muted/20 px-5 py-3">
           <div>
             <h1 className="text-base font-semibold tracking-tight text-foreground">Documentation</h1>
-            <p className="text-xs text-foreground/65">
-              <span className="font-medium text-primary/90">Projectr</span> features and metric reference
-            </p>
+            
           </div>
           <div className="relative w-full max-w-[min(100%,280px)] sm:max-w-[280px]">
             <Search
@@ -341,7 +339,7 @@ export default function GuidePage() {
 
         <div className="flex min-h-0 min-w-0 flex-1">
           <aside className="w-[152px] shrink-0 overflow-y-auto border-r border-border bg-muted/10 py-5 pr-1.5 pl-2 sm:w-[200px] sm:py-6 sm:pr-2 sm:pl-4">
-            <GuideOutlineNav outline={outline} activeId={outlineActiveId} onJump={jumpToSection} />
+            <DocumentationOutlineNav outline={outline} activeId={outlineActiveId} onJump={jumpToSection} />
           </aside>
 
           <main ref={mainRef} className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain">
@@ -400,7 +398,7 @@ export default function GuidePage() {
                             <li>
                               <span className="font-semibold text-primary">Layers: </span>
                               Use the map&apos;s layer control (top-left) for choropleth, transit, tracts, permits, and
-                              client CSV pins.
+                              uploaded CSV pins.
                             </li>
                             <li>
                               <span className="font-semibold text-primary">Intelligence terminal: </span>
@@ -408,8 +406,8 @@ export default function GuidePage() {
                               shortcuts.
                             </li>
                             <li>
-                              <span className="font-semibold text-primary">Client CSV: </span>
-                              Open <strong className="font-medium text-foreground">Client CSV</strong> from the sidebar
+                              <span className="font-semibold text-primary">Upload CSV: </span>
+                              Open <strong className="font-medium text-foreground">Upload CSV</strong> from the sidebar
                               to upload geocoded spreadsheets; turn on the{' '}
                               <em className="text-foreground/95">Client</em> layer on the map to see pins.
                             </li>
@@ -436,7 +434,7 @@ export default function GuidePage() {
 
               {showMetrics && (
                 <section id="metrics" className="scroll-mt-6">
-                  <DocSectionTitle kicker="Glossary">Metric reference</DocSectionTitle>
+                  <DocSectionTitle kicker="Glossary">Metric Reference</DocSectionTitle>
                   <p className="mt-3 text-sm text-foreground/75">
                     Same definitions as in-app tooltips; source and typical update cadence for each field.
                   </p>

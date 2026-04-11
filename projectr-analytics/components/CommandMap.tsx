@@ -496,10 +496,13 @@ interface CommandMapProps {
   onLayersChange?: (snapshot: LayerState & { choroplethMetric: 'zori' | 'zhvi' }) => void
   /** Fired when user manually toggles a layer - clears agent override for that key */
   onClearAgentOverride?: (key: string) => void
-  /** Map camera tilt (0–67.5) - controlled from parent / 3D pill. */
+  /** Map camera tilt (0–67.5) - controlled from parent / 3D control. */
   mapTilt: number
   /** Map camera heading (degrees). */
   mapHeading?: number
+  /** 45° perspective toggle (stacked with layer control, top-left). */
+  map3DActive: boolean
+  onToggleMap3D: () => void
 }
 
 function CommandMap({
@@ -519,6 +522,8 @@ function CommandMap({
   onClearAgentOverride,
   mapTilt,
   mapHeading = 0,
+  map3DActive,
+  onToggleMap3D,
 }: CommandMapProps) {
   const perfDebug = process.env.NEXT_PUBLIC_PERF_DEBUG === '1'
 
@@ -1590,6 +1595,21 @@ function CommandMap({
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-card/90 text-muted-foreground shadow-lg shadow-black/40 backdrop-blur-xl transition-colors hover:text-foreground"
           >
             <Layers className="h-[18px] w-[18px]" strokeWidth={1.75} />
+          </button>
+
+          <button
+            type="button"
+            aria-pressed={map3DActive}
+            aria-label={map3DActive ? 'Turn off 3D tilt' : 'Turn on 3D tilt'}
+            onClick={onToggleMap3D}
+            className={cn(
+              'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border shadow-lg shadow-black/40 backdrop-blur-xl text-[10px] font-bold tracking-wide transition-colors',
+              map3DActive
+                ? 'border-primary/60 bg-primary/20 text-primary'
+                : 'border-border/80 bg-card/90 text-muted-foreground hover:text-foreground'
+            )}
+          >
+            3D
           </button>
         </div>
 

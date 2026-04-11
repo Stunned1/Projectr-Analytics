@@ -1,5 +1,5 @@
 /**
- * Analyst-facing guide: metric glossary layout, search helpers, and shared layout constants.
+ * Analyst-facing Documentation: metric glossary layout, search helpers, and shared layout constants.
  */
 
 import { METRIC_DEFINITIONS, type MetricKey } from '@/lib/metric-definitions'
@@ -7,8 +7,8 @@ import { METRIC_DEFINITIONS, type MetricKey } from '@/lib/metric-definitions'
 /** Right data panel width on the map (`app/page.tsx`). */
 export const RIGHT_PANEL_WIDTH_PX = 360
 
-/** Stop words stripped from guide search so phrases like "what is ZORI" match on "zori". */
-const GUIDE_SEARCH_STOP_WORDS = new Set([
+/** Stop words stripped from Documentation search so phrases like "what is ZORI" match on "zori". */
+const Documentation_SEARCH_STOP_WORDS = new Set([
   'a',
   'an',
   'the',
@@ -142,16 +142,16 @@ const GUIDE_SEARCH_STOP_WORDS = new Set([
 ])
 
 /**
- * Tokens used for guide search: punctuation-insensitive, stop words removed when possible.
+ * Tokens used for Documentation search: punctuation-insensitive, stop words removed when possible.
  * Falls back to unstopped tokens if the query would otherwise be empty (e.g. only "to").
  */
-export function parseGuideSearchQuery(query: string): string[] {
+export function parseDocumentationSearchQuery(query: string): string[] {
   const raw = query.trim().toLowerCase()
   if (!raw) return []
   const tokens = raw.match(/[\p{L}\p{N}]+/gu)
   if (!tokens?.length) return []
 
-  const significant = tokens.filter((t) => t.length >= 2 && !GUIDE_SEARCH_STOP_WORDS.has(t))
+  const significant = tokens.filter((t) => t.length >= 2 && !Documentation_SEARCH_STOP_WORDS.has(t))
   if (significant.length > 0) return significant
 
   const shortOk = tokens.filter((t) => t.length >= 2)
@@ -161,11 +161,11 @@ export function parseGuideSearchQuery(query: string): string[] {
 }
 
 /** True if every search token appears in `text` (case-insensitive). */
-export function textMatchesGuideSearch(query: string, text: string): boolean {
+export function textMatchesDocumentationSearch(query: string, text: string): boolean {
   const q = query.trim().toLowerCase()
   if (!q) return true
   const blob = text.toLowerCase()
-  const terms = parseGuideSearchQuery(query)
+  const terms = parseDocumentationSearchQuery(query)
   if (terms.length === 0) return true
   return terms.every((t) => blob.includes(t))
 }
