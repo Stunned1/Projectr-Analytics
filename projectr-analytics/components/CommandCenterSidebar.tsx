@@ -4,6 +4,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import ShortlistPanel from '@/components/ShortlistPanel'
+import { ClearLocalWorkspaceButton } from '@/components/clear-local-workspace-button'
 import { Input } from '@/components/ui/input'
 import type { Site } from '@/lib/sites-store'
 import { cn } from '@/lib/utils'
@@ -140,6 +141,13 @@ export default function CommandCenterSidebar({
         <NavLink href="/upload" icon={<UploadIcon />} label="Client CSV" />
         <ShortlistPanel onOpenSite={onShortlistOpenSite} />
       </nav>
+
+      <div className="border-t border-sidebar-border px-2 py-2">
+        <p className="mb-1 px-1 text-[8px] font-semibold uppercase tracking-wider text-muted-foreground/80">
+          Testing
+        </p>
+        <ClearLocalWorkspaceButton variant="sidebar" />
+      </div>
 
       {activeMarket && (
         <div className="border-t border-sidebar-border px-3 py-3">

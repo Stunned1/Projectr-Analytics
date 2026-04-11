@@ -20,7 +20,9 @@ export interface TransitRoute {
   id: string
   name: string
   type: 'subway' | 'rail' | 'bus' | 'tram'
-  path: [number, number][] // [lng, lat] pairs
+  /** Same shape as Transitland `/api/transit` — one or more line segments [lng, lat][]. */
+  paths: [number, number][][]
+  color: [number, number, number]
 }
 
 export interface TransitGeoJSON {
@@ -32,6 +34,28 @@ export interface TransitGeoJSON {
   }>
   routes: TransitRoute[]
   stop_count: number
+}
+
+/** Match `CommandMap` / Transitland palette so PathLayer `getColor` works on OSM fallback. */
+const OSM_ROUTE_COLORS: Record<TransitRoute['type'], [number, number, number]> = {
+  subway: [250, 200, 50],
+  rail: [160, 220, 255],
+  tram: [180, 255, 180],
+  bus: [180, 180, 220],
+}
+
+const MAX_OSM_ROUTE_WAYS = 100
+const MAX_POINTS_PER_WAY = 160
+
+function downsamplePath(ring: [number, number][], maxPts: number): [number, number][] {
+  if (ring.length <= maxPts) return ring
+  const step = Math.ceil(ring.length / maxPts)
+  const out: [number, number][] = []
+  for (let i = 0; i < ring.length; i += step) out.push(ring[i])
+  const last = ring[ring.length - 1]
+  const prev = out[out.length - 1]
+  if (!prev || prev[0] !== last[0] || prev[1] !== last[1]) out.push(last)
+  return out
 }
 
 async function overpassQuery(query: string): Promise<{ elements: unknown[] }> {
@@ -115,14 +139,24 @@ out geom;`
       if (railway === 'subway' || railway === 'light_rail') routeType = 'subway'
       else if (railway === 'tram') routeType = 'tram'
 
+      const ring = el.geometry.map((pt) => [pt.lon, pt.lat] as [number, number])
+      if (ring.length < 2) continue
+
       routes.push({
         id: String(el.id),
         name: tags.name ?? tags.ref ?? routeType,
         type: routeType,
-        path: el.geometry.map((pt) => [pt.lon, pt.lat] as [number, number]),
+        paths: [downsamplePath(ring, MAX_POINTS_PER_WAY)],
+        color: OSM_ROUTE_COLORS[routeType],
       })
     }
   }
+
+  routes.sort((a, b) => {
+    const len = (x: TransitRoute) => x.paths.reduce((s, p) => s + p.length, 0)
+    return len(b) - len(a)
+  })
+  if (routes.length > MAX_OSM_ROUTE_WAYS) routes.length = MAX_OSM_ROUTE_WAYS
 
   return {
     type: 'FeatureCollection',

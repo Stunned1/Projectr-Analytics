@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { geocodeZip } from '@/lib/geocoder'
+import { geocodeAddressForward, getGoogleForwardGeocodeKey } from '@/lib/google-forward-geocode'
 import { isValidLatLng } from '@/lib/upload/lat-lng-detect'
 import type { UploadGeocodeRequestRow, UploadGeocodeResultRow } from '@/lib/upload'
 
@@ -17,50 +18,7 @@ function isZipOnly(text: string): boolean {
   return /^\d{5}(?:-\d{4})?$/.test(text.trim())
 }
 
-async function geocodeViaGoogle(
-  locationText: string,
-  apiKey: string
-): Promise<UploadGeocodeResultRow | null> {
-  const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(locationText)}&key=${encodeURIComponent(apiKey)}`
-  const response = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(12000) })
-  if (!response.ok) {
-    return { rowId: '', status: 'failed', error: `Google Geocoding failed (${response.status})` }
-  }
-  const data = await response.json()
-  const result = data?.results?.[0]
-  const location = result?.geometry?.location
-  const status = typeof data?.status === 'string' ? data.status : ''
-  const googleDetail =
-    typeof data?.error_message === 'string' && data.error_message.length > 0
-      ? ` — ${data.error_message}`
-      : ''
-
-  if (!location || typeof location.lat !== 'number' || typeof location.lng !== 'number') {
-    const base = status ? `Geocoding status: ${status}` : 'No geocode result found'
-    return { rowId: '', status: 'failed', error: `${base}${googleDetail}` }
-  }
-
-  const formattedAddress =
-    typeof result.formatted_address === 'string' ? result.formatted_address : locationText
-
-  const zipComponent = Array.isArray(result.address_components)
-    ? result.address_components.find((component: { types?: string[] }) =>
-        Array.isArray(component.types) && component.types.includes('postal_code')
-      )
-    : null
-  const postalCode = typeof zipComponent?.long_name === 'string' ? zipComponent.long_name : undefined
-
-  return {
-    rowId: '',
-    status: 'ok',
-    lat: location.lat,
-    lng: location.lng,
-    formattedAddress,
-    normalized: { address: formattedAddress, zip: postalCode, lat: location.lat, lng: location.lng },
-  }
-}
-
-async function geocodeOne(row: UploadGeocodeRequestRow, googleApiKey: string | null): Promise<UploadGeocodeResultRow> {
+async function geocodeOne(row: UploadGeocodeRequestRow): Promise<UploadGeocodeResultRow> {
   const lat = typeof row.lat === 'number' && Number.isFinite(row.lat) ? row.lat : null
   const lng = typeof row.lng === 'number' && Number.isFinite(row.lng) ? row.lng : null
   if (lat != null && lng != null && isValidLatLng(lat, lng)) {
@@ -94,15 +52,27 @@ async function geocodeOne(row: UploadGeocodeRequestRow, googleApiKey: string | n
     }
   }
 
-  if (!googleApiKey) {
+  if (!getGoogleForwardGeocodeKey()) {
     return { rowId: row.rowId, status: 'failed', error: 'Google Maps API key missing for address geocoding' }
   }
 
-  const googleResult = await geocodeViaGoogle(locationText, googleApiKey)
-  if (!googleResult) {
+  const hit = await geocodeAddressForward(locationText)
+  if (!hit) {
     return { rowId: row.rowId, status: 'failed', error: 'No geocode result found' }
   }
-  return { ...googleResult, rowId: row.rowId }
+  return {
+    rowId: row.rowId,
+    status: 'ok',
+    lat: hit.lat,
+    lng: hit.lng,
+    formattedAddress: hit.formattedAddress,
+    normalized: {
+      address: hit.formattedAddress,
+      zip: hit.postalCode,
+      lat: hit.lat,
+      lng: hit.lng,
+    },
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -114,7 +84,6 @@ export async function POST(request: NextRequest) {
     }
 
     const maxConcurrency = toSafeConcurrency(body.maxConcurrency)
-    const googleApiKey = process.env.GOOGLE_GEOCODING_API_KEY ?? process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? null
     const results: UploadGeocodeResultRow[] = new Array(rows.length)
     let cursor = 0
 
@@ -124,7 +93,7 @@ export async function POST(request: NextRequest) {
         cursor += 1
         if (index >= rows.length) return
         try {
-          results[index] = await geocodeOne(rows[index], googleApiKey)
+          results[index] = await geocodeOne(rows[index])
         } catch (err) {
           results[index] = {
             rowId: rows[index].rowId,

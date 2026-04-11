@@ -18,6 +18,7 @@ CENSUS_API_KEY
 NEXT_PUBLIC_SUPABASE_URL
 NEXT_PUBLIC_SUPABASE_ANON_KEY
 NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+GOOGLE_GEOCODING_API_KEY         # optional server-only Geocoding API key; Client CSV / upload forward-geocode falls back to NEXT_PUBLIC_GOOGLE_MAPS_API_KEY if unset
 NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID   # must be a Vector map ID
 GEMINI_API_KEY
 GOOGLE_MAPS_STATIC_KEY           # optional; Static Maps API for PDF brief (falls back to NEXT_PUBLIC_GOOGLE_MAPS_API_KEY)
@@ -68,6 +69,9 @@ _4.9.2026_
 _4.12.2026_
 - Added `zillow_zori_monthly` table (ZIP + month + ZORI value) and migration; `ingest:zillow` upserts every historical month from the ZORI CSV for chart-quality rent trends
 
+_4.11.2026_
+- `POST /api/normalize` forward-geocodes non-ZIP geography cells (street addresses, city+state, etc.) with the Google Geocoding API via `lib/google-forward-geocode.ts` (same key pattern as `/api/upload/geocode`), up to 50 unique strings per upload, after lat/lng and ZIP centroid resolution.
+
 **Infrastructure**
 
 _4.8.2026_
@@ -105,9 +109,14 @@ _4.11.2026_
 - Added `/api/pois` — Overture Maps POI endpoint; returns categorized places (coffee, grocery, pharmacy, fitness, schools) + named anchor tenants (Whole Foods, Equinox, SoulCycle, etc.) by lat/lng radius; 7-day cache; nationwide coverage
 - `/api/agent` system prompt: multi-step `steps` for case studies; `permits` vs `nycPermits` vocabulary aligned; explicit post-`run_analysis` client behavior (auto-off parcels/permits, pins); infer geography from the brief (no Manhattan default); NYC-only `run_analysis` boundary called out.
 - `/api/agent` prompt adds MODE A (exploration / “what to visualize” → single `action`, no `steps`, no `run_analysis`) vs MODE B (full case study) vs MODE C (follow-up when `hasRankedSites`); agent `contextStr` includes ranked-site pin state from the map page.
+- `/api/agent` receives **CLIENT CSV (last upload)** in `mapContext.clientCsv` (triage, row count, pin count, reasoning); new action `focus_data_panel` opens the sidebar Data tab; prompt instructs Gemini to turn on `clientData` when pins exist and otherwise steer users to Data.
+- Mock **Brooklyn workforce TOD** case study + two sample CSVs (`fixtures/brooklyn-workforce-housing-case-study/`) — one address-based file for map pins, one quarterly borough trend file for temporal/Data-tab testing.
+- **Client CSV** normalizer accepts **multiple files per drop** (up to 8); merges map pins + session metadata; legacy single-file sessions still hydrate from `sessionStorage` via `aggregateClientUploadSession`.
+- `/api/agent` MODE B ties pasted case studies to **CLIENT CSV** context when `rowsIngested > 0` (narrate uploads, toggle `clientData`, `focus_data_panel` for non-pin data).
 
 _4.12.2026_
 - `/api/trends` — optional `city` + `state` (USPS 2-letter) and `anchor_zip` (5 digits) skip ZIP geocoding and build the same keyword/geo flow; JSON adds `geo_note`, `empty_message`, and a soft `error` (HTTP 200) when Google Trends fails or returns no series; `fetchTrends` surfaces errors instead of failing silently
+- `/api/agent` system prompt documents **`set_heading`** (map bearing, clockwise from north) alongside existing actions.
 
 **Bug Fixes**
 
@@ -122,8 +131,12 @@ _4.11.2026_
 - PDF brief trend indicators use **SVG stroke arrows** (`lib/report/pdf-trend-arrow.tsx`) instead of Unicode ↑/↓/→ — Standard Helvetica in PDF has no those code points and viewers substitute junk (`"`, `,`); narrative uses a fixed **515pt** content column, paragraph split on newlines, and curly-apostrophe normalization for reliable `@react-pdf` wrapping.
 - PDF narrative `Text` uses **numeric 515pt width** (not `%`) and optional **sentence splitting** so long summaries don’t clip as a single truncated line; cycle Gemini narrative uses **2048 max output tokens** and falls back to the deterministic paragraph if the model stops with `MAX_TOKENS` (avoids endings like “confidence (9”).
 - Restored `lib/sites-store.ts` (shortlist Zustand + `saved_sites` + `signInAnonymously`) after it was missing from the tree, which broke imports from `page.tsx`, `ShortlistPanel`, and `SitesBootstrap`.
+- `POST /api/normalize` Gemini triage sometimes returned JSON wrapped in markdown or leading prose — now uses `responseMimeType: 'application/json'`, brace-balanced extraction, and field validation so temporal CSVs (e.g. quarterly borough series) no longer fail with “invalid JSON”.
+- Fixed **ReferenceError: Cannot access AGENT_CHAT_STORAGE_KEY before initialization** — `local-workspace-reset` no longer imports from `use-agent-intelligence` (cycle); shared key lives in `lib/agent-chat-storage-key.ts`.
 
 _4.12.2026_
+- `GoogleMapsOverlay` in `CommandMap` used `interleaved: false` while the app targets a **Vector** Map ID; current Maps JS can call `deck.getViewports()[0].project` before a non-interleaved deck has viewports — switched to **`interleaved: true`** (matches README’s deck.gl vector guidance).
+- `CommandMap` optional perf logging (`NEXT_PUBLIC_PERF_DEBUG=1`) used `useEffect` without a dependency array; React 19 rejected an inconsistent inferred dependency list — logging now runs as a guarded render counter (client-only) before return.
 - PDF market brief signal tiles used Unicode arrows that Helvetica cannot render in `@react-pdf`; replaced with ASCII direction marks (`+` / `-` / `~`).
 - Analytical cycle PDF tiles use the same ASCII arrows; `sanitizeCycleSignalText` + `sanitizeCycleAnalysisForDisplay` strip Gemini/JSON quote wrappers and `\\"` artifacts from signal lines, narrative, and confidence text on `/api/cycle`, PDF payload parse, and tile render.
 - `/api/aggregate` city/borough vacancy returned null when `Total_Housing_Units` / `Vacant_Units` were missing from `projectr_master_data` even though ACS `Vacancy_Rate` existed; aggregate now falls back to population-weighted (or simple average) per-ZIP vacancy rates.
@@ -151,6 +164,7 @@ _4.11.2026_
 - Default layer preset: rent choropleth and transit on; ZIP outline, client pins, permits, tracts, blocks, amenities, flood, and parcels off until the analyst enables them (matches `MapLayersSnapshot` defaults on the home page).
 - Case-study analysis site cards (`fly_to`): map camera eases ~1.6s via `moveCamera` (center + zoom + preserved tilt/heading); effect keys on lat/lng only and avoids Strict Mode skip / runaway zoom from the prior `setCenter`+`setZoom` loop.
 - Case brief PDF (`CaseBriefPdfDocument`): key findings as bordered cards with accent stripe, index, optional stat pills; Gemini schema asks for structured `keyFindings` objects (legacy string bullets still normalize); dedicated page with paired charts — composite score + air rights (horizontal M sqft), FAR % + permit counts, optional ZORI YoY bars when all site values are non-negative and vary; market signal tiles get a light tinted panel; `HorizontalBarChartPdf` + `formatValue` in `lib/report/pdf-charts.tsx`.
+- With no ZIP or city ZIP list loaded, the map **fitBounds** (or centers) on **client CSV pins** so a cold start → upload → Map path is not stuck on the default Virginia center.
 
 _4.8.2026_
 - Google Maps + deck.gl map with `GoogleMapsOverlay` (interleaved vector mode)
@@ -200,6 +214,7 @@ _4.11.2026_
 - **City / borough shortlist** — “+ Add area to shortlist” on aggregated market view stores `is_aggregate` + `saved_search` (the same search box text) so “Austin, TX”, “manhattan”, etc. reopen via `runAggregateSearch`; map pin uses an anchor ZIP’s coordinates; ZIP-only rows stay separate from area rows (no `hasZip` collision).
 - **Metric methodology layer** — `lib/metric-definitions.ts` is the single source of truth; `MetricTooltip` on data panel and bottom-bar labels (hover for definition + source); **Market cycle** card expands to show all four classifier signals (+/−/~) with direction, value, and source; **Momentum score** block loads `/api/momentum` (metro peer ZIPs for single-ZIP, up to 40 ZIPs for city/borough) and expands to default weights plus per-ZIP components; market brief PDF page 1 adds a compact three-column methodology table (Metric / Definition / Source) under the confidence line.
 - **Client CSV** — `/upload` shares `CommandCenterSidebar` with the map; analyze/shortlist stash `lib/pending-navigation` in `sessionStorage` then resume on `/`; replaces Case Studies.
+- **Client CSV + agent** — last normalize ingest is stored in `projectr-client-upload-session`; command-center Data tab shows a **Client CSV (last upload)** preview table; geospatial rows render as low-poly **ColumnLayer** pins (cone/pyramid silhouette) when the Client layer is on; the Gemini agent uses the same snapshot to toggle pins or open Data.
 - **Methodology first in panel** — Momentum and Market cycle explain blocks sit directly under the panel header (single-ZIP and aggregate); cycle card defaults expanded; momentum loads on mount when ZIP context exists.
 - **shadcn/ui experiment** — Initialized Radix Nova preset (Tailwind v4): `components.json`, `lib/utils.ts`, `components/ui/*` (button, input, card, badge, checkbox, collapsible, label, scroll-area); root `html` uses `dark` plus Geist font variables; Command Center sidebar search/submit and Shortlist panel use these primitives while keeping the existing charcoal/orange styling.
 - **Visible theme refresh** — Dark mode tokens in `app/globals.css` use a cool graphite base, elevated `card`/`popover` surfaces, Projectr orange as `--primary` (plus `--primary-deep` and `bg-gradient-primary` utility); sidebar uses `bg-sidebar` tokens; shell, stats bubble, data panel, map layer stack, agent chat, cycle/memo/upload accents, and shortlist use semantic `primary` / `border` / `muted` classes instead of flat `#0a0a0a` / `#D76B3D` hex everywhere.
@@ -219,9 +234,20 @@ _4.11.2026_
 - Sidebar market search — removed **Analyze Market** button; **Enter** submits; small spinner in the field while the request runs (map page + `/upload` sidebar).
 - Sidebar **Active market** control moved to the **footer** (full card when expanded, map icon when collapsed); legacy **AI** footer button removed — use the map-bottom intelligence terminal bar to open the agent.
 - Command center + **Client CSV** sidebar expanded width tightened from **240px** to **200px** for more map room.
+- **Clear local test data** — sidebar **Testing** strip + `/upload` footer; clears `projectr-client-upload-session`, `projectr-client-upload-markers`, `projectr-agent-chat-v1`, `projectr_pending_nav` and reloads the tab (`lib/local-workspace-reset.ts`).
+- **Slash commands** — colon forms (`/clear:…`, `/layers:…`), `/go`, view/tilt/rotate, etc.; see **`/help`** and `lib/slash-commands.ts` + `lib/slash-layer-keys.ts`.
+- **`/restart`** — clears the transcript to **Are you sure? y/n** only (no `/restart` echo); plain **`y`** / **`n`** reloads or resets to default greeting; **`/restart y`** / **`/restart n`** one-liners; **`/help`**, **`/clear:memory`**, **`/clear:terminal`**, or **`/clear:layers`** clears pending restart; `clearProjectrBrowserCachesAndReload` wipes every `projectr-*` key on confirm; broader than `/clear:workspace`; no `window.confirm`.
+- **`/clear:terminal`** / **`/clear:memory`** — **clean canvas**: transcript becomes the default greeting only (slash not shown); memory also clears the case-brief bundle; terminal keeps the bundle.
 
 _4.12.2026_
 - City and borough search loads Google Trends (keyword from borough name or city query via `/api/trends?city=&state=`); stats bar shows metro name plus keyword scope; panel surfaces Trends errors/empty data before PDF export; aggregate PDF includes Trends when loaded
+- Intelligence terminal **slash palette** — typing **`/`** opens command suggestions (filter as you type, ↑↓ + Enter or Tab to complete, Esc clears input); **`/help`** prints live commands and roadmap ideas without calling the API; unknown **`/token`** gets a short hint instead of **`/api/agent`**.
+- **`/view 3d`** / **`/view 2d`** — sets map tilt via the same `set_tilt` path as the agent (45° vs flat); parsed in `lib/slash-commands.ts`, handled in `use-agent-intelligence.ts`.
+- **`/tilt <0–100>`** — percent of max camera tilt (0°–67.5°, same cap as `CommandMap`); clamping, `%` suffix, and validation in `parseTiltSlashCommand`; `/help` includes a dedicated bounds / edge-case block.
+- **`/rotate <degrees>`** — map **bearing** (clockwise from north); `set_heading` + `mapHeading` state on `page.tsx`; values wrap to **[0, 360)** via `normalizeHeadingDegrees` in `lib/slash-commands.ts`; `/help` lists rules; Gemini may emit `set_heading` per `/api/agent` prompt.
+- **`/clear:<target>`** — `layers` (all layers off + permit filter cleared), `terminal` (clean canvas — default greeting only, command not echoed; case bundle kept), `memory` / `mem` (clean canvas + clear case bundle; map/CSV unchanged), `workspace` (same as **Testing → Clear local test data**, confirm + reload); malformed or unknown targets get explicit terminal errors.
+- **`/go <query>`** — runs sidebar-style search (ZIP, city, borough); dispatches map page form submit after `search` action; empty/oversized query errors.
+- **`/layers:a,b,…`** — comma-separated names/aliases turn **on** layers via `toggle_layers` merge; unknown tokens listed in the error; keys aligned with `LayerState` in `lib/slash-layer-keys.ts`.
 
 ## Known Bugs
 
@@ -246,6 +272,22 @@ _4.12.2026_
 - **PDF rent sparkline** — After `zillow_zori_monthly` exists and `ingest:zillow` has run, the brief uses **real** monthly ZORI. If the table is empty or a ZIP has too few points, the PDF falls back to a modeled series (footnoted).
 - **Cycle vacancy signal** — ACS vacancy in cache is a single vintage (level only); the classifier does not yet compute vacancy YoY until multi-year ACS rows exist in the pipeline.
 
+- **Client CSV forward geocode limits** — After ZIP + explicit lat/lng handling, **non-ZIP** geo cells (street addresses, `City, ST`, etc.) are sent to the **Google Geocoding API** (up to **50** unique strings per upload). Enable **Geocoding API** on the GCP project; use `GOOGLE_GEOCODING_API_KEY` or the same key as `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`. Ambiguous or non-US strings may return no pin; very large files need chunking or a higher cap (not implemented).
+
+## Client CSV & AI session
+
+- **Where it lives** — The **last normalize** triage + preview live in `sessionStorage` (`projectr-client-upload-session`); pin coordinates live in `projectr-client-upload-markers`. You can **ingest multiple CSVs in one drop** (up to 8); markers are **merged and deduped** by lat/lng/label, previews concatenated (capped), and each file still runs `POST /api/normalize` sequentially (separate Gemini triage + Supabase upserts per file). Rows also **upsert into Supabase** `projectr_master_data` with `data_source = Client Upload` and `submarket_id` from each row’s geography (or the optional form `zip` when the server was given a loaded market). The agent reads the combined snapshot via `mapContext.clientCsv` on every `/api/agent` call. **Pins:** explicit lat/lng columns, **5-digit ZIP** (Zippopotam/Census), then **address / place text** via Google Geocoding when a key is configured (`lib/google-forward-geocode.ts`, wired in `POST /api/normalize`).
+
+- **No market loaded** — You can upload first, then chat with the agent: context still includes the CSV block; pins render when the **Client** layer is on (default **on**). If the CSV has mappable rows, the map auto-fits to those pins until you load a ZIP or city.
+- **Case study + CSV** — Upload CSV(s) **before** pasting a ranking brief so `mapContext.clientCsv` is populated; `/api/agent` instructs Gemini (MODE B) to reference uploads, turn on **clientData** when pins exist, and use **focus_data_panel** for temporal-only ingests.
+- **Clear local test data** — Left sidebar **Testing** section and Client CSV page footer button remove session keys (`projectr-client-upload-session`, `projectr-client-upload-markers`, `projectr-agent-chat-v1`, `projectr_pending_nav`) and **reload the tab**; does not delete Supabase rows or shortlist.
+
+- **After you load a new location** — Session pins and the agent CSV context **stay** until you upload another file or clear pins; they are **not** tied to the searched ZIP. Supabase ingested rows are keyed by **row geography + metric + period**, not by whatever ZIP is on screen—so changing markets does not delete prior uploads, but the **Data** tab metrics view is still filtered to the **current** market unless you query elsewhere.
+
+- **Shortlist** — `saved_sites` stores label, ZIP/aggregate hint, geo, cycle snapshot, and notes only; it does **not** store CSV blobs or agent transcripts. Restoring a shortlist row reloads that market, not a prior upload or chat (see **Deferred**).
+- **Reset local workspace (QA)** — Use **Clear local test data** in the sidebar (under **Testing**) or on `/upload` to wipe this tab’s Client CSV session, pins, agent chat, and pending sidebar→map navigation, then reload. Ingested **Client Upload** rows remain in Supabase until you remove them in the database.
+- **Intelligence terminal** — Type **`/`** for suggestions; **`/help`** lists commands; **`/view`**, **`/tilt`**, **`/rotate`**, **`/go`**, **`/layers:`…**, **`/clear:`…** (see changelog); **`/clear:workspace`** matches **Testing → Clear local test data** (confirm + reload). **`/clear:terminal`** and **`/clear:memory`** replace the visible transcript with the default greeting only (no echo of the slash command); **`/restart`** clears to the y/n prompt the same way.
+
 ## Zillow Research CSVs
 
 The `zillow-csv's/` folder is gitignored due to file size. Before running `npm run ingest:zillow`, download the following files from [Zillow Research](https://www.zillow.com/research/data/) and place them in a `zillow-csv's/` folder at the repo root:
@@ -269,3 +311,5 @@ npm run ingest:zillow
 ## Deferred
 
 - **Multi-market permit comparison** — Permit visualization is currently NYC-only (Socrata DOB feed). Expanding to other cities would require per-jurisdiction ArcGIS FeatureServer URLs or a paid aggregator (Regrid, BuildZoom). Revisit if scoping to additional demo markets.
+
+- **Shortlist attachments (CSV + agent chat)** — Would require `saved_sites` JSONB column(s) or a sibling table, size limits, and UI to “attach workspace” on save plus restore flow (rehydrate markers store + optional transcript). Blocked on schema/auth product decisions.

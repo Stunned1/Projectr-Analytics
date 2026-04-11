@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import AgenticNormalizer from '@/components/AgenticNormalizer'
+import { ClearLocalWorkspaceButton } from '@/components/clear-local-workspace-button'
 import CommandCenterSidebar from '@/components/CommandCenterSidebar'
 import SitesBootstrap from '@/components/SitesBootstrap'
 import { useClientUploadMarkersStore } from '@/lib/client-upload-markers-store'
@@ -13,17 +14,7 @@ export default function ClientUploadPage() {
   const router = useRouter()
   const [searchInput, setSearchInput] = useState('')
   const markers = useClientUploadMarkersStore((s) => s.markers)
-  const setMarkers = useClientUploadMarkersStore((s) => s.setMarkers)
   const clearMarkers = useClientUploadMarkersStore((s) => s.clearMarkers)
-
-  function handleIngested(result: {
-    triage: { bucket: string }
-    marker_points?: Array<{ lat: number; lng: number; value: number | null; label: string }>
-  }) {
-    if (result.triage.bucket === 'GEOSPATIAL' && result.marker_points?.length) {
-      setMarkers(result.marker_points)
-    }
-  }
 
   function goMapWithPending(site: Site) {
     if (site.isAggregate && site.savedSearch?.trim()) {
@@ -58,21 +49,22 @@ export default function ClientUploadPage() {
         onShortlistOpenSite={goMapWithPending}
       />
       <main className="flex-1 overflow-y-auto">
-        <div className="max-w-lg mx-auto px-6 py-10 space-y-6">
+        <div className="mx-auto max-w-lg space-y-6 px-6 py-10">
           <div>
             <h1 className="text-2xl font-bold text-white">Client CSV</h1>
-            <p className="text-sm text-zinc-400 leading-relaxed mt-2">
-              Upload a CSV for Gemini triage. Geospatial rows with latitude and longitude columns appear as pins on the
-              map when you open <span className="text-zinc-300">Map</span> and enable the <span className="text-zinc-300">Client</span>{' '}
-              layer.
+            <p className="mt-2 text-sm leading-relaxed text-zinc-400">
+              Gemini classifies each file. <span className="text-zinc-300">Geospatial</span> rows (lat/lng or ZIP) become
+              orange <span className="text-zinc-300">3D cone pins</span> on the map when you enable the Client layer.
+              <span className="text-zinc-300"> Temporal</span> and <span className="text-zinc-300">tabular</span> sets
+              route to the map page <span className="text-zinc-300">Data</span> tab and ingest into your metrics pipeline.
             </p>
           </div>
-          <AgenticNormalizer onIngested={handleIngested} />
+          <AgenticNormalizer />
           {markers != null && markers.length > 0 && (
             <div className="flex flex-col gap-3 rounded-xl border border-border/80 bg-card/80 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-xs text-muted-foreground">
-                <span className="font-medium text-foreground">{markers.length}</span> pin{markers.length === 1 ? '' : 's'} saved
-                for the map
+                <span className="font-medium text-foreground">{markers.length}</span> pin{markers.length === 1 ? '' : 's'}{' '}
+                ready — turn on <span className="text-primary">Client</span> on the map
               </p>
               <div className="flex flex-wrap gap-2">
                 <button
@@ -92,6 +84,7 @@ export default function ClientUploadPage() {
               </div>
             </div>
           )}
+          <ClearLocalWorkspaceButton variant="panel" />
         </div>
       </main>
     </div>

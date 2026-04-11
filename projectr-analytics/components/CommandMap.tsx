@@ -39,8 +39,10 @@ interface TransitRoute {
   long_name?: string
   type: string
   route_type?: number
-  color: [number, number, number]
-  paths: [number, number][][]  // multiple segments per route
+  color?: [number, number, number]
+  paths?: [number, number][][]
+  /** Legacy OSM `/api/transit` fallback (singular) — prefer `paths` */
+  path?: [number, number][]
 }
 
 interface TransitData {
@@ -312,39 +314,99 @@ function MapFitter({ boundary, zip }: { boundary: GeoJSON | null; zip: string | 
   return null
 }
 
+/** When the user has not loaded a ZIP or city list yet, fit the map to client CSV pins (common: boot → upload → map). */
+function UploadedMarkersFitter({
+  markers,
+  active,
+}: {
+  markers: Array<{ lat: number; lng: number }> | null | undefined
+  active: boolean
+}) {
+  const map = useMap()
+  const lastSig = useRef<string>('')
+
+  useEffect(() => {
+    if (!active) {
+      lastSig.current = ''
+      return
+    }
+    if (!map || !markers?.length) return
+
+    const sig = markers.map((m) => `${m.lat.toFixed(5)},${m.lng.toFixed(5)}`).join('|')
+    if (sig === lastSig.current) return
+    lastSig.current = sig
+
+    if (markers.length === 1) {
+      map.setCenter({ lat: markers[0].lat, lng: markers[0].lng })
+      map.setZoom(12)
+      return
+    }
+
+    let minLat = markers[0].lat
+    let maxLat = markers[0].lat
+    let minLng = markers[0].lng
+    let maxLng = markers[0].lng
+    for (let i = 1; i < markers.length; i++) {
+      const m = markers[i]
+      minLat = Math.min(minLat, m.lat)
+      maxLat = Math.max(maxLat, m.lat)
+      minLng = Math.min(minLng, m.lng)
+      maxLng = Math.max(maxLng, m.lng)
+    }
+    if (minLat === maxLat && minLng === maxLng) {
+      map.setCenter({ lat: minLat, lng: minLng })
+      map.setZoom(12)
+      return
+    }
+
+    const bounds = new google.maps.LatLngBounds(
+      { lat: minLat, lng: minLng },
+      { lat: maxLat, lng: maxLng }
+    )
+    map.fitBounds(bounds, 56)
+  }, [map, active, markers])
+
+  return null
+}
+
 // ── DeckGL overlay ────────────────────────────────────────────────────────────
 
 function DeckGlOverlay({ layers }: { layers: Layer[] }) {
-  const deck = useMemo(() => new GoogleMapsOverlay({ interleaved: false }), [])
+  /** Vector Map ID: interleaved mode avoids `getViewports()[0]` being undefined during Maps’ WebGL draw. */
+  const deck = useMemo(() => new GoogleMapsOverlay({ interleaved: true }), [])
   const map = useMap()
-  const attachedMapRef = useRef<google.maps.Map | null>(null)
-  const isAttachedRef = useRef(false)
+  const [overlayReady, setOverlayReady] = useState(false)
 
   useEffect(() => {
     if (!map) return
-    if (attachedMapRef.current === map && isAttachedRef.current) return
-    // Small delay to ensure map is fully initialized before attaching overlay
+    setOverlayReady(false)
     const timer = setTimeout(() => {
       try {
         deck.setMap(map)
-        attachedMapRef.current = map
-        isAttachedRef.current = true
-      } catch { /* map not ready */ }
+        setOverlayReady(true)
+      } catch {
+        /* map not ready */
+      }
     }, 100)
     return () => {
       clearTimeout(timer)
-      if (attachedMapRef.current === map && isAttachedRef.current) {
-        try { deck.setMap(null) } catch { /* ignore */ }
-        attachedMapRef.current = null
-        isAttachedRef.current = false
+      try {
+        deck.setMap(null)
+      } catch {
+        /* ignore */
       }
+      setOverlayReady(false)
     }
   }, [map, deck])
 
   useEffect(() => {
-    if (!map || !isAttachedRef.current) return
-    try { deck.setProps({ layers }) } catch { /* ignore */ }
-  }, [layers, deck, map])
+    if (!map || !overlayReady) return
+    try {
+      deck.setProps({ layers })
+    } catch {
+      /* ignore */
+    }
+  }, [layers, deck, map, overlayReady])
 
   return null
 }
@@ -496,6 +558,8 @@ interface CommandMapProps {
   onLayersChange?: (snapshot: LayerState & { choroplethMetric: 'zori' | 'zhvi' }) => void
   /** Fired when user manually toggles a layer — clears agent override for that key */
   onClearAgentOverride?: (key: string) => void
+  /** When `id` increments, replaces internal layer toggles (keeps parent overrides in sync after `/clear:layers`). */
+  layerStateResync?: { id: number; state: LayerState } | null
   /** Map camera tilt (0–67.5) — controlled from parent / 3D pill. */
   mapTilt: number
   /** Map camera heading (degrees). */
@@ -517,6 +581,7 @@ function CommandMap({
   agentFlyTo,
   onLayersChange,
   onClearAgentOverride,
+  layerStateResync,
   mapTilt,
   mapHeading = 0,
 }: CommandMapProps) {
@@ -538,9 +603,13 @@ function CommandMap({
   const [permitTypeFilter, setPermitTypeFilter] = useState<Set<string>>(new Set())
   const [mapZoom, setMapZoom] = useState(11)
   const handleZoomChange = useCallback((zoom: number) => { setMapZoom(zoom) }, [])
+  const fitClientMarkersOnly =
+    !zip &&
+    !(cityZips && cityZips.length > 0) &&
+    (uploadedMarkers?.length ?? 0) > 0
   const [selectedPermit, setSelectedPermit] = useState<PermitPayload | null>(null)
   const [layers, setLayers] = useState<LayerState>({
-    zipBoundary: false,
+    zipBoundary: true,
     transitStops: true,
     rentChoropleth: true,
     blockGroups: false,
@@ -557,7 +626,14 @@ function CommandMap({
   const [activeMetric, setActiveMetric] = useState<'zori' | 'zhvi'>('zori')
   const [parcelColorMode, setParcelColorMode] = useState<'landuse' | 'airRights'>('landuse')
   const [layerPanelOpen, setLayerPanelOpen] = useState(false)
+  const lastLayerResyncId = useRef(0)
   const mapId = process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID ?? process.env.NEXT_PUBLIC_GOOGLE_MAPS_ID ?? undefined
+
+  useEffect(() => {
+    if (!layerStateResync || layerStateResync.id === lastLayerResyncId.current) return
+    lastLayerResyncId.current = layerStateResync.id
+    setLayers(layerStateResync.state)
+  }, [layerStateResync])
 
   const setTooltipStable = useCallback((next: { x: number; y: number; text: string } | null) => {
     setTooltip((prev) => {
@@ -569,12 +645,6 @@ function CommandMap({
       return sameText && sameX && sameY ? prev : next
     })
   }, [])
-
-  useEffect(() => {
-    if (!perfDebug) return
-    commandMapRenderCounter += 1
-    console.log('[perf] CommandMap render #', commandMapRenderCounter)
-  })
 
   // Fetch momentum scores when layer is toggled on and we have ZIPs loaded
   useEffect(() => {
@@ -895,8 +965,8 @@ function CommandMap({
       })
     }
 
-    // Borough boundary outline (rendered on top of city ZIPs)
-    if (boroughBoundary && cityBoundaries.length > 0) {
+    // Borough boundary outline — show as soon as `/api/borough` returns (do not wait on per-ZIP boundary fetches)
+    if (boroughBoundary) {
       result.push(
         new GeoJsonLayer({
           id: 'borough-boundary',
@@ -1008,9 +1078,20 @@ function CommandMap({
     // Transit routes — PathLayer for subway/rail/bus lines with brand colors
     if (effectiveLayers.transitStops && transitRoutes.length > 0) {
       const segments = transitRoutes.flatMap((r: TransitRoute) => {
-        const pathList = r.paths ?? []
+        const pathList =
+          r.paths && r.paths.length > 0
+            ? r.paths
+            : r.path && r.path.length > 0
+              ? [r.path]
+              : []
         return pathList.map((path: [number, number][]) => ({ path, route: r }))
       })
+
+      const MAX_TRANSIT_PATH_SEGMENTS = 400
+      if (segments.length > MAX_TRANSIT_PATH_SEGMENTS) {
+        segments.sort((a, b) => b.path.length - a.path.length)
+        segments.length = MAX_TRANSIT_PATH_SEGMENTS
+      }
 
       if (segments.length > 0) {
         result.push(
@@ -1410,7 +1491,7 @@ function CommandMap({
       )
     }
 
-    // Uploaded client data markers (from Agentic Normalizer) — 3D columns
+    // Uploaded client data — extruded column with few sides reads as a cone / pyramid from the map
     if (effectiveLayers.clientData && uploadedMarkers?.length) {
       const values = uploadedMarkers.map((d) => d.value ?? 0).filter((v) => v > 0)
       const maxVal = values.length ? Math.max(...values) : 1
@@ -1420,8 +1501,8 @@ function CommandMap({
         new ColumnLayer({
           id: 'uploaded-markers',
           data: uploadedMarkers,
-          diskResolution: 3, // triangle = cone-like appearance
-          radius: 25,        // much smaller footprint
+          diskResolution: 4, // square pyramid frustum (cone-like silhouette when tilted)
+          radius: 22,
           extruded: true,
           getPosition: (d: { lat: number; lng: number }) => [d.lng, d.lat],
           getElevation: (d: { value: number | null }) => {
@@ -1446,10 +1527,14 @@ function CommandMap({
   }, [primaryBoundary, neighborBoundaries, cityBoundaries, boroughBoundary, transitStops, transitRoutes, blockGroupData, parcelData, parcelColorMode, tractData, amenityPoints, poiPoints, floodData, nycPermitData, permitHeatPoints, permitTypeFilter, agentPermitFilter, mapZoom, momentumScores, effectiveLayers, colorScale, primaryMetricValue, effectiveMetric, zip, setTooltipStable, uploadedMarkers, shortlistSites, analysisSites])
 
   const handleToggle = useCallback((key: keyof LayerState) => {
-    setLayers((prev) => ({ ...prev, [key]: !prev[key] }))
-    // Clear agent override for this key so user toggle takes effect
+    setLayers((prev) => ({ ...prev, [key]: !effectiveLayers[key] }))
     onClearAgentOverride?.(key)
-  }, [onClearAgentOverride])
+  }, [effectiveLayers, onClearAgentOverride])
+
+  if (typeof window !== 'undefined' && perfDebug) {
+    commandMapRenderCounter += 1
+    console.log('[perf] CommandMap render #', commandMapRenderCounter)
+  }
 
   return (
     <div className="relative isolate h-full min-h-0 min-w-0 w-full">
@@ -1464,6 +1549,7 @@ function CommandMap({
           style={{ width: '100%', height: '100%' }}
         >
           <MapFitter boundary={primaryBoundary ?? (cityBoundaries[0]?.geojson ?? null)} zip={zip ?? cityZips?.[0]?.zip ?? null} />
+          <UploadedMarkersFitter markers={uploadedMarkers ?? null} active={fitClientMarkersOnly} />
           <TiltController tilt={mapTilt} heading={mapHeading} />
           <ZoomTracker onZoomChange={handleZoomChange} />
           <FlyToController target={agentFlyTo} />

@@ -44,9 +44,11 @@ AVAILABLE ACTIONS (single):
 - Set permit filter: {"type":"set_permit_filter","types":["NB","A1"]} — NB=new building, A1=major alteration, DM=demolition
 - Switch metric: {"type":"set_metric","metric":"zori"|"zhvi"}
 - Tilt map: {"type":"set_tilt","tilt":0-60}
+- Rotate map (bearing, clockwise from north): {"type":"set_heading","heading":0-359} — client normalizes to [0,360)
 - Run spatial analysis (NYC only): {"type":"run_analysis","borough":"<manhattan|brooklyn|queens|bronx|staten island>","top_n":5}
 - Show analysis results: {"type":"show_sites","sites":[...]} — do not emit in steps; the client adds this after run_analysis
 - Generate memo: {"type":"generate_memo"}
+- Open sidebar Data tab (metrics, client CSV table): {"type":"focus_data_panel"}
 - No action: {"type":"none"}
 
 FOR CASE STUDIES ONLY (MODE B) — multi-step "steps" array:
@@ -62,6 +64,12 @@ Recommended arc (adapt copy, delays, borough, and layers to each brief):
 4) Backend crunch — one run_analysis step only (no toggles). borough must match the brief (lowercase NYC borough name).
 5) Reveal — do NOT add steps to turn parcels, permits, or tracts off. After run_analysis, the app automatically hides parcels, permits, census tract/block-group overlays, clears the agent permit filter, and drops ranked-site pins.
 
+MODE B + CLIENT CSV (when the CLIENT CSV block in context is NOT “None” and rowsIngested > 0):
+- The user has ingested spreadsheet(s) in this browser session; treat them as **part of the same workflow** as the pasted brief. You MUST mention the upload(s) by name/count in your opening "message", in at least one step narration, and in "insight" — do not run a case study as if only PLUTO/permits exist.
+- If mapPinCount > 0: include an early step (after search to the correct borough/ZIP) that turns on **clientData** via {"type":"toggle_layer","layer":"clientData","value":true} or toggle_layers including clientData. Narrate that the **orange 3D pins** are the user’s uploaded candidate locations and how the spatial model **complements, stress-tests, or ranks against** that list.
+- If mapPinCount === 0 but rowsIngested > 0: the upload is temporal/tabular (no point map). Use {"type":"focus_data_panel"} in a step and narrate that **borough / time-series metrics** from Client Upload back the thesis; still run run_analysis when the brief demands ranked NYC parcels.
+- If the user pastes only the brief (no mention of CSV) but CLIENT CSV shows data, **still** follow the rules above — the context proves they already uploaded.
+
 INTELLIGENCE RULES:
 - MODE B only: case study / rank parcels / underutilized / site selection → multi-step sequence; geography comes from the user text
 - City, neighborhood, borough → search (any mode, when needed)
@@ -73,6 +81,7 @@ INTELLIGENCE RULES:
 - Parcels / zoning / FAR / air rights (NYC) → parcels
 - Permits / construction / DOB (NYC) → permits (key name is "permits", not nycPermits)
 - Momentum choropleth → momentum
+- Client CSV / uploaded spreadsheet (see CLIENT CSV block in context): if mapPinCount > 0 → toggle_layer clientData true (3D cone / pyramid columns); if mapPinCount is 0 (temporal/tabular, or geocode miss) → focus_data_panel; mapEligible is triage only — trust mapPinCount for the map
 - MODE A: short answers + toggle_layers or none — never steps
 - run_analysis supports NYC boroughs only; non-NYC briefs → navigate + layers + honest insight — no fake run_analysis
 
@@ -123,6 +132,17 @@ MARKET DATA:
 - Active Inventory: ${fmt(context.inventory)}
 - Transit Stops: ${fmt(context.transitStops)}
 - Population: ${fmt(context.population)}
+
+CLIENT CSV (last upload on this browser session — included on every agent request while present):
+${context.clientCsv
+  ? `- File(s): ${context.clientCsv.fileName ?? 'unknown'}${context.clientCsv.fileCount != null && context.clientCsv.fileCount > 1 ? ` (${context.clientCsv.fileCount} CSVs merged)` : ''}
+  ${context.clientCsv.fileNames?.length ? `- Names: ${context.clientCsv.fileNames.join(', ')}` : ''}
+  - Gemini bucket (first file): ${context.clientCsv.bucket} / visual: ${context.clientCsv.visual_bucket}
+  - Metric name (first file): ${context.clientCsv.metric_name}
+  - Rows ingested (all files): ${context.clientCsv.rowsIngested}
+  - Map pins (all files, deduped): ${context.clientCsv.mapPinCount} (triage mapEligible=${context.clientCsv.mapEligible})
+  - Triage reasoning (concat if multi-file): ${String(context.clientCsv.reasoning ?? '').slice(0, 800)}`
+  : '- None — user has not uploaded in this session (or cleared). For case studies with CSVs: upload on Client CSV / Data tab first, then paste the brief so this block is filled.'}
 ` : ''
 
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
