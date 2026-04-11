@@ -8,7 +8,8 @@ import { usePathname } from 'next/navigation'
 import ExecutiveMemo from '@/components/ExecutiveMemo'
 import AgenticNormalizer from '@/components/AgenticNormalizer'
 import MarketReportExport from '@/components/MarketReportExport'
-import AgentChat, { type AgentAction, type AnalysisSite } from '@/components/AgentChat'
+import AgentTerminal, { type AgentTerminalSize } from '@/components/AgentTerminal'
+import type { AgentAction, AnalysisSite } from '@/lib/agent-types'
 import type { CycleAnalysis } from '@/lib/cycle/types'
 import type { MapLayersSnapshot } from '@/lib/report/types'
 import { parseCycleAnalysisField } from '@/lib/report/validate-cycle'
@@ -553,14 +554,15 @@ export default function Home() {
   const [boroughBoundary, setBoroughBoundary] = useState<object | null>(null)
   const [aggregateData, setAggregateData] = useState<AggregateData | null>(null)
   const uploadedMarkers = useClientUploadMarkersStore((s) => s.markers)
-  const [agentOpen, setAgentOpen] = useState(false)
+  const [agentExpandSignal, setAgentExpandSignal] = useState(0)
   const [agentUnread, setAgentUnread] = useState(false)
+  const [agentTerminalSize, setAgentTerminalSize] = useState<AgentTerminalSize>('collapsed')
   const [agentLayerOverrides, setAgentLayerOverrides] = useState<Record<string, boolean>>({})
   const [agentMetric, setAgentMetric] = useState<'zori' | 'zhvi' | null>(null)
   const [agentTilt, setAgentTilt] = useState<number | null>(null)
   /** User 3D pill (45°) when agent has not overridden tilt. */
   const [map3DEnabled, setMap3DEnabled] = useState(false)
-  const [analysisSites, setAnalysisSites] = useState<import('@/components/AgentChat').AnalysisSite[]>([])
+  const [analysisSites, setAnalysisSites] = useState<AnalysisSite[]>([])
   const [agentPermitFilter, setAgentPermitFilter] = useState<string[] | null>(null)
   const [selectedSite, setSelectedSite] = useState<AnalysisSite | null>(null)
   const [agentFlyTo, setAgentFlyTo] = useState<{ lat: number; lng: number } | null>(null)
@@ -926,6 +928,23 @@ export default function Home() {
     : null
 
   const hasStatsBar = !!(result || aggregateData)
+  const intelligenceContextSubtitle = useMemo(() => {
+    if (aggregateData) return `${aggregateData.label} · ${aggregateData.zip_count} ZIPs`
+    if (result && cityZips && cityZips.length > 1) {
+      const place = cityZips[0]?.city ?? result.zillow?.city ?? result.zip
+      return `${place} · ${cityZips.length} ZIPs`
+    }
+    if (result) return `${result.zillow?.city ?? result.zip} · ${result.zip}`
+    return 'No market loaded'
+  }, [aggregateData, result, cityZips])
+
+  const statsBubbleBottomClass = useMemo(() => {
+    if (!hasStatsBar) return 'bottom-5'
+    if (agentTerminalSize === 'collapsed') return 'bottom-10'
+    if (agentTerminalSize === 'compact') return 'bottom-[13.5rem]'
+    return 'bottom-[calc(min(58vh,560px)+1.5rem)]'
+  }, [hasStatsBar, agentTerminalSize])
+
   const effectiveMapTilt = agentTilt != null ? agentTilt : map3DEnabled ? 45 : 0
   const map3DActive = effectiveMapTilt > 0
 
@@ -1102,12 +1121,12 @@ export default function Home() {
             <button
               type="button"
               onClick={() => {
-                setAgentOpen(true)
+                setAgentExpandSignal((n) => n + 1)
                 setAgentUnread(false)
               }}
               className="relative flex h-8 w-8 items-center justify-center rounded-full text-[10px] font-bold text-white shadow-md transition-transform hover:scale-105"
               style={{ background: '#D76B3D' }}
-              title="Open AI agent"
+              title="Open intelligence terminal"
             >
               AI
               {agentUnread && (
@@ -1148,9 +1167,23 @@ export default function Home() {
         />
         </div>
 
+        <AgentTerminal
+          mapContext={mapContext}
+          onAction={handleAgentAction}
+          contextSubtitle={intelligenceContextSubtitle}
+          expandSignal={agentExpandSignal}
+          onUnreadChange={setAgentUnread}
+          onSizeChange={setAgentTerminalSize}
+        />
+
         {/* Floating stats bubble */}
         {(result || aggregateData) && (
-          <div className="absolute bottom-5 left-1/2 z-30 flex max-w-[calc(100vw-120px)] -translate-x-1/2 items-center gap-0 overflow-hidden rounded-2xl border border-border/80 bg-background/90 shadow-2xl shadow-black/40 backdrop-blur-xl">
+          <div
+            className={cn(
+              'absolute left-1/2 z-30 flex max-w-[calc(100vw-120px)] -translate-x-1/2 items-center gap-0 overflow-hidden rounded-2xl border border-border/80 bg-background/90 shadow-2xl shadow-black/40 backdrop-blur-xl',
+              statsBubbleBottomClass
+            )}
+          >
             <div className="scrollbar-none flex min-w-0 flex-1 items-center overflow-x-auto px-1">
               {result ? (
                 <>
@@ -1247,33 +1280,6 @@ export default function Home() {
             >
               {panelOpen ? '✕' : '↗'}
             </button>
-          </div>
-        )}
-
-        {/* AI Agent Chat — docked near sidebar when open */}
-        {agentOpen && (
-          <div
-            className="pointer-events-none fixed z-50 flex max-h-[min(520px,72vh)] w-[min(360px,calc(100vw-1rem))] justify-start"
-            style={{
-              bottom: hasStatsBar ? '7.25rem' : '2.5rem',
-              left: sidebarCollapsed ? '3.5rem' : `${SIDEBAR_EXPANDED_PX / 16}rem`,
-            }}
-          >
-            <div className="pointer-events-auto max-h-full w-full">
-              <AgentChat
-                mapContext={mapContext}
-                onAction={handleAgentAction}
-                isOpen
-                onToggle={() => setAgentOpen(false)}
-                onClose={() => {
-                  setAgentOpen(false)
-                  setAgentUnread(false)
-                }}
-                onNotifyWhileClosed={() => setAgentUnread(true)}
-                hasStatsBar={hasStatsBar}
-                variant="docked"
-              />
-            </div>
           </div>
         )}
 

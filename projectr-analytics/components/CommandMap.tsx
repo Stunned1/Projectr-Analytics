@@ -10,7 +10,7 @@ import type { GeoJSON, Feature, FeatureCollection, Geometry } from 'geojson'
 import { Layers } from 'lucide-react'
 import { dedupedFetchJson } from '@/lib/request-cache'
 import type { Site } from '@/lib/sites-store'
-import type { AnalysisSite } from '@/components/AgentChat'
+import type { AnalysisSite } from '@/lib/agent-types'
 import { cn } from '@/lib/utils'
 
 function shortlistPinColor(stage: string | undefined): [number, number, number, number] {
