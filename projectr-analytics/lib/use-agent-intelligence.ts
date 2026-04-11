@@ -214,7 +214,7 @@ export function useAgentIntelligence(
 
         onAction({
           type: 'toggle_layers',
-          layers: { parcels: false, permits: false, tracts: false, blockGroups: false },
+          layers: { ...ALL_LAYERS_OFF },
         })
         onAction({ type: 'set_permit_filter', types: [] })
         setTimeout(() => {

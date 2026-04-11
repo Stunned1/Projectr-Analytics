@@ -63,7 +63,7 @@ Recommended arc (adapt copy, delays, borough, and layers to each brief):
 2) Baseline fabric - parcels on when zoning, FAR, tax lots, or land use matter (NYC).
 3) Momentum - permits on; set_permit_filter to match the brief (e.g. ["NB","A1"], exclude DM if teardowns are out of scope).
 4) Backend crunch - one run_analysis step only (no toggles). borough must match the brief (lowercase NYC borough name).
-5) Reveal - do NOT add steps to turn parcels, permits, or tracts off. After run_analysis, the app automatically hides parcels, permits, census tract/block-group overlays, clears the agent permit filter, and drops ranked-site pins.
+5) Reveal - do NOT add steps to turn layers off. After run_analysis, the app turns all map layers off (same behavior as slash command /clear:layers), clears the agent permit filter, then shows ranked-site pins.
 
 MODE B + CLIENT CSV (when the CLIENT CSV block in context is NOT “None” and rowsIngested > 0):
 - The user has ingested spreadsheet(s) in this browser session; treat them as **part of the same workflow** as the pasted brief. You MUST mention the upload(s) by name/count in your opening "message", in at least one step narration, and in "insight" — do not run a case study as if only PLUTO/permits exist.
@@ -87,7 +87,7 @@ INTELLIGENCE RULES:
 - run_analysis supports NYC boroughs only; non-NYC briefs → navigate + layers + honest insight — no fake run_analysis
 
 POST-ANALYSIS (automatic client behavior):
-run_analysis completion triggers: parcels OFF, permits OFF, tracts OFF, blockGroups OFF, permit filter cleared, then show_sites. Do not duplicate those toggles in your steps.
+run_analysis completion triggers: all layers OFF, permit filter cleared, then show_sites. Do not duplicate layer toggles in your steps.
 
 EXAMPLE shape (substitute borough and narration from the user’s case study):
 {

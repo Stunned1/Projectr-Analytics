@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { ALL_LAYERS_OFF } from '@/lib/slash-layer-keys'
 import { AGENT_CHAT_STORAGE_KEY } from '@/lib/use-agent-intelligence'
 
 export interface AgentAction {
@@ -232,10 +233,10 @@ export default function AgentChat({
         analysisSites: sites,
       }])
 
-      // Clear analytical clutter before pins (parcels, permits, census overlays); drop agent permit filter so UI matches “reveal” state
+      // Full layer reset before pins (same as `/clear:layers`): partial false patches merge into overrides and left rent/transit/ZIP/client on
       onAction({
         type: 'toggle_layers',
-        layers: { parcels: false, permits: false, tracts: false, blockGroups: false },
+        layers: { ...ALL_LAYERS_OFF },
       })
       onAction({ type: 'set_permit_filter', types: [] })
       setTimeout(() => {
