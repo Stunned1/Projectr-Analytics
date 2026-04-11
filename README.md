@@ -119,6 +119,7 @@ _4.12.2026_
 - `/api/trends` — optional `city` + `state` (USPS 2-letter) and `anchor_zip` (5 digits) skip ZIP geocoding and build the same keyword/geo flow; JSON adds `geo_note`, `empty_message`, and a soft `error` (HTTP 200) when Google Trends fails or returns no series; `fetchTrends` surfaces errors instead of failing silently
 - `/api/agent` system prompt documents **`set_heading`** (map bearing, clockwise from north) alongside existing actions.
 - `lib/gemini-text-rules.ts` exports `GEMINI_NO_EM_DASH_RULE` appended to Gemini prompts (including `/api/agent`, `/api/memo`, `/api/normalize`, `case-brief-shared`, `gemini-brief`, `gemini-market-dossier`, `gemini-cycle-narrative`, `ExecutiveMemo`, `suggest-location-column`) so model copy avoids Unicode em dash (U+2014).
+- Merged `origin/main` into this branch; `README.md` conflict under **Map & Visualization** resolved by keeping the full changelog here (main currently carries a short stub README only).
 
 **Bug Fixes**
 
