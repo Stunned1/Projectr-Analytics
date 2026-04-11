@@ -140,7 +140,7 @@ export default function CommandCenterSidebar({
       >
         {!collapsed && (
           <Image
-            src="/Scout_Logo.png"
+            src="/scout.png"
             alt="Scout"
             width={120}
             height={32}
