@@ -220,10 +220,13 @@ _4.11.2026_
 - Sidebar market search - removed **Analyze Market** button; **Enter** submits; small spinner in the field while the request runs (map page + `/upload` sidebar).
 - Sidebar **Active market** control moved to the **footer** (full card when expanded, map icon when collapsed); legacy **AI** footer button removed - use the map-bottom intelligence terminal bar to open the agent.
 - Command center + **Client CSV** sidebar expanded width tightened from **240px** to **200px** for more map room.
+- **`/guide` doc polish** - Onboarding is a collapsible **FOR NEW USERS** block (default expanded) with primary-tint chrome; **What you can use** uses feature cards and section kickers; **Metric reference** uses accented category rules and metric tiles; copy avoids em dashes.
+- **`/guide` outline** - Permanent **On this page** rail with anchors for onboarding, each capability card, and each metric category (`lib/guide-content.ts`); jump clears the doc filter and smooth-scrolls; active section tracks scroll while not filtering.
+- **`/guide` search** - `parseGuideSearchQuery` tokenizes with punctuation stripped and stop words dropped; features filter per card; metric glossary phrases match via `GUIDE_METRICS_INTRO_SEARCH_BLOB`; `metricSearchBlob` includes calculation strings where defined.
 
 _4.12.2026_
 - City and borough search loads Google Trends (keyword from borough name or city query via `/api/trends?city=&state=`); stats bar shows metro name plus keyword scope; panel surfaces Trends errors/empty data before PDF export; aggregate PDF includes Trends when loaded
-- Right data panel width tightened from **360px** to **320px** for more map area (`app/page.tsx`).
+- **Analyst guide** - **`/guide`** shares **`CommandCenterSidebar`** with map/upload; scrollable doc column with in-page outline, collapsible **FOR NEW USERS** onboarding, **What you can use** (feature overview) + **Metric reference** (no accordions), shadcn **Input** search in the header (`textMatchesGuideSearch`, `parseGuideSearchQuery`, `lib/guide-content.ts`, `lib/analyst-guide.ts`); right map panel stays data-only (**360px**).
 
 ## Known Bugs
 

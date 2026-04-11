@@ -19,12 +19,14 @@ import { useClientUploadMarkersStore } from '@/lib/client-upload-markers-store'
 import SitesBootstrap from '@/components/SitesBootstrap'
 import ShortlistPanel from '@/components/ShortlistPanel'
 import { takePendingNav } from '@/lib/pending-navigation'
+import { RIGHT_PANEL_WIDTH_PX } from '@/lib/analyst-guide'
 import { MetricTooltip } from '@/components/MetricTooltip'
 import { MomentumExplainBlock } from '@/components/MomentumExplainBlock'
 import { CycleExplainCard } from '@/components/CycleExplainCard'
 import type { MetricKey } from '@/lib/metric-definitions'
 import { metricKeyFromDataRow, sparklineMetricKey } from '@/lib/metric-definitions'
 import { cn } from '@/lib/utils'
+import { BookOpen } from 'lucide-react'
 import {
   denormalizeAgentLayersForContext,
   normalizeAgentLayerKey,
@@ -483,7 +485,7 @@ const SIDEBAR_EXPANDED_PX = 200
 /** Agent-selected parcel / site - lives in the right panel, not over the map. */
 function SiteDetailRightPanel({ site, onBack }: { site: AnalysisSite; onBack: () => void }) {
   return (
-    <div className="flex min-h-0 min-w-[320px] flex-1 flex-col overflow-hidden p-4">
+    <div className="flex min-h-0 min-w-[360px] flex-1 flex-col overflow-hidden p-4">
       <div className="mb-4 flex items-start gap-2 border-b border-border/60 pb-3">
         <button
           type="button"
@@ -982,6 +984,8 @@ export default function Home() {
     }
   }
 
+  const rightPanelVisible = panelOpen && (result != null || aggregateData != null || selectedSite != null)
+
   const sidebarActiveMarket =
     result != null
       ? {
@@ -1071,9 +1075,10 @@ export default function Home() {
         )}
 
         {!sidebarCollapsed && (
-          <div className="border-b border-white/8 px-2 py-2">
+          <div className="border-b border-white/8 px-2 py-2 space-y-0.5">
             <SidebarNavLink href="/" icon={<MapIcon />} label="Map" />
             <SidebarNavLink href="/upload" icon={<UploadIcon />} label="Client CSV" />
+            <SidebarNavLink href="/guide" icon={<BookOpen className="h-4 w-4" strokeWidth={1.5} />} label="Guide" />
           </div>
         )}
 
@@ -1083,6 +1088,7 @@ export default function Home() {
               <div className="flex flex-col gap-1">
                 <SidebarCollapsedLink href="/" icon={<MapIcon />} title="Map" />
                 <SidebarCollapsedLink href="/upload" icon={<UploadIcon />} title="Client CSV upload" />
+                <SidebarCollapsedLink href="/guide" icon={<BookOpen className="h-4 w-4" strokeWidth={1.5} />} title="Analyst guide" />
               </div>
             ) : (
               <>
@@ -1316,18 +1322,20 @@ export default function Home() {
 
       {/* ── Right Data Panel ── */}
       <aside
-        className={`z-20 flex min-h-0 flex-shrink-0 flex-col overflow-hidden border-l border-border/80 bg-card transition-all duration-300 ${
-          panelOpen && (result || aggregateData || selectedSite) ? 'w-[320px]' : 'w-0 overflow-hidden border-l-0'
-        }`}
+        className={cn(
+          'z-20 flex min-h-0 flex-shrink-0 flex-col overflow-hidden border-l border-border/80 bg-card transition-[width] duration-300 ease-out',
+          !rightPanelVisible && 'border-l-0'
+        )}
+        style={{ width: rightPanelVisible ? RIGHT_PANEL_WIDTH_PX : 0 }}
       >
-        {panelOpen && selectedSite && (
+        {panelOpen && selectedSite != null && (
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <SiteDetailRightPanel site={selectedSite} onBack={() => setSelectedSite(null)} />
           </div>
         )}
 
         {!selectedSite && aggregateData && panelOpen && !result && (
-          <div className="flex min-h-0 min-w-[320px] flex-1 flex-col overflow-hidden">
+          <div className="flex min-h-0 min-w-[360px] flex-1 flex-col overflow-hidden">
             <div className="shrink-0 border-b border-border/50 p-4 pb-3">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
@@ -1527,7 +1535,7 @@ export default function Home() {
         )}
 
         {!selectedSite && result && panelOpen && (
-          <div className="flex min-h-0 min-w-[320px] flex-1 flex-col overflow-hidden">
+          <div className="flex min-h-0 min-w-[360px] flex-1 flex-col overflow-hidden">
             <div className="shrink-0 border-b border-border/50 p-4 pb-3">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">

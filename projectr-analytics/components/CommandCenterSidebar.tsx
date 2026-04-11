@@ -7,6 +7,7 @@ import ShortlistPanel from '@/components/ShortlistPanel'
 import { Input } from '@/components/ui/input'
 import type { Site } from '@/lib/sites-store'
 import { cn } from '@/lib/utils'
+import { BookOpen } from 'lucide-react'
 
 const navBtnClass = (active: boolean) =>
   cn(
@@ -18,7 +19,10 @@ const navBtnClass = (active: boolean) =>
 
 function NavLink({ href, icon, label }: { href: string; icon: React.ReactNode; label: string }) {
   const pathname = usePathname()
-  const active = pathname === href || (href === '/' && (pathname === '/' || pathname === ''))
+  const active =
+    href === '/'
+      ? pathname === '/' || pathname === ''
+      : pathname === href || pathname.startsWith(`${href}/`)
   return (
     <Link href={href} className={navBtnClass(active)}>
       <span className="w-4 h-4 flex-shrink-0">{icon}</span>
@@ -135,9 +139,10 @@ export default function CommandCenterSidebar({
         </form>
       </div>
 
-      <nav className="flex-1 px-2 py-3 flex flex-col gap-0.5 min-h-0">
+      <nav className="flex min-h-0 flex-1 flex-col gap-0.5 px-2 py-3">
         <NavLink href="/" icon={<MapIcon />} label="Map" />
         <NavLink href="/upload" icon={<UploadIcon />} label="Client CSV" />
+        <NavLink href="/guide" icon={<BookOpen className="h-4 w-4" strokeWidth={1.5} />} label="Guide" />
         <ShortlistPanel onOpenSite={onShortlistOpenSite} />
       </nav>
 
