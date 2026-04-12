@@ -44,7 +44,6 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
 export const SLASH_COMMAND_IDEAS: string[] = [
   '/data — open right panel on Data tab',
   '/zip <5-digit or city> — same as sidebar search (or use `/go`)',
-  '/memo — Executive memo panel',
   '/brief — market brief PDF export',
   '/context — copy sanitized map context for debugging',
 ]

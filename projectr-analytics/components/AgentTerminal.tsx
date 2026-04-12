@@ -1,6 +1,6 @@
 'use client'
 
-import { Fragment, useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { Fragment, useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react'
 import type { AgentAction, AnalysisSite } from '@/lib/agent-types'
 import type { MapContext } from '@/lib/agent-types'
 import { useAgentIntelligence, formatActionLogLine } from '@/lib/use-agent-intelligence'
@@ -27,6 +27,24 @@ const C_NARRATIVE = '#c9d1d9'
 const C_NARRATIVE_BULLET = '#4b5563'
 const C_SYSTEM = '#10b981'
 const C_SEPARATOR = '#2d3342'
+
+const TERMINAL_DEFAULT_OPEN_PX = 200
+const TERMINAL_MIN_OPEN_PX = 120
+const TERMINAL_MAX_OPEN_PX = 560
+
+function maxOpenTerminalHeightPx(): number {
+  if (typeof window === 'undefined') return TERMINAL_MAX_OPEN_PX
+  return Math.min(TERMINAL_MAX_OPEN_PX, Math.round(window.innerHeight * 0.85))
+}
+
+function expandedPresetHeightPx(): number {
+  if (typeof window === 'undefined') return TERMINAL_MAX_OPEN_PX
+  return Math.min(TERMINAL_MAX_OPEN_PX, Math.round(window.innerHeight * 0.58))
+}
+
+function clampOpenTerminalHeightPx(h: number): number {
+  return Math.round(Math.max(TERMINAL_MIN_OPEN_PX, Math.min(maxOpenTerminalHeightPx(), h)))
+}
 
 function formatUserCommandTime(ts: number): string {
   try {
@@ -138,6 +156,8 @@ interface AgentTerminalProps {
   onUnreadChange?: (unread: boolean) => void
   /** For layout (e.g. floating stats bubble clearance). */
   onSizeChange?: (size: AgentTerminalSize) => void
+  /** Open-state pixel height (null when collapsed) for parent layout offsets. */
+  onOpenHeightPxChange?: (heightPx: number | null) => void
   /** Offset above bottom so floating stats pill stays visible */
   bottomOffsetClass?: string
 }
@@ -148,12 +168,20 @@ export default function AgentTerminal({
   contextSubtitle,
   onUnreadChange,
   onSizeChange,
+  onOpenHeightPxChange,
   bottomOffsetClass = 'bottom-0',
 }: AgentTerminalProps) {
   const [size, setSize] = useState<AgentTerminalSize>('collapsed')
+  const [openHeightPx, setOpenHeightPx] = useState(TERMINAL_DEFAULT_OPEN_PX)
+  const [isResizing, setIsResizing] = useState(false)
+  const isResizingRef = useRef(false)
+  const resizeStartYRef = useRef(0)
+  const resizeStartHRef = useRef(TERMINAL_DEFAULT_OPEN_PX)
   const rootRef = useRef<HTMLDivElement>(null)
   const outputRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  /** After `/` opens the panel from collapsed, focus input and insert `/` once the field mounts. */
+  const slashOpenPendingRef = useRef(false)
   const [unread, setUnread] = useState(false)
   const [slashHighlight, setSlashHighlight] = useState(0)
 
@@ -207,6 +235,58 @@ export default function AgentTerminal({
   }, [size, onSizeChange])
 
   useEffect(() => {
+    onOpenHeightPxChange?.(size === 'collapsed' ? null : openHeightPx)
+  }, [size, openHeightPx, onOpenHeightPxChange])
+
+  const focusTerminalAndInsertSlash = useCallback(() => {
+    inputRef.current?.focus()
+    setInput((p) => `${p}/`)
+  }, [setInput])
+
+  useLayoutEffect(() => {
+    if (size === 'collapsed' || !slashOpenPendingRef.current) return
+    slashOpenPendingRef.current = false
+    if (loading || isRunningSequence) {
+      inputRef.current?.focus()
+      return
+    }
+    focusTerminalAndInsertSlash()
+  }, [size, loading, isRunningSequence, focusTerminalAndInsertSlash])
+
+  useEffect(() => {
+    const onDocKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return
+
+      const target = e.target
+      if (inputRef.current && (target === inputRef.current || inputRef.current.contains(target as Node))) return
+
+      if (target instanceof HTMLElement) {
+        const tag = target.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+        if (target.isContentEditable) return
+      }
+
+      e.preventDefault()
+
+      if (loading || isRunningSequence) {
+        if (size === 'collapsed') setSize('compact')
+        return
+      }
+
+      if (size === 'collapsed') {
+        slashOpenPendingRef.current = true
+        setSize('compact')
+        return
+      }
+
+      focusTerminalAndInsertSlash()
+    }
+
+    document.addEventListener('keydown', onDocKeyDown, true)
+    return () => document.removeEventListener('keydown', onDocKeyDown, true)
+  }, [size, loading, isRunningSequence, focusTerminalAndInsertSlash])
+
+  useEffect(() => {
     outputRef.current?.scrollTo({ top: outputRef.current.scrollHeight, behavior: 'smooth' })
   }, [visibleTerminalMessages, size, loading])
 
@@ -221,6 +301,51 @@ export default function AgentTerminal({
     return () => document.removeEventListener('mousedown', onDown, true)
   }, [size])
 
+  const endResize = useCallback(() => {
+    isResizingRef.current = false
+    setIsResizing(false)
+  }, [])
+
+  useEffect(() => {
+    if (!isResizing) return
+    const onWinUp = () => endResize()
+    window.addEventListener('pointerup', onWinUp)
+    window.addEventListener('pointercancel', onWinUp)
+    return () => {
+      window.removeEventListener('pointerup', onWinUp)
+      window.removeEventListener('pointercancel', onWinUp)
+    }
+  }, [isResizing, endResize])
+
+  useEffect(() => {
+    const onResize = () => setOpenHeightPx((h) => clampOpenTerminalHeightPx(h))
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  const onResizeHandlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (size === 'collapsed' || e.button !== 0) return
+    e.preventDefault()
+    resizeStartYRef.current = e.clientY
+    resizeStartHRef.current = openHeightPx
+    isResizingRef.current = true
+    setIsResizing(true)
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }, [size, openHeightPx])
+
+  const onResizeHandlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isResizingRef.current) return
+    const dy = resizeStartYRef.current - e.clientY
+    setOpenHeightPx(clampOpenTerminalHeightPx(resizeStartHRef.current + dy))
+  }, [])
+
+  const onResizeHandlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    }
+    endResize()
+  }, [endResize])
+
   const terminalMsgOffset = messages.length - visibleTerminalMessages.length
   const hasUserMessage = useMemo(() => messages.some((m) => m.role === 'user'), [messages])
 
@@ -234,9 +359,6 @@ export default function AgentTerminal({
     }
     return 'Idle — type a command to run the engine.'
   }, [visibleTerminalMessages])
-
-  const panelHeight =
-    size === 'collapsed' ? 'h-8' : size === 'compact' ? 'h-[200px]' : 'min-h-[200px] h-[min(58vh,560px)] max-h-[560px]'
 
   function renderSiteTable(sites: AnalysisSite[]) {
     return (
@@ -264,20 +386,37 @@ export default function AgentTerminal({
   return (
     <div
       ref={rootRef}
+      style={size === 'collapsed' ? undefined : { height: openHeightPx }}
       className={cn(
         'pointer-events-auto absolute left-0 right-0 z-[38] flex flex-col border-t border-zinc-700/90 bg-[#0c0c0e] font-[family-name:var(--font-dm-mono)] shadow-[0_-8px_32px_rgba(0,0,0,0.45)]',
         bottomOffsetClass,
-        panelHeight,
-        'transition-[height,min-height] duration-200 ease-out'
+        size === 'collapsed' ? 'h-8' : 'min-h-0',
+        !isResizing && size !== 'collapsed' && 'transition-[height] duration-200 ease-out'
       )}
     >
-      {/* Title / collapse bar - always one row */}
-      <div className="flex h-8 shrink-0 items-center gap-2 border-b border-zinc-800 px-2 pr-1">
+      {/* Inner `relative` only — never put `relative` on the root or tailwind-merge drops `absolute` and the bar jumps to the top of the map */}
+      <div className="relative flex h-full min-h-0 flex-col">
+        {/* Full-width top edge (no grip chrome) — same interaction as resizing a desktop terminal window */}
+        {size !== 'collapsed' && (
+          <div
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="Resize terminal height"
+            title="Drag top edge to resize"
+            onPointerDown={onResizeHandlePointerDown}
+            onPointerMove={onResizeHandlePointerMove}
+            onPointerUp={onResizeHandlePointerUp}
+            onPointerCancel={onResizeHandlePointerUp}
+            className="absolute left-0 right-0 top-0 z-[41] h-3 cursor-ns-resize touch-none"
+          />
+        )}
+        {/* Title / collapse bar - always one row */}
+        <div className="flex h-8 shrink-0 items-center gap-2 border-b border-zinc-800 px-2 pr-1">
         <button
           type="button"
           onClick={() => setSize((s) => (s === 'collapsed' ? 'compact' : 'collapsed'))}
           className="flex min-w-0 flex-1 items-center gap-2 text-left"
-          title={size === 'collapsed' ? 'Expand terminal' : 'Collapse terminal'}
+          title={size === 'collapsed' ? 'Expand terminal (or press /)' : 'Collapse terminal'}
         >
           <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0 text-primary" fill="none" stroke="currentColor" strokeWidth="2">
             <rect x="2" y="4" width="20" height="14" rx="1" />
@@ -301,7 +440,15 @@ export default function AgentTerminal({
             type="button"
             className="shrink-0 rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
             title={size === 'expanded' ? 'Restore height' : 'Maximize'}
-            onClick={() => setSize((s) => (s === 'expanded' ? 'compact' : 'expanded'))}
+            onClick={() => {
+              if (size === 'expanded') {
+                setOpenHeightPx(TERMINAL_DEFAULT_OPEN_PX)
+                setSize('compact')
+              } else {
+                setOpenHeightPx(clampOpenTerminalHeightPx(expandedPresetHeightPx()))
+                setSize('expanded')
+              }
+            }}
           >
             {size === 'expanded' ? (
               <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -330,9 +477,9 @@ export default function AgentTerminal({
             <path d="M6 9l6 6 6-6" />
           </svg>
         </button>
-      </div>
+        </div>
 
-      {size !== 'collapsed' && (
+        {size !== 'collapsed' && (
         <>
           <div className="shrink-0 border-b border-zinc-800/80 px-2 py-0.5 text-[9px] text-zinc-600">
             <span className="text-zinc-500">Slash:</span> type <span className="font-mono text-zinc-500">/</span> for
@@ -528,7 +675,8 @@ export default function AgentTerminal({
             <span className="h-3.5 w-px animate-pulse bg-primary/80" aria-hidden />
           </form>
         </>
-      )}
+        )}
+      </div>
     </div>
   )
 }

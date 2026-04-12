@@ -28,7 +28,7 @@ const ACTION_LOG: Record<string, string> = {
   toggle_layers: 'Layers updated',
   set_metric: 'Fill metric changed',
   search: 'Navigating to market',
-  generate_memo: 'Opening data panel (memo)',
+  generate_memo: 'Opening Analysis tab',
   focus_data_panel: 'Opening Data tab',
   set_tilt: 'Map tilt updated',
   set_heading: 'Map heading updated',

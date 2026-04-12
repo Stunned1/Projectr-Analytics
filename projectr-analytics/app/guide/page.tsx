@@ -392,7 +392,7 @@ export default function DocumentationPage() {
                             <li>
                               <span className="font-semibold text-primary">Analysis vs Data: </span>
                               The right panel has two tabs: <em className="text-foreground/95">Analysis</em> for cycle,
-                              momentum, PDF brief, and memo; <em className="text-foreground/95">Data</em> for tables,
+                              momentum, and PDF brief; <em className="text-foreground/95">Data</em> for tables,
                               trends, and exports.
                             </li>
                             <li>

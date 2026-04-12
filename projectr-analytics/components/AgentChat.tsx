@@ -90,7 +90,7 @@ const ACTION_LABELS: Record<string, string> = {
   toggle_layers: '↳ Layers updated',
   set_metric: '↳ Metric changed',
   search: '↳ Navigating to market',
-  generate_memo: '↳ Opening memo',
+  generate_memo: '↳ Opening Analysis tab',
   set_tilt: '↳ Map tilted',
   set_heading: '↳ Map rotated',
   run_analysis: '↳ Running spatial model...',

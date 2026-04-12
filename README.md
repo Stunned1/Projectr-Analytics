@@ -118,7 +118,7 @@ _4.11.2026_
 _4.12.2026_
 - `/api/trends` — optional `city` + `state` (USPS 2-letter) and `anchor_zip` (5 digits) skip ZIP geocoding and build the same keyword/geo flow; JSON adds `geo_note`, `empty_message`, and a soft `error` (HTTP 200) when Google Trends fails or returns no series; `fetchTrends` surfaces errors instead of failing silently
 - `/api/agent` system prompt documents **`set_heading`** (map bearing, clockwise from north) alongside existing actions.
-- `lib/gemini-text-rules.ts` exports `GEMINI_NO_EM_DASH_RULE` appended to Gemini prompts (including `/api/agent`, `/api/memo`, `/api/normalize`, `case-brief-shared`, `gemini-brief`, `gemini-market-dossier`, `gemini-cycle-narrative`, `ExecutiveMemo`, `suggest-location-column`) so model copy avoids Unicode em dash (U+2014).
+- `lib/gemini-text-rules.ts` exports `GEMINI_NO_EM_DASH_RULE` appended to Gemini prompts (including `/api/agent`, `/api/memo`, `/api/normalize`, `case-brief-shared`, `gemini-brief`, `gemini-market-dossier`, `gemini-cycle-narrative`, `suggest-location-column`) so model copy avoids Unicode em dash (U+2014).
 - Merged `origin/main` into this branch; `README.md` conflict under **Map & Visualization** resolved by keeping the full changelog here (main currently carries a short stub README only).
 - Merged `origin/aidan-branch`; resolved `README.md`, `AgentTerminal.tsx`, `use-agent-intelligence.ts`, and `tsconfig.tsbuildinfo` conflicts (remote-first; README keeps Client CSV / slash-command docs, Scout branding, and local terminal UI notes; terminal keeps slash palette plus `_` placeholder after first user message).
 
@@ -151,6 +151,7 @@ _4.12.2026_
 - `/api/aggregate` cold-fills up to 16 ZIPs (parallel batches of 4) with the same Census/BPS/FRED/HUD fetch as `/api/market` when no `projectr_master_data` exists for the area - borough/city searches no longer require a prior single-ZIP load for PDF metrics.
 - FRED county search uses NYC borough county names (e.g. Richmond County for Staten Island) so unemployment/employment series resolve instead of `Staten Island County NY`-style mismatches.
 - Map layer chrome drifted into the map (read as “top-center”) when the right data panel was open - `reservedRightPx={300}` was wrong for the current layout (panel is a flex sibling, not overlaying the map), so the stack was offset an extra 300px left; removed `reservedRightPx`; later IA pass moved controls to **top-left** of the map (`left-4 top-4`) with `[dots][sheet]` order.
+- Intelligence terminal dock jumped to the **top** of the map when expanded because `relative` on the root was merged after `absolute` (tailwind-merge), dropping bottom anchoring; `relative` now wraps inner content only in `AgentTerminal.tsx`.
 
 **Map & Visualization**
 
@@ -229,7 +230,7 @@ _4.11.2026_
 - **Visible theme refresh** — Dark mode tokens in `app/globals.css` use a cool graphite base, elevated `card`/`popover` surfaces, Scout orange as `--primary` (plus `--primary-deep` and `bg-gradient-primary` utility); sidebar uses `bg-sidebar` tokens; shell, stats bubble, data panel, map layer stack, agent chat, cycle/memo/upload accents, and shortlist use semantic `primary` / `border` / `muted` classes instead of flat `#0a0a0a` / `#D76B3D` hex everywhere.
 - Left sidebar now collapsible — collapses to 48px icon strip, expands to **200px**; top zone = logo, search, Map / Client CSV / Guide nav; scrollable middle = shortlist only; **Active market** card (or collapsed map icon) sits in the **footer** and toggles the right data panel; intelligence terminal opens only from the map-bottom bar (no sidebar AI button).
 - Bottom stats bar replaced with floating pill bubble (bottom-center, glassmorphism) — scrollable stats with dividers; ↗ button opens data panel
-- Right data panel is **360px** with **Analysis** / **Data** tabs — Analysis = momentum, market cycle, PDF brief, executive memo; Data = pricing, velocity, demographics, FRED, trends, transit, shortlist add, **All metrics** (`<details>` flat table), Agentic Normalizer; former **Overview / All Data** split removed.
+- Right data panel is **360px** with **Analysis** / **Data** tabs — Analysis = momentum, market cycle, PDF brief; Data = pricing, velocity, demographics, FRED, trends, transit, shortlist add, **All metrics** (`<details>` flat table), Agentic Normalizer; former **Overview / All Data** split removed.
 - Map layer pill **Rent/value fill** (was labeled Rent) toggles the Zillow-sourced ZIP choropleth; **Fill metric** (ZORI / ZHVI) only appears when that layer is on; PDF active-layer line uses the same naming and omits fill metric when the choropleth is off.
 - **Layers UI** — map layer **dots + Layers** button anchor **top-left** of the map (`left-4 top-4`); **sheet** opens to the right of the toggle; up to **five** active dots shown then **+N**; dots turn layers off on click; no `reservedRightPx` offset.
 - **Agent site selection** — spatial-analysis **site detail** moved from a map overlay card into the **right panel** with a **Back** control; `fly_to` with `site` opens the panel; new ZIP/area search clears the selected site.
@@ -243,7 +244,7 @@ _4.11.2026_
 - Intelligence terminal: each narrative line split from the agent reply (newline or sentence chunks) is prefixed with the muted **·** bullet, not only the first line.
 - Command center sidebar nav: active route uses **primary (orange) text only**; removed active background fill, left border stripe, and collapsed icon tile tint.
 - Sidebar **Saved** (formerly Shortlist): collapsible header **Saved (n)**; data panel uses **Save Site** / **Saved** and **Save** / **Area saved** for aggregates; map pin tooltip **Saved ·**; sync error copy and Market Report hint text updated; `/guide` onboarding and feature docs use **Saved & PDF**.
-- Map **right data panel** (`aside[data-right-panel]`): dark theme uses a slightly brighter `card` / `muted-foreground` / border tokens; smallest copy bumped (e.g. section kicker `11px`, `text-xs` for former `10px`); **MetricRow**, cycle/momentum cards, Quick Summary, Market Report, Agentic Normalizer, and **MetricTooltip** hovers adjusted for legibility.
+- Map **right data panel** (`aside[data-right-panel]`): dark theme uses a slightly brighter `card` / `muted-foreground` / border tokens; smallest copy bumped (e.g. section kicker `11px`, `text-xs` for former `10px`); **MetricRow**, cycle/momentum cards, Market Report, Agentic Normalizer, and **MetricTooltip** hovers adjusted for legibility.
 - **City search** — non-ZIP queries accept full state names (`Newark, New Jersey`) or abbreviations (`Newark, NJ`); map sidebar placeholder still prompts **Enter** to submit.
 - **3D** — tilt/rotation sliders removed from the map; **3D** toggle stacks under the **Layers** control (top-left on the map, same chrome as the layer button) and sets 45° perspective when on; agent `set_tilt` still overrides until cleared.
 - Sidebar market search — removed **Analyze Market** button; **Enter** submits; small spinner in the field while the request runs (map page + `/upload` sidebar).
@@ -272,6 +273,9 @@ _4.12.2026_
 - **`/clear:<target>`** — `layers` (all layers off + permit filter cleared), `terminal` (clean canvas — default greeting only, command not echoed; case bundle kept), `memory` / `mem` (clean canvas + clear case bundle; map/CSV unchanged), `workspace` (**Clear local test data**: confirm + reload — same keys as `lib/local-workspace-reset.ts`); malformed or unknown targets get explicit terminal errors.
 - **`/go <query>`** — runs sidebar-style search (ZIP, city, borough); dispatches map page form submit after `search` action; empty/oversized query errors.
 - **`/layers:a,b,…`** — comma-separated names/aliases turn **on** layers via `toggle_layers` merge; unknown tokens listed in the error; keys aligned with `LayerState` in `lib/slash-layer-keys.ts`.
+- **Intelligence terminal** — pressing **`/`** on the map page (when focus is not in another text field) expands the docked terminal if collapsed, focuses the prompt, and inserts **`/`** so slash commands start immediately; ignored while the terminal input is focused so normal typing is unchanged.
+- Removed the right-panel **Quick Summary** block (Gemini executive memo UI); **`POST /api/memo`** remains for reuse; agent action **`generate_memo`** still opens the **Analysis** tab.
+- **Intelligence terminal** — drag the **top edge** of the dock (full-width hit zone, no grip control) to resize open height (clamped ~120px–min(560px, 85vh)); maximize/restore still snap to ~58vh (capped at 560px) vs default 200px; floating stats bubble offset follows live height via `onOpenHeightPxChange`.
 
 ## Known Bugs
 

@@ -1,8 +1,7 @@
 'use client'
 
-import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
+import { useState, useCallback, useMemo, useEffect, useRef, type CSSProperties } from 'react'
 import dynamic from 'next/dynamic'
-import ExecutiveMemo from '@/components/ExecutiveMemo'
 import AgenticNormalizer from '@/components/AgenticNormalizer'
 import MarketReportExport from '@/components/MarketReportExport'
 import AgentTerminal, { type AgentTerminalSize } from '@/components/AgentTerminal'
@@ -516,6 +515,7 @@ export default function Home() {
     [clientUploadSession]
   )
   const [agentTerminalSize, setAgentTerminalSize] = useState<AgentTerminalSize>('collapsed')
+  const [agentTerminalOpenHeightPx, setAgentTerminalOpenHeightPx] = useState<number | null>(null)
   const [agentLayerOverrides, setAgentLayerOverrides] = useState<Record<string, boolean>>({})
   const [agentMetric, setAgentMetric] = useState<'zori' | 'zhvi' | null>(null)
   const [agentTilt, setAgentTilt] = useState<number | null>(null)
@@ -961,9 +961,14 @@ export default function Home() {
   const statsBubbleBottomClass = useMemo(() => {
     if (!hasStatsBar) return 'bottom-5'
     if (agentTerminalSize === 'collapsed') return 'bottom-10'
-    if (agentTerminalSize === 'compact') return 'bottom-[13.5rem]'
-    return 'bottom-[calc(min(58vh,560px)+1.5rem)]'
+    return ''
   }, [hasStatsBar, agentTerminalSize])
+
+  const statsBubbleBottomStyle = useMemo((): CSSProperties | undefined => {
+    if (!hasStatsBar || agentTerminalSize === 'collapsed') return undefined
+    const h = agentTerminalOpenHeightPx ?? 200
+    return { bottom: `calc(${h}px + 1.5rem)` }
+  }, [hasStatsBar, agentTerminalSize, agentTerminalOpenHeightPx])
 
   const effectiveMapTilt = agentTilt != null ? agentTilt : map3DEnabled ? 45 : 0
   const map3DActive = effectiveMapTilt > 0
@@ -1062,6 +1067,7 @@ export default function Home() {
           onAction={handleAgentAction}
           contextSubtitle={intelligenceContextSubtitle}
           onSizeChange={setAgentTerminalSize}
+          onOpenHeightPxChange={setAgentTerminalOpenHeightPx}
         />
 
         {/* Floating stats bubble */}
@@ -1071,6 +1077,7 @@ export default function Home() {
               'absolute left-1/2 z-30 flex max-w-[calc(100vw-120px)] -translate-x-1/2 items-center gap-0 overflow-hidden rounded-2xl border border-border/80 bg-background/90 shadow-2xl shadow-black/40 backdrop-blur-xl',
               statsBubbleBottomClass
             )}
+            style={statsBubbleBottomStyle}
           >
             <div className="scrollbar-none flex min-w-0 flex-1 items-center overflow-x-auto px-1">
               {result ? (
@@ -1243,26 +1250,6 @@ export default function Home() {
                 cycleAnalysis={cycleData}
               />
             </PanelSection>
-            <PanelSection title="Quick Summary">
-              <ExecutiveMemo
-                marketLabel={aggregateData.label}
-                cycle={cycleData}
-                data={{
-                  avg_zori: aggregateData.zillow.avg_zori,
-                  avg_zhvi: aggregateData.zillow.avg_zhvi,
-                  zori_growth: aggregateData.zillow.zori_growth_12m,
-                  zhvi_growth: aggregateData.zillow.zhvi_growth_12m,
-                  vacancy_rate: aggregateData.housing.vacancy_rate,
-                  median_income: aggregateData.housing.median_income,
-                  doz_pending: aggregateData.metro_velocity?.doz_pending_latest,
-                  price_cut_pct: aggregateData.metro_velocity?.price_cut_pct_latest,
-                  inventory: aggregateData.metro_velocity?.inventory_latest,
-                  permit_units: aggregateData.permits.total_units,
-                  population: aggregateData.total_population,
-                  search_interest: trends?.error ? null : trends?.latest_score,
-                }}
-              />
-            </PanelSection>
               </>
             )}
 
@@ -1423,27 +1410,6 @@ export default function Home() {
                 cityZips={null}
                 trends={trendsShapeForReport(trends)}
                 cycleAnalysis={cycleData}
-              />
-            </PanelSection>
-            <PanelSection title="Quick Summary">
-              <ExecutiveMemo
-                marketLabel={result.zillow?.city ?? result.zip}
-                cycle={cycleData}
-                data={{
-                  avg_zori: result.zillow?.zori_latest,
-                  avg_zhvi: result.zillow?.zhvi_latest,
-                  zori_growth: result.zillow?.zori_growth_12m,
-                  zhvi_growth: result.zillow?.zhvi_growth_12m,
-                  vacancy_rate: result.data.find((r) => r.metric_name === 'Vacancy_Rate')?.metric_value,
-                  median_income: result.data.find((r) => r.metric_name === 'Median_Household_Income')?.metric_value,
-                  doz_pending: result.metro_velocity?.doz_pending_latest,
-                  price_cut_pct: result.metro_velocity?.price_cut_pct_latest,
-                  inventory: result.metro_velocity?.inventory_latest,
-                  permit_units: result.data.find((r) => r.metric_name === 'Permit_Units')?.metric_value,
-                  population: result.data.find((r) => r.metric_name === 'Total_Population')?.metric_value,
-                  transit_stops: transit?.stop_count,
-                  search_interest: trends?.error ? null : trends?.latest_score,
-                }}
               />
             </PanelSection>
               </>

@@ -23,7 +23,7 @@ export type DocumentationOutlineNode = {
 export const Documentation_ONBOARDING_SEARCH_TEXT = `
 FOR NEW USERS new users onboarding orientation quick command center product features metrics UI
 Load a market sidebar ZIP city state Austin borough NYC Enter map data panel Analysis Data tabs
-cycle momentum PDF brief memo tables trends exports Layers map layer control top-left choropleth
+cycle momentum PDF brief tables trends exports Layers map layer control top-left choropleth
 transit tracts permits CSV Upload pins Intelligence terminal bottom agent natural language shortcuts
 CSV Upload sidebar upload geocoded spreadsheets Client layer map pins Saved areas comparison Market Report PDF exported
 `.trim()
@@ -48,10 +48,10 @@ geography (for example borough-level behavior in NYC).`,
   {
     id: 'feature-data-panel',
     title: 'Right data panel',
-    body: `Analysis: Market cycle explanation, momentum vs peers, downloadable Market Report PDF, and an AI-generated Quick Summary.
+    body: `Analysis: Market cycle explanation, momentum vs peers, and downloadable Market Report PDF.
 Data: Pricing, demographics, metro velocity, economic indicators, Google Trends, transit counts,
 Saved list actions, and the full metrics table where exposed.`,
-    searchAliases: 'Analysis Data tabs classifier listings inventory velocity Gemini Quick Summary Saved shortlist',
+    searchAliases: 'Analysis Data tabs classifier listings inventory velocity Saved shortlist',
   },
   {
     id: 'feature-terminal',
