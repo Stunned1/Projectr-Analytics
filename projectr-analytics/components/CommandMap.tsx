@@ -1,5 +1,6 @@
 'use client'
 
+import type { MutableRefObject } from 'react'
 import { memo, useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { APIProvider, Map, useMap } from '@vis.gl/react-google-maps'
 import { GoogleMapsOverlay } from '@deck.gl/google-maps'
@@ -469,6 +470,28 @@ function applyCameraFrame(
   }
 }
 
+/** Latest map camera for `/save` map bookmarks (updated on `idle`). */
+export type MapViewportSnapshot = { lat: number; lng: number; zoom: number }
+
+function MapViewportSync({ viewportRef }: { viewportRef: MutableRefObject<MapViewportSnapshot | null> }) {
+  const map = useMap()
+  useEffect(() => {
+    if (!map) return
+    const sync = () => {
+      const c = map.getCenter()
+      const z = map.getZoom()
+      if (!c || z == null) return
+      viewportRef.current = { lat: c.lat(), lng: c.lng(), zoom: z }
+    }
+    sync()
+    const idleListener = map.addListener('idle', sync)
+    return () => {
+      google.maps.event.removeListener(idleListener)
+    }
+  }, [map, viewportRef])
+  return null
+}
+
 function FlyToController({ target }: { target: { lat: number; lng: number } | null | undefined }) {
   const map = useMap()
   const rafRef = useRef<number | null>(null)
@@ -576,6 +599,8 @@ interface CommandMapProps {
   /** 45° perspective toggle (stacked with layer control, top-left). */
   map3DActive: boolean
   onToggleMap3D: () => void
+  /** When set, updated on map idle for `/save` without a loaded market. */
+  mapViewportRef?: MutableRefObject<MapViewportSnapshot | null>
 }
 
 function CommandMap({
@@ -598,6 +623,7 @@ function CommandMap({
   mapHeading = 0,
   map3DActive,
   onToggleMap3D,
+  mapViewportRef,
 }: CommandMapProps) {
   const perfDebug = process.env.NEXT_PUBLIC_PERF_DEBUG === '1'
 
@@ -1579,6 +1605,7 @@ function CommandMap({
           <TiltController tilt={mapTilt} heading={mapHeading} />
           <ZoomTracker onZoomChange={handleZoomChange} />
           <FlyToController target={agentFlyTo} />
+          {mapViewportRef ? <MapViewportSync viewportRef={mapViewportRef} /> : null}
           <DeckGlOverlay layers={deckLayers} />
         </Map>
       </APIProvider>

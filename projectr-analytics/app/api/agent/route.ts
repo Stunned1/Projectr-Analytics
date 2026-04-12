@@ -48,7 +48,7 @@ AVAILABLE ACTIONS (single):
 - Rotate map (bearing, clockwise from north): {"type":"set_heading","heading":0-359} — client normalizes to [0,360)
 - Run spatial analysis (NYC only): {"type":"run_analysis","borough":"<manhattan|brooklyn|queens|bronx|staten island>","top_n":5}
 - Show analysis results: {"type":"show_sites","sites":[...]} - do not emit in steps; the client adds this after run_analysis
-- Generate memo: {"type":"generate_memo"}
+- Open analysis panel (cycle, momentum, market PDF): {"type":"generate_memo"}
 - Open sidebar Data tab (metrics, client CSV table): {"type":"focus_data_panel"}
 - No action: {"type":"none"}
 

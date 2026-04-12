@@ -1,8 +1,7 @@
 'use client'
 
-import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
+import { useState, useCallback, useMemo, useEffect, useRef, type CSSProperties } from 'react'
 import dynamic from 'next/dynamic'
-import ExecutiveMemo from '@/components/ExecutiveMemo'
 import AgenticNormalizer from '@/components/AgenticNormalizer'
 import MarketReportExport from '@/components/MarketReportExport'
 import AgentTerminal, { type AgentTerminalSize } from '@/components/AgentTerminal'
@@ -26,7 +25,7 @@ import { CycleExplainCard } from '@/components/CycleExplainCard'
 import type { MetricKey } from '@/lib/metric-definitions'
 import { metricKeyFromDataRow, sparklineMetricKey } from '@/lib/metric-definitions'
 import { cn } from '@/lib/utils'
-import type { LayerState } from '@/components/CommandMap'
+import type { LayerState, MapViewportSnapshot } from '@/components/CommandMap'
 import {
   denormalizeAgentLayersForContext,
   normalizeAgentLayerKey,
@@ -36,6 +35,7 @@ import {
 import { ALL_LAYERS_OFF } from '@/lib/slash-layer-keys'
 import { normalizeHeadingDegrees } from '@/lib/slash-commands'
 import { normalizeUsStateToAbbr } from '@/lib/us-state-abbr'
+import { MAP_VIEW_SAVE_ZIP } from '@/lib/saved-viewport'
 
 const CommandMap = dynamic(() => import('@/components/CommandMap'), { ssr: false })
 
@@ -516,6 +516,7 @@ export default function Home() {
     [clientUploadSession]
   )
   const [agentTerminalSize, setAgentTerminalSize] = useState<AgentTerminalSize>('collapsed')
+  const [agentTerminalOpenHeightPx, setAgentTerminalOpenHeightPx] = useState<number | null>(null)
   const [agentLayerOverrides, setAgentLayerOverrides] = useState<Record<string, boolean>>({})
   const [agentMetric, setAgentMetric] = useState<'zori' | 'zhvi' | null>(null)
   const [agentTilt, setAgentTilt] = useState<number | null>(null)
@@ -535,6 +536,7 @@ export default function Home() {
   const layerStateResyncIdRef = useRef(0)
   const [layerStateResync, setLayerStateResync] = useState<{ id: number; state: LayerState } | null>(null)
   const [marketPanelTab, setMarketPanelTab] = useState<'analysis' | 'data'>('analysis')
+  const mapViewportRef = useRef<MapViewportSnapshot | null>(null)
 
   const handleNormalizerIngested = useCallback((payload: NormalizerIngestPayload) => {
     const pts = payload.mergedMarkerPoints
@@ -636,6 +638,122 @@ export default function Home() {
         break
     }
   }
+
+  const handleSlashSave = useCallback(
+    async (customLabel: string | null) => {
+      const labelArg = customLabel?.trim() || null
+      const addSite = useSitesStore.getState().addSite
+      const getErr = () => useSitesStore.getState().syncError ?? 'Could not save.'
+
+      if (result?.geo && /^\d{5}$/.test(result.zip)) {
+        if (useSitesStore.getState().hasZip(result.zip)) {
+          return { ok: false, message: 'This ZIP is already in **Saved**.' }
+        }
+        const zipCode = result.zip
+        const geo = result.geo
+        let momentum: number | null = null
+        try {
+          const res = await fetch('/api/momentum', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ zips: [zipCode] }),
+          })
+          if (res.ok) {
+            const j = (await res.json()) as { scores?: { zip: string; score: number }[] }
+            momentum = j.scores?.find((x) => x.zip === zipCode)?.score ?? null
+          }
+        } catch {
+          /* non-fatal */
+        }
+        const human = labelArg ?? defaultHumanSiteLabel(result)
+        const ok = await addSite({
+          label: human,
+          zip: zipCode,
+          lat: geo.lat,
+          lng: geo.lng,
+          marketLabel: human,
+          cyclePosition: cycleData?.cyclePosition,
+          cycleStage: cycleData?.cycleStage,
+          momentumScore: momentum,
+        })
+        return ok
+          ? { ok: true, message: `Saved **${human}** (${zipCode}) to Saved.` }
+          : { ok: false, message: getErr() }
+      }
+
+      if (aggregateData && cityZips && cityZips.length > 0) {
+        const q = searchInput.trim() || aggregateData.label.trim()
+        if (!q) {
+          return {
+            ok: false,
+            message: 'Could not determine the area search text — try searching again, then `/save`.',
+          }
+        }
+        if (useSitesStore.getState().hasAggregateSaved(q)) {
+          return { ok: false, message: 'This area is already in **Saved**.' }
+        }
+        const pin = await resolveAggregateAnchorGeo(cityZips)
+        if (!pin) {
+          return { ok: false, message: 'Could not place a pin for this area (no coordinates).' }
+        }
+        let momentum: number | null = null
+        try {
+          const zipsList = cityZips.map((z) => z.zip).filter((z) => /^\d{5}$/.test(z))
+          if (zipsList.length) {
+            const res = await fetch('/api/momentum', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ zips: zipsList.slice(0, 40) }),
+            })
+            if (res.ok) {
+              const j = (await res.json()) as { scores?: { zip: string; score: number }[] }
+              momentum = j.scores?.find((x) => x.zip === pin.zip)?.score ?? null
+            }
+          }
+        } catch {
+          /* optional */
+        }
+        const human = labelArg ?? (aggregateData.label.trim() || q)
+        const ok = await addSite({
+          label: human,
+          zip: pin.zip,
+          lat: pin.lat,
+          lng: pin.lng,
+          marketLabel: human,
+          isAggregate: true,
+          savedSearch: q,
+          cyclePosition: cycleData?.cyclePosition,
+          cycleStage: cycleData?.cycleStage,
+          momentumScore: momentum,
+        })
+        return ok
+          ? { ok: true, message: `Saved area **${human}** to Saved.` }
+          : { ok: false, message: getErr() }
+      }
+
+      const vp = mapViewportRef.current
+      if (vp) {
+        const defaultLabel = `Map view · ${vp.lat.toFixed(4)}, ${vp.lng.toFixed(4)}`
+        const human = labelArg ?? defaultLabel
+        const ok = await addSite({
+          label: human,
+          zip: MAP_VIEW_SAVE_ZIP,
+          lat: vp.lat,
+          lng: vp.lng,
+          marketLabel: human,
+        })
+        return ok
+          ? { ok: true, message: `Saved map position **${human}** to Saved.` }
+          : { ok: false, message: getErr() }
+      }
+
+      return {
+        ok: false,
+        message: 'Nothing to save — load a ZIP or city search, or wait for the map to finish loading.',
+      }
+    },
+    [result, aggregateData, cityZips, searchInput, cycleData]
+  )
 
   const mapContext = {
     label: result ? (result.zillow?.city ?? result.zip) : aggregateData?.label,
@@ -923,6 +1041,10 @@ export default function Home() {
   useEffect(() => {
     const nav = takePendingNav()
     if (!nav) return
+    if (nav.type === 'coords') {
+      setAgentFlyTo({ lat: nav.lat, lng: nav.lng })
+      return
+    }
     if (nav.type === 'zip') {
       setSearchInput(nav.zip)
       void loadZipMarket(nav.zip)
@@ -961,9 +1083,14 @@ export default function Home() {
   const statsBubbleBottomClass = useMemo(() => {
     if (!hasStatsBar) return 'bottom-5'
     if (agentTerminalSize === 'collapsed') return 'bottom-10'
-    if (agentTerminalSize === 'compact') return 'bottom-[13.5rem]'
-    return 'bottom-[calc(min(58vh,560px)+1.5rem)]'
+    return ''
   }, [hasStatsBar, agentTerminalSize])
+
+  const statsBubbleBottomStyle = useMemo((): CSSProperties | undefined => {
+    if (!hasStatsBar || agentTerminalSize === 'collapsed') return undefined
+    const h = agentTerminalOpenHeightPx ?? 200
+    return { bottom: `calc(${h}px + 1.5rem)` }
+  }, [hasStatsBar, agentTerminalSize, agentTerminalOpenHeightPx])
 
   const effectiveMapTilt = agentTilt != null ? agentTilt : map3DEnabled ? 45 : 0
   const map3DActive = effectiveMapTilt > 0
@@ -1015,16 +1142,6 @@ export default function Home() {
         }
         panelOpen={panelOpen}
         onTogglePanel={() => setPanelOpen(!panelOpen)}
-        onShortlistOpenSite={(site: Site) => {
-          if (site.isAggregate && site.savedSearch?.trim()) {
-            const q = site.savedSearch.trim()
-            setSearchInput(q)
-            void runAggregateSearch(q)
-            return
-          }
-          setSearchInput(site.zip)
-          void loadZipMarket(site.zip)
-        }}
       />
 
       {/* ── Map ── - inset-0 fill gives CommandMap a definite box (flex % height + Google Map can otherwise leave overlays misaligned) */}
@@ -1054,6 +1171,7 @@ export default function Home() {
           layerStateResync={layerStateResync}
           map3DActive={map3DActive}
           onToggleMap3D={handleMap3DToggle}
+          mapViewportRef={mapViewportRef}
         />
         </div>
 
@@ -1062,6 +1180,8 @@ export default function Home() {
           onAction={handleAgentAction}
           contextSubtitle={intelligenceContextSubtitle}
           onSizeChange={setAgentTerminalSize}
+          onOpenHeightPxChange={setAgentTerminalOpenHeightPx}
+          onSlashSave={handleSlashSave}
         />
 
         {/* Floating stats bubble */}
@@ -1071,6 +1191,7 @@ export default function Home() {
               'absolute left-1/2 z-30 flex max-w-[calc(100vw-120px)] -translate-x-1/2 items-center gap-0 overflow-hidden rounded-2xl border border-border/80 bg-background/90 shadow-2xl shadow-black/40 backdrop-blur-xl',
               statsBubbleBottomClass
             )}
+            style={statsBubbleBottomStyle}
           >
             <div className="scrollbar-none flex min-w-0 flex-1 items-center overflow-x-auto px-1">
               {result ? (
@@ -1243,26 +1364,6 @@ export default function Home() {
                 cycleAnalysis={cycleData}
               />
             </PanelSection>
-            <PanelSection title="Quick Summary">
-              <ExecutiveMemo
-                marketLabel={aggregateData.label}
-                cycle={cycleData}
-                data={{
-                  avg_zori: aggregateData.zillow.avg_zori,
-                  avg_zhvi: aggregateData.zillow.avg_zhvi,
-                  zori_growth: aggregateData.zillow.zori_growth_12m,
-                  zhvi_growth: aggregateData.zillow.zhvi_growth_12m,
-                  vacancy_rate: aggregateData.housing.vacancy_rate,
-                  median_income: aggregateData.housing.median_income,
-                  doz_pending: aggregateData.metro_velocity?.doz_pending_latest,
-                  price_cut_pct: aggregateData.metro_velocity?.price_cut_pct_latest,
-                  inventory: aggregateData.metro_velocity?.inventory_latest,
-                  permit_units: aggregateData.permits.total_units,
-                  population: aggregateData.total_population,
-                  search_interest: trends?.error ? null : trends?.latest_score,
-                }}
-              />
-            </PanelSection>
               </>
             )}
 
@@ -1423,27 +1524,6 @@ export default function Home() {
                 cityZips={null}
                 trends={trendsShapeForReport(trends)}
                 cycleAnalysis={cycleData}
-              />
-            </PanelSection>
-            <PanelSection title="Quick Summary">
-              <ExecutiveMemo
-                marketLabel={result.zillow?.city ?? result.zip}
-                cycle={cycleData}
-                data={{
-                  avg_zori: result.zillow?.zori_latest,
-                  avg_zhvi: result.zillow?.zhvi_latest,
-                  zori_growth: result.zillow?.zori_growth_12m,
-                  zhvi_growth: result.zillow?.zhvi_growth_12m,
-                  vacancy_rate: result.data.find((r) => r.metric_name === 'Vacancy_Rate')?.metric_value,
-                  median_income: result.data.find((r) => r.metric_name === 'Median_Household_Income')?.metric_value,
-                  doz_pending: result.metro_velocity?.doz_pending_latest,
-                  price_cut_pct: result.metro_velocity?.price_cut_pct_latest,
-                  inventory: result.metro_velocity?.inventory_latest,
-                  permit_units: result.data.find((r) => r.metric_name === 'Permit_Units')?.metric_value,
-                  population: result.data.find((r) => r.metric_name === 'Total_Population')?.metric_value,
-                  transit_stops: transit?.stop_count,
-                  search_interest: trends?.error ? null : trends?.latest_score,
-                }}
               />
             </PanelSection>
               </>

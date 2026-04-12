@@ -13,6 +13,7 @@ import {
   layersSlashUsageLines,
   parseClearSlashCommand,
   parseGoSlashCommand,
+  parseSaveSlashCommand,
   parseLayersSlashCommand,
   RESTART_CONFIRM_PROMPT_MESSAGE,
   parseRestartSlashCommand,
@@ -28,7 +29,7 @@ const ACTION_LOG: Record<string, string> = {
   toggle_layers: 'Layers updated',
   set_metric: 'Fill metric changed',
   search: 'Navigating to market',
-  generate_memo: 'Opening data panel (memo)',
+  generate_memo: 'Opening Analysis tab',
   focus_data_panel: 'Opening Data tab',
   set_tilt: 'Map tilt updated',
   set_heading: 'Map heading updated',
@@ -114,6 +115,8 @@ export function useAgentIntelligence(
     /** When true, new agent output triggers onNotifyWhileClosed */
     shouldNotifyWhileClosed?: () => boolean
     onNotifyWhileClosed?: () => void
+    /** `/save` — persist ZIP, aggregate, or map camera to Saved (map page). */
+    onSlashSave?: (customLabel: string | null) => Promise<{ ok: boolean; message: string }>
   }
 ) {
   const [messages, setMessages] = useState<AgentMessage[]>([DEFAULT_GREETING])
@@ -132,10 +135,12 @@ export function useAgentIntelligence(
   const shouldNotifyRef = useRef(options?.shouldNotifyWhileClosed)
   const notifyCbRef = useRef(options?.onNotifyWhileClosed)
 
+  const onSlashSaveRef = useRef(options?.onSlashSave)
   useEffect(() => {
     shouldNotifyRef.current = options?.shouldNotifyWhileClosed
     notifyCbRef.current = options?.onNotifyWhileClosed
-  }, [options?.shouldNotifyWhileClosed, options?.onNotifyWhileClosed])
+    onSlashSaveRef.current = options?.onSlashSave
+  }, [options?.shouldNotifyWhileClosed, options?.onNotifyWhileClosed, options?.onSlashSave])
 
   useEffect(() => {
     const p = readPersistedSession()
@@ -480,6 +485,36 @@ export function useAgentIntelligence(
             action: { type: 'search', query: goCmd.query },
           },
         ])
+        return
+      }
+
+      const saveCmd = parseSaveSlashCommand(userPrompt)
+      if (saveCmd) {
+        setInput('')
+        const saveFn = onSlashSaveRef.current
+        if (!saveFn) {
+          setMessages((prev) => [
+            ...prev,
+            { role: 'user', text: userPrompt, ts: Date.now() },
+            { role: 'agent', text: '`/save` is only available on the map page.' },
+          ])
+          return
+        }
+        try {
+          const { ok, message } = await saveFn(saveCmd.customLabel)
+          setMessages((prev) => [
+            ...prev,
+            { role: 'user', text: userPrompt, ts: Date.now() },
+            { role: 'agent', text: message },
+          ])
+          if (!ok) return
+        } catch {
+          setMessages((prev) => [
+            ...prev,
+            { role: 'user', text: userPrompt, ts: Date.now() },
+            { role: 'agent', text: 'Save failed — try again.' },
+          ])
+        }
         return
       }
 

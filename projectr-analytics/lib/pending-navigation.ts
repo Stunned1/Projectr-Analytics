@@ -5,6 +5,7 @@ export const PENDING_NAV_KEY = 'scout_pending_nav'
 export type PendingNav =
   | { type: 'zip'; zip: string }
   | { type: 'aggregate'; query: string }
+  | { type: 'coords'; lat: number; lng: number }
 
 export function stashPendingNav(nav: PendingNav) {
   if (typeof window === 'undefined') return
@@ -23,6 +24,15 @@ export function takePendingNav(): PendingNav | null {
     }
     if (o?.type === 'aggregate' && typeof o.query === 'string' && o.query.trim()) {
       return { type: 'aggregate', query: o.query.trim() }
+    }
+    if (
+      o?.type === 'coords' &&
+      typeof o.lat === 'number' &&
+      typeof o.lng === 'number' &&
+      Number.isFinite(o.lat) &&
+      Number.isFinite(o.lng)
+    ) {
+      return { type: 'coords', lat: o.lat, lng: o.lng }
     }
   } catch {
     /* ignore */

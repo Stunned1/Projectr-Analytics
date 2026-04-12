@@ -23,9 +23,9 @@ export type DocumentationOutlineNode = {
 export const Documentation_ONBOARDING_SEARCH_TEXT = `
 FOR NEW USERS new users onboarding orientation quick command center product features metrics UI
 Load a market sidebar ZIP city state Austin borough NYC Enter map data panel Analysis Data tabs
-cycle momentum PDF brief memo tables trends exports Layers map layer control top-left choropleth
-transit tracts permits CSV Upload pins Intelligence terminal bottom agent natural language shortcuts
-CSV Upload sidebar upload geocoded spreadsheets Client layer map pins Saved areas comparison Market Report PDF exported
+cycle momentum PDF brief tables trends exports Layers map layer control top-left choropleth
+transit tracts permits Intelligence terminal bottom agent natural language shortcuts
+Saved tab sidebar saved sites comparison Market Report PDF exported
 `.trim()
 
 export const Documentation_FEATURES: DocumentationFeatureBlock[] = [
@@ -41,17 +41,17 @@ value (ZHVI) when enabled in the layer panel.`,
     id: 'feature-layer-panel',
     title: 'Layer panel',
     body: `Toggle vector layers: transit (routes and stops), Census tracts, block groups, NYC parcels, NYC building
-permits, flood zones, amenity heatmap, and client-uploaded CSV pins. Layer availability can depend on
+permits, flood zones, amenity heatmap, and optional client CSV pins when a session upload exists. Layer availability can depend on
 geography (for example borough-level behavior in NYC).`,
     searchAliases: 'DOB FEMA NFHL OSM GTFS PLUTO routes stops heatmap',
   },
   {
     id: 'feature-data-panel',
     title: 'Right data panel',
-    body: `Analysis: Market cycle explanation, momentum vs peers, downloadable Market Report PDF, and an AI-generated Quick Summary.
+    body: `Analysis: Market cycle explanation, momentum vs peers, and downloadable Market Report PDF.
 Data: Pricing, demographics, metro velocity, economic indicators, Google Trends, transit counts,
-Saved list actions, and the full metrics table where exposed.`,
-    searchAliases: 'Analysis Data tabs classifier listings inventory velocity Gemini Quick Summary Saved shortlist',
+Save Site and area actions, and the full metrics table where exposed. Open the sidebar Saved tab for the full saved list.`,
+    searchAliases: 'Analysis Data tabs classifier listings inventory velocity Saved shortlist',
   },
   {
     id: 'feature-terminal',
@@ -62,16 +62,17 @@ agent-driven actions. Session can persist across reloads in the browser.`,
   },
   {
     id: 'feature-client-csv',
-    title: 'CSV Upload',
-    body: `Dedicated upload page (sidebar) parses spreadsheets with Gemini triage; rows with latitude and longitude can
-appear as map pins when the Client layer is on. Pins can persist for your session when returning to the map.`,
-    searchAliases: 'normalize upload spreadsheet lat lng coordinates pins',
+    title: 'Client CSV (deferred)',
+    body: `Client CSV upload and normalize are still supported at /upload for this session, but the sidebar entry is
+removed while the workflow is relocated. See README Deferred.`,
+    searchAliases: 'normalize upload spreadsheet lat lng coordinates pins client upload',
   },
   {
     id: 'feature-shortlist-pdf',
     title: 'Saved & PDF',
-    body: `Use Save Site for a ZIP or Save for a whole city/borough area to add them to Saved, with optional notes and comparison checkboxes. When two
-or more sites are selected for comparison, the Market Report PDF can include a comparison layout.`,
+    body: `Use Save Site for a ZIP or Save for a whole city/borough area from the data panel; open the sidebar Saved tab
+to see every row, edit labels and notes, and use comparison checkboxes. When two or more sites are selected, the
+Market Report PDF can include a comparison layout.`,
     searchAliases: 'saved sites shortlist comparison checkboxes notes aggregate borough',
   },
   {
