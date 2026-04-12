@@ -1,7 +1,5 @@
 # Scout
 
-Try scout here: https://scout-taupe-eta.vercel.app/
-
 A geospatial data engine and automated reporting platform for real estate analytics. Scout automates data aggregation for real estate analysts. By unifying public market signals with proprietary client site lists, it provides instant spatial context and data-driven market briefs.
 
 ## Core Features
