@@ -31,7 +31,6 @@ import {
 import type { MetricKey } from '@/lib/metric-definitions'
 import { METRIC_DEFINITIONS } from '@/lib/metric-definitions'
 import { stashPendingNav } from '@/lib/pending-navigation'
-import type { Site } from '@/lib/sites-store'
 import { cn } from '@/lib/utils'
 
 function flattenOutlineIds(nodes: DocumentationOutlineNode[]): string[] {
@@ -209,15 +208,6 @@ export default function DocumentationPage() {
   const outline = useMemo(() => getDocumentationDocOutline(), [])
   const outlineIds = useMemo(() => flattenOutlineIds(outline), [outline])
 
-  function goMapWithPending(site: Site) {
-    if (site.isAggregate && site.savedSearch?.trim()) {
-      stashPendingNav({ type: 'aggregate', query: site.savedSearch.trim() })
-    } else if (/^\d{5}$/.test(site.zip)) {
-      stashPendingNav({ type: 'zip', zip: site.zip })
-    }
-    router.push('/')
-  }
-
   async function handleSidebarAnalyze(e: React.FormEvent) {
     e.preventDefault()
     const input = sidebarSearch.trim()
@@ -306,7 +296,6 @@ export default function DocumentationPage() {
         activeMarket={null}
         panelOpen={false}
         onTogglePanel={() => router.push('/')}
-        onShortlistOpenSite={goMapWithPending}
       />
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -398,7 +387,7 @@ export default function DocumentationPage() {
                             <li>
                               <span className="font-semibold text-primary">Layers: </span>
                               Use the map&apos;s layer control (top-left) for choropleth, transit, tracts, permits, and
-                              uploaded CSV pins.
+                              other overlays (availability depends on market).
                             </li>
                             <li>
                               <span className="font-semibold text-primary">Intelligence terminal: </span>
@@ -406,15 +395,10 @@ export default function DocumentationPage() {
                               shortcuts.
                             </li>
                             <li>
-                              <span className="font-semibold text-primary">Upload CSV: </span>
-                              Open <strong className="font-medium text-foreground">Upload CSV</strong> from the sidebar
-                              to upload geocoded spreadsheets; turn on the{' '}
-                              <em className="text-foreground/95">Client</em> layer on the map to see pins.
-                            </li>
-                            <li>
                               <span className="font-semibold text-primary">Saved &amp; PDF: </span>
-                              Save ZIPs or areas from <strong className="font-medium text-foreground">Saved</strong> in
-                              the sidebar; check two or more for comparison in the Market Report PDF when exported.
+                              Open the <strong className="font-medium text-foreground">Saved</strong> tab in the sidebar
+                              to manage ZIPs and areas you saved from the data panel; check two or more for comparison
+                              in the Market Report PDF when exported.
                             </li>
                           </ol>
                         </div>

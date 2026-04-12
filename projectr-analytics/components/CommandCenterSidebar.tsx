@@ -4,11 +4,9 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState, type ReactNode } from 'react'
-import ShortlistPanel from '@/components/ShortlistPanel'
 import { Input } from '@/components/ui/input'
-import type { Site } from '@/lib/sites-store'
 import { cn } from '@/lib/utils'
-import { BookOpen } from 'lucide-react'
+import { BookOpen, Bookmark } from 'lucide-react'
 
 const SIDEBAR_EXPANDED_PX = 200
 const SIDEBAR_COLLAPSED_PX = 48
@@ -61,14 +59,6 @@ const MapIcon = () => (
   </svg>
 )
 
-const UploadIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-4 w-4">
-    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-    <polyline points="17 8 12 3 7 8" />
-    <line x1="12" y1="3" x2="12" y2="15" />
-  </svg>
-)
-
 const SearchIcon = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-3.5 w-3.5">
     <circle cx="11" cy="11" r="8" />
@@ -107,7 +97,6 @@ export type CommandCenterSidebarProps = {
   activeMarket: CommandCenterActiveMarket | null
   panelOpen: boolean
   onTogglePanel: () => void
-  onShortlistOpenSite: (site: Site) => void
   /** Optional content below active market subtitle (e.g. cycle stage on the map page). */
   activeMarketExtra?: ReactNode
 }
@@ -121,7 +110,6 @@ export default function CommandCenterSidebar({
   activeMarket,
   panelOpen,
   onTogglePanel,
-  onShortlistOpenSite,
   activeMarketExtra,
 }: CommandCenterSidebarProps) {
   const [collapsed, setCollapsed] = useState(false)
@@ -217,7 +205,7 @@ export default function CommandCenterSidebar({
         {!collapsed && (
           <div className="space-y-0.5 border-b border-sidebar-border px-2 py-2">
             <NavLink href="/" icon={<MapIcon />} label="Map" />
-            <NavLink href="/upload" icon={<UploadIcon />} label="Client CSV" />
+            <NavLink href="/saved" icon={<Bookmark className="h-4 w-4" strokeWidth={1.5} />} label="Saved" />
             <NavLink href="/guide" icon={<BookOpen className="h-4 w-4" strokeWidth={1.5} />} label="Guide" />
           </div>
         )}
@@ -226,7 +214,11 @@ export default function CommandCenterSidebar({
           {collapsed ? (
             <div className="flex flex-col gap-1">
               <NavLinkCollapsed href="/" icon={<MapIcon />} title="Map" />
-              <NavLinkCollapsed href="/upload" icon={<UploadIcon />} title="Client CSV" />
+              <NavLinkCollapsed
+                href="/saved"
+                icon={<Bookmark className="h-4 w-4" strokeWidth={1.5} />}
+                title="Saved"
+              />
               <NavLinkCollapsed
                 href="/guide"
                 icon={<BookOpen className="h-4 w-4" strokeWidth={1.5} />}
@@ -234,7 +226,7 @@ export default function CommandCenterSidebar({
               />
             </div>
           ) : (
-            <ShortlistPanel onOpenSite={onShortlistOpenSite} />
+            <div className="min-h-0 flex-1" aria-hidden />
           )}
         </nav>
 

@@ -27,6 +27,10 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
     summary: '`/go <zip | city | borough>` — same as sidebar search / agent navigate',
   },
   {
+    command: 'save',
+    summary: '`/save` or `/save <name>` — save loaded market or current map view to **Saved**',
+  },
+  {
     command: 'layers',
     summary: '`/layers:a,b` — turn **on** listed layers (comma-separated); see /help',
   },
@@ -61,6 +65,7 @@ export function getSlashPaletteState(input: string): { open: boolean; matches: S
     body === 'tilt' ||
     body === 'rotate' ||
     body === 'go' ||
+    body === 'save' ||
     body === 'layers' ||
     body.startsWith('layers:') ||
     body === 'restart'
@@ -150,6 +155,9 @@ export function buildSlashHelpMessage(): string {
     '',
     '/go (detail):',
     ...goSlashUsageLines().split('\n').map((ln) => `  ${ln}`),
+    '',
+    '/save (detail):',
+    ...saveSlashUsageLines().split('\n').map((ln) => `  ${ln}`),
     '',
     '/layers (detail):',
     ...layersSlashUsageLines().split('\n').map((ln) => `  ${ln}`),
@@ -351,6 +359,29 @@ export function parseGoSlashCommand(trimmed: string): ParsedGoSlash | null {
   return { kind: 'run', query }
 }
 
+const SAVE_LABEL_MAX = 120
+
+export type ParsedSaveSlash = { kind: 'run'; customLabel: string | null }
+
+export function saveSlashUsageLines(): string {
+  return [
+    'Usage: `/save` or `/save <name>` — adds a row to **Saved** (same Supabase flow as the data panel).',
+    '• **ZIP loaded** — saves that market (optional name replaces the default place label).',
+    '• **City / borough loaded** — saves the area (optional name; reopen uses your sidebar search text when set).',
+    '• **Otherwise** — saves the **current map center** as a bookmark (optional name; default label uses rounded coordinates).',
+    '• Requires Auth (enable **Anonymous** sign-ins in Supabase if you see a sign-in error).',
+  ].join('\n')
+}
+
+/** Non-`null` when the line is `/save` with optional label after whitespace. */
+export function parseSaveSlashCommand(trimmed: string): ParsedSaveSlash | null {
+  const m = trimmed.match(/^\/save(?:\s+(.*))?\s*$/i)
+  if (!m) return null
+  let rest = (m[1] ?? '').trim()
+  if (rest.length > SAVE_LABEL_MAX) rest = rest.slice(0, SAVE_LABEL_MAX)
+  return { kind: 'run', customLabel: rest.length > 0 ? rest : null }
+}
+
 export type ParsedLayersSlash =
   | { kind: 'run'; layers: Partial<Record<SlashLayerKey, true>> }
   | { kind: 'usage' }
@@ -424,6 +455,7 @@ export function isSlashCommandHandled(trimmed: string): boolean {
   if (/^\/help\b/i.test(trimmed)) return true
   if (parseClearSlashCommand(trimmed)) return true
   if (parseGoSlashCommand(trimmed)) return true
+  if (parseSaveSlashCommand(trimmed)) return true
   if (parseLayersSlashCommand(trimmed)) return true
   if (parseRestartSlashCommand(trimmed)) return true
   if (parseViewSlashCommand(trimmed)) return true

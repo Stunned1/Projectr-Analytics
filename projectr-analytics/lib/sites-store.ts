@@ -80,8 +80,6 @@ interface SitesStore {
   selectedForComparison: string[]
   loading: boolean
   syncError: string | null
-  shortlistPanelOpen: boolean
-  setShortlistPanelOpen: (open: boolean) => void
   loadSites: () => Promise<void>
   addSite: (site: Omit<Site, 'id' | 'createdAt'>) => Promise<boolean>
   removeSite: (id: string) => Promise<void>
@@ -100,9 +98,6 @@ export const useSitesStore = create<SitesStore>((set, get) => ({
   selectedForComparison: [],
   loading: false,
   syncError: null,
-  shortlistPanelOpen: true,
-
-  setShortlistPanelOpen: (open) => set({ shortlistPanelOpen: open }),
 
   hasZip: (zip) => get().sites.some((s) => !s.isAggregate && s.zip === zip),
 

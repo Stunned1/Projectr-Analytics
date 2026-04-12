@@ -9,7 +9,6 @@ import CommandCenterSidebar from '@/components/CommandCenterSidebar'
 import SitesBootstrap from '@/components/SitesBootstrap'
 import { useClientUploadMarkersStore } from '@/lib/client-upload-markers-store'
 import { stashPendingNav } from '@/lib/pending-navigation'
-import type { Site } from '@/lib/sites-store'
 import { cn } from '@/lib/utils'
 
 export default function ClientUploadPage() {
@@ -17,15 +16,6 @@ export default function ClientUploadPage() {
   const [searchInput, setSearchInput] = useState('')
   const markers = useClientUploadMarkersStore((s) => s.markers)
   const clearMarkers = useClientUploadMarkersStore((s) => s.clearMarkers)
-
-  function goMapWithPending(site: Site) {
-    if (site.isAggregate && site.savedSearch?.trim()) {
-      stashPendingNav({ type: 'aggregate', query: site.savedSearch.trim() })
-    } else if (/^\d{5}$/.test(site.zip)) {
-      stashPendingNav({ type: 'zip', zip: site.zip })
-    }
-    router.push('/')
-  }
 
   async function handleAnalyzeFromUpload(e: React.FormEvent) {
     e.preventDefault()
@@ -48,7 +38,6 @@ export default function ClientUploadPage() {
         activeMarket={null}
         panelOpen={false}
         onTogglePanel={() => router.push('/')}
-        onShortlistOpenSite={goMapWithPending}
       />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border bg-muted/20 px-5 py-3">

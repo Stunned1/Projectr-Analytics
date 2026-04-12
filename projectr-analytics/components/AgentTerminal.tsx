@@ -11,6 +11,7 @@ const STREAM_MS = 72
 const SUGGESTIONS = [
   '/help',
   '/go 11201',
+  '/save',
   '/layers:transit,rent',
   '/clear:terminal',
   '/clear:workspace',
@@ -31,6 +32,10 @@ const C_SEPARATOR = '#2d3342'
 const TERMINAL_DEFAULT_OPEN_PX = 200
 const TERMINAL_MIN_OPEN_PX = 120
 const TERMINAL_MAX_OPEN_PX = 560
+/** Matches `h-8` collapsed chrome — height we animate to before unmounting open content */
+const TERMINAL_COLLAPSED_HEIGHT_PX = 32
+/** Fallback if `transitionend` doesn’t fire; slightly longer than `duration-300` */
+const CLOSE_FALLBACK_MS = 400
 
 function maxOpenTerminalHeightPx(): number {
   if (typeof window === 'undefined') return TERMINAL_MAX_OPEN_PX
@@ -160,6 +165,8 @@ interface AgentTerminalProps {
   onOpenHeightPxChange?: (heightPx: number | null) => void
   /** Offset above bottom so floating stats pill stays visible */
   bottomOffsetClass?: string
+  /** Map page: `/save` persists ZIP, aggregate, or camera to Saved. */
+  onSlashSave?: (customLabel: string | null) => Promise<{ ok: boolean; message: string }>
 }
 
 export default function AgentTerminal({
@@ -170,9 +177,13 @@ export default function AgentTerminal({
   onSizeChange,
   onOpenHeightPxChange,
   bottomOffsetClass = 'bottom-0',
+  onSlashSave,
 }: AgentTerminalProps) {
   const [size, setSize] = useState<AgentTerminalSize>('collapsed')
   const [openHeightPx, setOpenHeightPx] = useState(TERMINAL_DEFAULT_OPEN_PX)
+  /** True while animating height down before switching to `collapsed` (click-outside / collapse controls). */
+  const [isClosing, setIsClosing] = useState(false)
+  const restoreHeightAfterCloseRef = useRef(TERMINAL_DEFAULT_OPEN_PX)
   const [isResizing, setIsResizing] = useState(false)
   const isResizingRef = useRef(false)
   const resizeStartYRef = useRef(0)
@@ -204,6 +215,7 @@ export default function AgentTerminal({
       setUnread(true)
       onUnreadChange?.(true)
     },
+    onSlashSave,
   })
 
   const slashPalette = useMemo(() => getSlashPaletteState(input), [input])
@@ -290,16 +302,37 @@ export default function AgentTerminal({
     outputRef.current?.scrollTo({ top: outputRef.current.scrollHeight, behavior: 'smooth' })
   }, [visibleTerminalMessages, size, loading])
 
+  const finishSmoothCollapse = useCallback(() => {
+    setSize('collapsed')
+    setIsClosing(false)
+    setOpenHeightPx(restoreHeightAfterCloseRef.current)
+  }, [])
+
+  const beginSmoothCollapse = useCallback(() => {
+    if (size === 'collapsed' || isClosing) return
+    restoreHeightAfterCloseRef.current = openHeightPx
+    setIsClosing(true)
+    requestAnimationFrame(() => {
+      setOpenHeightPx(TERMINAL_COLLAPSED_HEIGHT_PX)
+    })
+  }, [size, isClosing, openHeightPx])
+
   useEffect(() => {
-    if (size === 'collapsed' || size === 'expanded') return
+    if (!isClosing) return
+    const id = window.setTimeout(finishSmoothCollapse, CLOSE_FALLBACK_MS)
+    return () => window.clearTimeout(id)
+  }, [isClosing, finishSmoothCollapse])
+
+  useEffect(() => {
+    if (size === 'collapsed' || size === 'expanded' || isClosing) return
     const onDown = (e: MouseEvent) => {
       const el = rootRef.current
       if (!el || el.contains(e.target as Node)) return
-      setSize('collapsed')
+      beginSmoothCollapse()
     }
     document.addEventListener('mousedown', onDown, true)
     return () => document.removeEventListener('mousedown', onDown, true)
-  }, [size])
+  }, [size, isClosing, beginSmoothCollapse])
 
   const endResize = useCallback(() => {
     isResizingRef.current = false
@@ -383,15 +416,27 @@ export default function AgentTerminal({
 
   const waitingForModel = loading && !visibleTerminalMessages.some((m) => m.isAnalyzing)
 
+  const onRootTransitionEnd = useCallback(
+    (e: React.TransitionEvent<HTMLDivElement>) => {
+      if (!isClosing || e.propertyName !== 'height') return
+      if (e.target !== e.currentTarget) return
+      finishSmoothCollapse()
+    },
+    [isClosing, finishSmoothCollapse]
+  )
+
   return (
     <div
       ref={rootRef}
       style={size === 'collapsed' ? undefined : { height: openHeightPx }}
+      onTransitionEnd={onRootTransitionEnd}
       className={cn(
         'pointer-events-auto absolute left-0 right-0 z-[38] flex flex-col border-t border-zinc-700/90 bg-[#0c0c0e] font-[family-name:var(--font-dm-mono)] shadow-[0_-8px_32px_rgba(0,0,0,0.45)]',
         bottomOffsetClass,
-        size === 'collapsed' ? 'h-8' : 'min-h-0',
-        !isResizing && size !== 'collapsed' && 'transition-[height] duration-200 ease-out'
+        size === 'collapsed' ? 'h-8' : 'min-h-0 overflow-hidden',
+        !isResizing &&
+          size !== 'collapsed' &&
+          (isClosing ? 'transition-[height] duration-300 ease-out' : 'transition-[height] duration-200 ease-out')
       )}
     >
       {/* Inner `relative` only — never put `relative` on the root or tailwind-merge drops `absolute` and the bar jumps to the top of the map */}
@@ -414,7 +459,7 @@ export default function AgentTerminal({
         <div className="flex h-8 shrink-0 items-center gap-2 border-b border-zinc-800 px-2 pr-1">
         <button
           type="button"
-          onClick={() => setSize((s) => (s === 'collapsed' ? 'compact' : 'collapsed'))}
+          onClick={() => (size === 'collapsed' ? setSize('compact') : beginSmoothCollapse())}
           className="flex min-w-0 flex-1 items-center gap-2 text-left"
           title={size === 'collapsed' ? 'Expand terminal (or press /)' : 'Collapse terminal'}
         >
@@ -463,7 +508,7 @@ export default function AgentTerminal({
         )}
         <button
           type="button"
-          onClick={() => setSize((s) => (s === 'collapsed' ? 'compact' : 'collapsed'))}
+          onClick={() => (size === 'collapsed' ? setSize('compact') : beginSmoothCollapse())}
           className="shrink-0 rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
           aria-label={size === 'collapsed' ? 'Expand' : 'Collapse'}
         >

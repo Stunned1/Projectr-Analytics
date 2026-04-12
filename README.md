@@ -276,6 +276,9 @@ _4.12.2026_
 - **Intelligence terminal** — pressing **`/`** on the map page (when focus is not in another text field) expands the docked terminal if collapsed, focuses the prompt, and inserts **`/`** so slash commands start immediately; ignored while the terminal input is focused so normal typing is unchanged.
 - Removed the right-panel **Quick Summary** block (Gemini executive memo UI); **`POST /api/memo`** remains for reuse; agent action **`generate_memo`** still opens the **Analysis** tab.
 - **Intelligence terminal** — drag the **top edge** of the dock (full-width hit zone, no grip control) to resize open height (clamped ~120px–min(560px, 85vh)); maximize/restore still snap to ~58vh (capped at 560px) vs default 200px; floating stats bubble offset follows live height via `onOpenHeightPxChange`.
+- **Intelligence terminal** — click-outside / header collapse use a **height transition** (`duration-300`) to the collapsed strip before unmounting open content (saved height restored for the next expand).
+- **Sidebar** — **Saved** is a primary nav tab (`/saved`) with full **`ShortlistPanel`** list; the collapsible Saved block and **`shortlistPanelOpen`** store field were removed; **Client CSV** was removed from the nav (workflow deferred — see **Deferred**); **`/upload`** still works when opened directly.
+- **`/save`** — intelligence terminal slash command with optional label; saves the loaded ZIP, city/borough aggregate, or current map center to **Saved** (`MAP_VIEW_SAVE_ZIP` in `lib/saved-viewport.ts`, camera sync in `CommandMap`); **`/saved`** → map uses **`pending-navigation`** **coords** to fly back to that bookmark.
 
 ## Known Bugs
 
@@ -337,6 +340,8 @@ npm run ingest:zillow
 ```
 
 ## Deferred
+
+- **Client CSV in the command-center sidebar** — The **Client CSV** nav item was removed; `/upload` and the normalize / Client layer pipeline remain for now while the upload workflow is redesigned for another surface (IA TBD). README **Client CSV & AI session** still describes session keys and behavior.
 
 - **Multi-market permit comparison** — Permit visualization is currently NYC-only (Socrata DOB feed). Expanding to other cities would require per-jurisdiction ArcGIS FeatureServer URLs or a paid aggregator (Regrid, BuildZoom). Revisit if scoping to additional demo markets.
 
