@@ -57,7 +57,7 @@ TRANSITLAND_API_KEY=             # free at transit.land/sign-up (Developer API, 
 - **Shortlist / `saved_sites`** - enable **Anonymous sign-ins** under Supabase Authentication → Providers (or use email/OAuth); the app calls `signInAnonymously()` when there is no session so `saved_sites` inserts satisfy RLS.
 - **Turbopack + Tailwind** - if you get `Can't resolve 'tailwindcss'`, kill any stale `next dev` processes and restart fresh. Stale processes hold onto old module resolution state.
 - **Google Maps Map ID** - must be a Vector type map for deck.gl `interleaved: true` mode. Raster maps cause `fromLatLngToDivPixel` errors.
-- **Zillow CSVs are gitignored** - they exceed GitHub's 100MB file limit. Each teammate needs to download them locally and run `ingest:zillow` once.
+- **Zillow CSVs are gitignored** - ~they exceed GitHub's 100MB file limit. Each teammate needs to download them locally and run `ingest:zillow` once.~ You must download the CSV's locally and run ingest:zillow, OR just use a supabase with the zillow data already in.
 - **`ingest:zillow` runtime** - writing every ZIP × month into `zillow_zori_monthly` adds many upsert batches; expect a longer first run than snapshot-only ingests (on the order of tens of minutes depending on network and Supabase rate limits).
 
 ## Changelog
