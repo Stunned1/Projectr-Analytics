@@ -52,6 +52,31 @@ export interface AgentStep {
   action: AgentAction
 }
 
+/** Optional row for future server-side tool loops (args/results are previews only). */
+export type AgentTraceToolRow = {
+  name: string
+  argsPreview?: string
+  resultPreview?: string
+  ok?: boolean
+}
+
+/**
+ * Planning / eval / execution log from `/api/agent`, shown in the right sidebar via **Show thinking**.
+ */
+export interface AgentTrace {
+  summary: string
+  /**
+   * Long-form English reasoning (separate model pass before JSON actions).
+   * Shown like Cursor’s expanded thinking — headings and paragraphs, not just bullets.
+   */
+  thinking?: string | null
+  detail?: string | null
+  plan?: string[]
+  eval?: string | null
+  executionSteps?: { message: string; actionType: string }[]
+  toolCalls?: AgentTraceToolRow[]
+}
+
 export interface AgentMessage {
   role: 'user' | 'agent'
   text: string
@@ -61,6 +86,7 @@ export interface AgentMessage {
   insight?: string | null
   isAnalyzing?: boolean
   analysisSites?: AnalysisSite[]
+  trace?: AgentTrace
 }
 
 /** Last client CSV ingest — agent uses for “show my upload / pins / sidebar” intents. */

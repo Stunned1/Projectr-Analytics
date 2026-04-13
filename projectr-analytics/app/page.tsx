@@ -4,8 +4,9 @@ import { useState, useCallback, useMemo, useEffect, useRef, type CSSProperties }
 import dynamic from 'next/dynamic'
 import AgenticNormalizer from '@/components/AgenticNormalizer'
 import MarketReportExport from '@/components/MarketReportExport'
+import { AgentThinkingPanel } from '@/components/AgentThinkingPanel'
 import AgentTerminal, { type AgentTerminalSize } from '@/components/AgentTerminal'
-import type { AgentAction, AnalysisSite } from '@/lib/agent-types'
+import type { AgentAction, AgentTrace, AnalysisSite } from '@/lib/agent-types'
 import type { CycleAnalysis } from '@/lib/cycle/types'
 import type { MapLayersSnapshot } from '@/lib/report/types'
 import { parseCycleAnalysisField } from '@/lib/report/validate-cycle'
@@ -535,8 +536,38 @@ export default function Home() {
   const [mapLayersSnapshot, setMapLayersSnapshot] = useState<MapLayersSnapshot>(DEFAULT_MAP_LAYERS)
   const layerStateResyncIdRef = useRef(0)
   const [layerStateResync, setLayerStateResync] = useState<{ id: number; state: LayerState } | null>(null)
-  const [marketPanelTab, setMarketPanelTab] = useState<'analysis' | 'data'>('analysis')
+  const [marketPanelTab, setMarketPanelTab] = useState<'analysis' | 'data' | 'thinking'>('analysis')
+  const [agentSidebarTrace, setAgentSidebarTrace] = useState<AgentTrace | null>(null)
+  const [agentThinkingStreaming, setAgentThinkingStreaming] = useState(false)
   const mapViewportRef = useRef<MapViewportSnapshot | null>(null)
+
+  const handleShowAgentThinking = useCallback((trace: AgentTrace) => {
+    setSelectedSite(null)
+    setAgentSidebarTrace(trace)
+    setMarketPanelTab('thinking')
+    setPanelOpen(true)
+  }, [])
+
+  const handleAgentThinkingUpdate = useCallback(
+    (u: { trace: AgentTrace; phase: 'thinking' | 'json' | 'done' }) => {
+      setSelectedSite(null)
+      setAgentSidebarTrace(u.trace)
+      setMarketPanelTab('thinking')
+      setPanelOpen(true)
+      setAgentThinkingStreaming(u.phase !== 'done')
+    },
+    []
+  )
+
+  const handleAgentThinkingStreamFinished = useCallback(() => {
+    setAgentThinkingStreaming(false)
+  }, [])
+
+  const clearAgentSidebarTrace = useCallback(() => {
+    setAgentSidebarTrace(null)
+    setMarketPanelTab('analysis')
+    setAgentThinkingStreaming(false)
+  }, [])
 
   const handleNormalizerIngested = useCallback((payload: NormalizerIngestPayload) => {
     const pts = payload.mergedMarkerPoints
@@ -1105,7 +1136,9 @@ export default function Home() {
     }
   }
 
-  const rightPanelVisible = panelOpen && (result != null || aggregateData != null || selectedSite != null)
+  const rightPanelVisible =
+    panelOpen &&
+    (result != null || aggregateData != null || selectedSite != null || agentSidebarTrace != null)
 
   const sidebarActiveMarket =
     result != null
@@ -1182,6 +1215,9 @@ export default function Home() {
           onSizeChange={setAgentTerminalSize}
           onOpenHeightPxChange={setAgentTerminalOpenHeightPx}
           onSlashSave={handleSlashSave}
+          onShowThinking={handleShowAgentThinking}
+          onAgentThinkingUpdate={handleAgentThinkingUpdate}
+          onAgentThinkingStreamFinished={handleAgentThinkingStreamFinished}
         />
 
         {/* Floating stats bubble */}
@@ -1296,12 +1332,31 @@ export default function Home() {
 
       {/* ── Right Data Panel ── */}
       <aside
+        data-right-panel
         className={cn(
           'z-20 flex min-h-0 flex-shrink-0 flex-col overflow-hidden border-l border-border/80 bg-card transition-[width] duration-300 ease-out',
           !rightPanelVisible && 'border-l-0'
         )}
         style={{ width: rightPanelVisible ? RIGHT_PANEL_WIDTH_PX : 0 }}
       >
+        {panelOpen &&
+          agentSidebarTrace != null &&
+          !selectedSite &&
+          !result &&
+          !aggregateData && (
+            <div className="flex min-h-0 min-w-[360px] flex-1 flex-col overflow-hidden">
+              <AgentThinkingPanel
+                trace={agentSidebarTrace}
+                embedded={false}
+                streaming={agentThinkingStreaming}
+                onDismiss={() => {
+                  setAgentSidebarTrace(null)
+                  setPanelOpen(false)
+                }}
+              />
+            </div>
+          )}
+
         {panelOpen && selectedSite != null && (
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <SiteDetailRightPanel site={selectedSite} onBack={() => setSelectedSite(null)} />
@@ -1321,7 +1376,7 @@ export default function Home() {
                 </div>
               </div>
               <div className="mt-3 flex gap-0 overflow-hidden rounded-lg border border-white/10">
-                {(['analysis', 'data'] as const).map((t) => (
+                {(['analysis', 'data', 'thinking'] as const).map((t) => (
                   <button
                     key={t}
                     type="button"
@@ -1331,13 +1386,21 @@ export default function Home() {
                       marketPanelTab === t ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'
                     )}
                   >
-                    {t === 'analysis' ? 'Analysis' : 'Data'}
+                    {t === 'analysis' ? 'Analysis' : t === 'data' ? 'Data' : 'Thinking'}
                   </button>
                 ))}
               </div>
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
+            {marketPanelTab === 'thinking' && (
+              <AgentThinkingPanel
+                trace={agentSidebarTrace}
+                embedded
+                streaming={agentThinkingStreaming}
+                onDismiss={clearAgentSidebarTrace}
+              />
+            )}
             {marketPanelTab === 'analysis' && (
               <>
             <MomentumExplainBlock
@@ -1490,7 +1553,7 @@ export default function Home() {
                 </div>
               </div>
               <div className="mt-3 flex gap-0 overflow-hidden rounded-lg border border-white/10">
-                {(['analysis', 'data'] as const).map((t) => (
+                {(['analysis', 'data', 'thinking'] as const).map((t) => (
                   <button
                     key={t}
                     type="button"
@@ -1500,13 +1563,21 @@ export default function Home() {
                       marketPanelTab === t ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'
                     )}
                   >
-                    {t === 'analysis' ? 'Analysis' : 'Data'}
+                    {t === 'analysis' ? 'Analysis' : t === 'data' ? 'Data' : 'Thinking'}
                   </button>
                 ))}
               </div>
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
+            {marketPanelTab === 'thinking' && (
+              <AgentThinkingPanel
+                trace={agentSidebarTrace}
+                embedded
+                streaming={agentThinkingStreaming}
+                onDismiss={clearAgentSidebarTrace}
+              />
+            )}
             {marketPanelTab === 'analysis' && (
               <>
             <MomentumExplainBlock anchorZip={/^\d{5}$/.test(result.zip) ? result.zip : null} aggregateZips={null} />

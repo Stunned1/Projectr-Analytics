@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import type { AgentAction, AgentMessage, AgentStep, AnalysisSite, MapContext } from '@/lib/agent-types'
+import type { AgentAction, AgentMessage, AgentStep, AgentTrace, AnalysisSite, MapContext } from '@/lib/agent-types'
+import { consumeAgentNdjsonStream } from '@/lib/consume-agent-ndjson-stream'
 import { AGENT_CHAT_STORAGE_KEY } from '@/lib/agent-chat-storage-key'
 import { clearLocalWorkspaceForTesting, clearProjectrBrowserCachesAndReload } from '@/lib/local-workspace-reset'
 import { ALL_LAYERS_OFF } from '@/lib/slash-layer-keys'
@@ -108,6 +109,8 @@ export function formatActionLogLine(action: AgentAction | undefined): string | n
   return base
 }
 
+export type AgentThinkingStreamPhase = 'thinking' | 'json' | 'done'
+
 export function useAgentIntelligence(
   mapContext: MapContext,
   onAction: (action: AgentAction) => void,
@@ -117,6 +120,10 @@ export function useAgentIntelligence(
     onNotifyWhileClosed?: () => void
     /** `/save` — persist ZIP, aggregate, or map camera to Saved (map page). */
     onSlashSave?: (customLabel: string | null) => Promise<{ ok: boolean; message: string }>
+    /** Live Thinking panel: streaming reasoning, JSON phase, then final trace (`done`). */
+    onAgentThinkingUpdate?: (u: { trace: AgentTrace; phase: AgentThinkingStreamPhase }) => void
+    /** Always called when the agent request finishes (success, error, or abort) so UI can clear a “streaming” state. */
+    onAgentThinkingStreamFinished?: () => void
   }
 ) {
   const [messages, setMessages] = useState<AgentMessage[]>([DEFAULT_GREETING])
@@ -130,6 +137,8 @@ export function useAgentIntelligence(
   /** Messages with index < this are hidden in the terminal (scrollback); session still stores full history. */
   const [terminalFirstVisibleIndex, setTerminalFirstVisibleIndex] = useState(0)
   const sequenceRef = useRef<ReturnType<typeof setTimeout>[]>([])
+  /** Preserved on every agent bubble while a MODE B step sequence runs. */
+  const pendingSequenceTraceRef = useRef<AgentTrace | null>(null)
   /** After `/restart`, next plain `y` / `n` completes or cancels the wipe (not sent to Gemini). Cleared by `/help`, `/clear:memory`, `/clear:terminal`, `/clear:layers`, and restart confirm/cancel. */
   const restartConfirmPendingRef = useRef(false)
   const shouldNotifyRef = useRef(options?.shouldNotifyWhileClosed)
@@ -195,27 +204,37 @@ export function useAgentIntelligence(
         const data = await res.json()
 
         if (data.error || !data.sites?.length) {
-          setMessages((prev) => [
-            ...prev.slice(0, -1),
-            {
-              role: 'agent',
-              text: `Analysis complete - no qualifying sites found. ${data.error ?? ''}`,
-            },
-          ])
+          setMessages((prev) => {
+            const prior = prev[prev.length - 2]
+            const trace = prior?.role === 'agent' ? prior.trace : undefined
+            return [
+              ...prev.slice(0, -2),
+              {
+                role: 'agent',
+                text: `Analysis complete - no qualifying sites found. ${data.error ?? ''}`,
+                trace,
+              },
+            ]
+          })
           maybeNotify()
           return
         }
 
         const sites: AnalysisSite[] = data.sites
 
-        setMessages((prev) => [
-          ...prev.slice(0, -1),
-          {
-            role: 'agent',
-            text: `Analysis complete. Top ${sites.length} parcels ranked by upside (FAR, momentum, rent).`,
-            analysisSites: sites,
-          },
-        ])
+        setMessages((prev) => {
+          const prior = prev[prev.length - 2]
+          const trace = prior?.role === 'agent' ? prior.trace : undefined
+          return [
+            ...prev.slice(0, -2),
+            {
+              role: 'agent',
+              text: `Analysis complete. Top ${sites.length} parcels ranked by upside (FAR, momentum, rent).`,
+              analysisSites: sites,
+              trace,
+            },
+          ]
+        })
 
         onAction({
           type: 'toggle_layers',
@@ -227,10 +246,14 @@ export function useAgentIntelligence(
         }, 600)
         maybeNotify()
       } catch {
-        setMessages((prev) => [
-          ...prev.slice(0, -1),
-          { role: 'agent', text: 'Analysis failed. Please try again.' },
-        ])
+        setMessages((prev) => {
+          const prior = prev[prev.length - 2]
+          const trace = prior?.role === 'agent' ? prior.trace : undefined
+          return [
+            ...prev.slice(0, -2),
+            { role: 'agent', text: 'Analysis failed. Please try again.', trace },
+          ]
+        })
         maybeNotify()
       }
     },
@@ -239,12 +262,21 @@ export function useAgentIntelligence(
 
   const executeStep = useCallback(
     (step: AgentStep) => {
+      const seqTrace = pendingSequenceTraceRef.current
       setMessages((prev) => {
         const last = prev[prev.length - 1]
         if (last?.role === 'agent' && !last.analysisSites) {
-          return [...prev.slice(0, -1), { role: 'agent', text: step.message, action: step.action }]
+          return [
+            ...prev.slice(0, -1),
+            {
+              ...last,
+              text: step.message,
+              action: step.action,
+              trace: seqTrace ?? last.trace,
+            },
+          ]
         }
-        return [...prev, { role: 'agent', text: step.message, action: step.action }]
+        return [...prev, { role: 'agent', text: step.message, action: step.action, trace: seqTrace ?? undefined }]
       })
 
       if (step.action.type === 'run_analysis') {
@@ -257,7 +289,8 @@ export function useAgentIntelligence(
   )
 
   const runSequence = useCallback(
-    (steps: AgentStep[]) => {
+    (steps: AgentStep[], sequenceTrace?: AgentTrace | null) => {
+      pendingSequenceTraceRef.current = sequenceTrace ?? null
       setIsRunningSequence(true)
       sequenceRef.current.forEach(clearTimeout)
       sequenceRef.current = []
@@ -268,7 +301,10 @@ export function useAgentIntelligence(
       })
 
       const maxDelay = Math.max(...steps.map((s) => s.delay), 0) + 1000
-      const done = setTimeout(() => setIsRunningSequence(false), maxDelay)
+      const done = setTimeout(() => {
+        setIsRunningSequence(false)
+        pendingSequenceTraceRef.current = null
+      }, maxDelay)
       sequenceRef.current.push(done)
     },
     [executeStep]
@@ -676,9 +712,51 @@ export function useAgentIntelligence(
         const res = await fetch('/api/agent', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: userPrompt, context: mapContext }),
+          body: JSON.stringify({ message: userPrompt, context: mapContext, stream: true }),
         })
-        const data = await res.json()
+
+        if (!res.ok) {
+          setMessages((prev) => [...prev, { role: 'agent', text: 'Something went wrong. Try again.' }])
+          maybeNotify()
+          return
+        }
+
+        const contentType = res.headers.get('content-type') ?? ''
+        let data: {
+          message: string
+          action?: AgentAction
+          steps?: AgentStep[]
+          insight?: string | null
+          trace?: AgentTrace
+          error?: string
+        }
+
+        if (contentType.includes('application/x-ndjson')) {
+          const out = await consumeAgentNdjsonStream(res, {
+            onThinkingDelta: (acc) => {
+              options?.onAgentThinkingUpdate?.({
+                trace: { summary: 'Composing reasoning…', thinking: acc },
+                phase: 'thinking',
+              })
+            },
+            onJsonPhase: (thinkingSoFar) => {
+              options?.onAgentThinkingUpdate?.({
+                trace: { summary: 'Selecting map actions…', thinking: thinkingSoFar },
+                phase: 'json',
+              })
+            },
+          })
+          data = {
+            message: out.message,
+            action: out.action as AgentAction | undefined,
+            steps: out.steps as AgentStep[] | undefined,
+            insight: out.insight ?? null,
+            trace: out.trace,
+          }
+          options?.onAgentThinkingUpdate?.({ trace: out.trace, phase: 'done' })
+        } else {
+          data = (await res.json()) as typeof data
+        }
 
         if (data.error) {
           setMessages((prev) => [...prev, { role: 'agent', text: 'Something went wrong. Try again.' }])
@@ -687,14 +765,18 @@ export function useAgentIntelligence(
         }
 
         if (data.steps?.length) {
+          const trace = data.trace as AgentTrace | undefined
           setCaseStudyBundle({
             userText: userPrompt,
             agentLead: typeof data.message === 'string' ? data.message : '',
             insight: typeof data.insight === 'string' ? data.insight : null,
           })
-          setMessages((prev) => [...prev, { role: 'agent', text: data.message, insight: data.insight }])
+          setMessages((prev) => [
+            ...prev,
+            { role: 'agent', text: data.message, insight: data.insight, trace },
+          ])
           maybeNotify()
-          runSequence(data.steps)
+          runSequence(data.steps, trace ?? null)
           return
         }
 
@@ -710,6 +792,7 @@ export function useAgentIntelligence(
             text: data.message,
             action: data.action?.type !== 'none' ? data.action : undefined,
             insight: data.insight,
+            trace: data.trace as AgentTrace | undefined,
           },
         ])
         maybeNotify()
@@ -719,14 +802,33 @@ export function useAgentIntelligence(
         } else if (data.action && data.action.type !== 'none') {
           onAction(data.action)
         }
-      } catch {
-        setMessages((prev) => [...prev, { role: 'agent', text: 'Connection error.' }])
+      } catch (e) {
+        const msg =
+          e instanceof Error
+            ? e.message === 'Agent stream ended without a result'
+              ? 'Stream ended before map actions finished—often an idle timeout while the second model runs. Retry the same prompt; Thinking may still show streamed reasoning.'
+              : e.message === 'Failed to fetch' || e.name === 'TypeError'
+                ? 'Network error—check connection and retry.'
+                : e.message
+            : 'Connection error.'
+        setMessages((prev) => [...prev, { role: 'agent', text: msg }])
         maybeNotify()
       } finally {
         setLoading(false)
+        options?.onAgentThinkingStreamFinished?.()
       }
     },
-    [loading, isRunningSequence, mapContext, onAction, runSequence, runAnalysis, maybeNotify]
+    [
+      loading,
+      isRunningSequence,
+      mapContext,
+      onAction,
+      runSequence,
+      runAnalysis,
+      maybeNotify,
+      options?.onAgentThinkingUpdate,
+      options?.onAgentThinkingStreamFinished,
+    ]
   )
 
   return {

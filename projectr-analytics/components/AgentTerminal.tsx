@@ -1,7 +1,7 @@
 'use client'
 
 import { Fragment, useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react'
-import type { AgentAction, AnalysisSite } from '@/lib/agent-types'
+import type { AgentAction, AgentTrace, AnalysisSite } from '@/lib/agent-types'
 import type { MapContext } from '@/lib/agent-types'
 import { useAgentIntelligence, formatActionLogLine } from '@/lib/use-agent-intelligence'
 import { getSlashPaletteState } from '@/lib/slash-commands'
@@ -167,6 +167,11 @@ interface AgentTerminalProps {
   bottomOffsetClass?: string
   /** Map page: `/save` persists ZIP, aggregate, or camera to Saved. */
   onSlashSave?: (customLabel: string | null) => Promise<{ ok: boolean; message: string }>
+  /** Open right sidebar with plan / eval / execution trace from `/api/agent`. */
+  onShowThinking?: (trace: AgentTrace) => void
+  /** Live updates while `/api/agent` streams reasoning (Thinking tab opens automatically). */
+  onAgentThinkingUpdate?: (u: { trace: AgentTrace; phase: 'thinking' | 'json' | 'done' }) => void
+  onAgentThinkingStreamFinished?: () => void
 }
 
 export default function AgentTerminal({
@@ -178,6 +183,9 @@ export default function AgentTerminal({
   onOpenHeightPxChange,
   bottomOffsetClass = 'bottom-0',
   onSlashSave,
+  onShowThinking,
+  onAgentThinkingUpdate,
+  onAgentThinkingStreamFinished,
 }: AgentTerminalProps) {
   const [size, setSize] = useState<AgentTerminalSize>('collapsed')
   const [openHeightPx, setOpenHeightPx] = useState(TERMINAL_DEFAULT_OPEN_PX)
@@ -216,6 +224,8 @@ export default function AgentTerminal({
       onUnreadChange?.(true)
     },
     onSlashSave,
+    onAgentThinkingUpdate,
+    onAgentThinkingStreamFinished,
   })
 
   const slashPalette = useMemo(() => getSlashPaletteState(input), [input])
@@ -585,6 +595,20 @@ export default function AgentTerminal({
                       {splitForTerminal(msg.insight).map((line, li) => (
                         <div key={li}>{line}</div>
                       ))}
+                    </div>
+                  )}
+                  {msg.trace && onShowThinking && !msg.isAnalyzing && (
+                    <div className="mt-2 pl-[2ch]">
+                      <button
+                        type="button"
+                        onClick={() => onShowThinking(msg.trace!)}
+                        className="max-w-full text-left text-[10px] font-semibold text-primary hover:underline"
+                      >
+                        Show thinking
+                      </button>
+                      <p className="mt-0.5 line-clamp-2 font-mono text-[9px] leading-snug text-zinc-500">
+                        {msg.trace.summary}
+                      </p>
                     </div>
                   )}
                   {msg.analysisSites && msg.analysisSites.length > 0 && renderSiteTable(msg.analysisSites)}

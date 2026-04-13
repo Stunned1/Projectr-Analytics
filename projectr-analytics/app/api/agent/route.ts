@@ -10,9 +10,14 @@
  */
 import { type NextRequest, NextResponse } from 'next/server'
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import { normalizeAgentTrace } from '@/lib/agent-trace'
+import type { AgentStep, AgentTrace } from '@/lib/agent-types'
 import { GEMINI_NO_EM_DASH_RULE } from '@/lib/gemini-text-rules'
 
 export const dynamic = 'force-dynamic'
+
+/** Allow long reasoning + JSON passes on serverless hosts (e.g. Vercel). */
+export const maxDuration = 120
 
 const SYSTEM_PROMPT = `You are the Scout AI Agent - a spatial intelligence assistant embedded in a real estate command center dashboard.
 
@@ -92,6 +97,12 @@ run_analysis completion triggers: all layers OFF, permit filter cleared, then sh
 EXAMPLE shape (substitute borough and narration from the user’s case study):
 {
   "message": "Initiating spatial screening from your brief.",
+  "trace": {
+    "summary": "5-step Brooklyn screening: market → 3D → PLUTO → permits → spatial model",
+    "detail": "Brief centers on multifamily value-add; we load Brooklyn, show built form and pipeline, then rank underbuilt parcels.",
+    "plan": ["Navigate to borough from brief", "Tilt for massing read", "PLUTO for FAR and lots", "Permits for momentum", "Run NYC spatial model"],
+    "eval": "run_analysis is NYC-only; brief must be Brooklyn for model step to apply."
+  },
   "steps": [
     { "delay": 0, "message": "Ingesting spatial parameters. Focusing on the market in your brief...", "action": {"type":"search","query":"manhattan"} },
     { "delay": 2000, "message": "Pitching to 3D view for built-form context.", "action": {"type":"set_tilt","tilt":45} },
@@ -103,82 +114,286 @@ EXAMPLE shape (substitute borough and narration from the user’s case study):
   "insight": "One sentence tying the brief to what appears after result pins land."
 }
 
+TRACE (required on every response — planning / reasoning log for the UI sidebar):
+Include a top-level "trace" object so analysts can open **Show thinking** in the right panel:
+{
+  "trace": {
+    "summary": "One scannable line (e.g. '5-step Brooklyn screening · permits + PLUTO → model')",
+    "detail": "Optional 2-5 sentences: geography choice, thesis link, what the map actions are meant to show, limits (e.g. NYC-only run_analysis).",
+    "plan": ["Short bullet 1", "Short bullet 2", ...],
+    "eval": "Optional self-check: constraints satisfied, assumptions, caveats."
+  }
+}
+MODE B: "plan" bullets MUST align in order and intent with your "steps" array (same story arc). MODE A: "plan" can be 1-3 bullets; "eval" may note no spatial model run.
+
 RESPONSE FORMAT:
-Simple: { "message": "...", "action": {...}, "insight": "..." }
-Case study: { "message": "...", "steps": [...], "insight": "..." }
+Simple: { "message": "...", "action": {...}, "insight": "...", "trace": {...} }
+Case study: { "message": "...", "steps": [...], "insight": "...", "trace": {...} }
 CRITICAL: Return ONLY valid JSON. No markdown, no prose outside JSON.
 PERSONALITY: Direct, data-driven, senior analyst. Cinematic narration for multi-step flows.
 
 ${GEMINI_NO_EM_DASH_RULE}`
 
-export async function POST(request: NextRequest) {
-  try {
-    const { message, context } = await request.json()
+/** Plain-text pass: long-form reasoning for the Thinking panel (Cursor-style). Second call stays JSON-only. */
+const REASONING_SYSTEM = `You are the Scout AI Agent — same product and rules as the production JSON agent, but your **only** job here is **extended reasoning in plain English** for an analyst-facing Thinking panel.
 
-    const fmt = (n: number | null | undefined, prefix = '', suffix = '') =>
-      n != null ? `${prefix}${n.toLocaleString()}${suffix}` : 'N/A'
+You are **not** outputting JSON or map actions. Write like a senior spatial analyst thinking aloud: full paragraphs, nuance, tradeoffs, and self-checks.
 
-    const contextStr = context ? `
-CURRENT MAP STATE:
-- Active market: ${context.label ?? 'None'}
-- ZIP/Search: ${context.zip ?? 'None'}
-- Ranked analysis pins on map: ${context.hasRankedSites ? `yes (${context.rankedSiteCount ?? '?'} sites)` : 'no'}
-- Active layers: ${Object.entries(context.layers ?? {}).filter(([, v]) => v).map(([k]) => k).join(', ') || 'none'}
-- Rent/value fill metric (ZORI vs ZHVI): ${context.activeMetric ?? 'zori'}
+Structure with Markdown-style headings (use ## and ### only — no fenced code blocks, no JSON):
+## What I'm interpreting
+## Map and data context
+## Mode (A exploration vs B case study vs C follow-up)
+## Planned approach
+## Risks, limits, and caveats
 
-MARKET DATA:
-- Median Rent (ZORI): ${fmt(context.zori, '$', '/mo')}${context.zoriGrowth != null ? ` (${context.zoriGrowth > 0 ? '+' : ''}${context.zoriGrowth.toFixed(2)}% YoY)` : ''}
-- Home Value (ZHVI): ${fmt(context.zhvi, '$')}${context.zhviGrowth != null ? ` (${context.zhviGrowth > 0 ? '+' : ''}${context.zhviGrowth.toFixed(2)}% YoY)` : ''}
-- Vacancy Rate: ${context.vacancyRate != null ? context.vacancyRate + '%' : 'N/A'}
-- Days to Pending: ${context.dozPending != null ? context.dozPending + ' days' : 'N/A'}
-- Price Cuts: ${context.priceCuts != null ? context.priceCuts + '%' : 'N/A'}
-- Active Inventory: ${fmt(context.inventory)}
-- Transit Stops: ${fmt(context.transitStops)}
-- Population: ${fmt(context.population)}
+Internalize the same rules as the JSON agent:
+- MODE A: education / layer help → no multi-step case study, no run_analysis unless the user explicitly wants ranking or a pasted brief demands it.
+- MODE B: case study / rank / pasted brief → describe the intended step arc; run_analysis only for NYC boroughs named in the brief.
+- MODE C: ranked sites already on map → visualization follow-ups only; no second model run unless the user clearly starts fresh.
+- run_analysis is NYC boroughs only; state honestly when geography is out of scope.
+- Reference the CLIENT CSV block when present (uploads, pins vs tabular).
 
-CLIENT CSV (last upload on this browser session — included on every agent request while present):
-${context.clientCsv
-  ? `- File(s): ${context.clientCsv.fileName ?? 'unknown'}${context.clientCsv.fileCount != null && context.clientCsv.fileCount > 1 ? ` (${context.clientCsv.fileCount} CSVs merged)` : ''}
-  ${context.clientCsv.fileNames?.length ? `- Names: ${context.clientCsv.fileNames.join(', ')}` : ''}
-  - Gemini bucket (first file): ${context.clientCsv.bucket} / visual: ${context.clientCsv.visual_bucket}
-  - Metric name (first file): ${context.clientCsv.metric_name}
-  - Rows ingested (all files): ${context.clientCsv.rowsIngested}
-  - Map pins (all files, deduped): ${context.clientCsv.mapPinCount} (triage mapEligible=${context.clientCsv.mapEligible})
-  - Triage reasoning (concat if multi-file): ${String(context.clientCsv.reasoning ?? '').slice(0, 800)}`
-  : '- None — user has not uploaded in this session (or cleared). For case studies with CSVs: upload on Client CSV / Data tab first, then paste the brief so this block is filled.'}
-` : ''
+Be specific: boroughs, exact layer keys (rentChoropleth, parcels, permits, transitStops, clientData, momentum, floodRisk, etc.), and whether search is skipped because map state already matches.
 
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-2.5-flash',
-      systemInstruction: SYSTEM_PROMPT,
-      generationConfig: { responseMimeType: 'application/json' },
-    })
+Length: substantial (about 400–1200 words for substantive questions; shorter for trivial one-liners). Prefer prose; short lists under headings are fine. No bullet-only wall.
 
-    const result = await model.generateContent(`${contextStr}\nUSER: ${message}`)
-    const raw = result.response.text().trim()
+Tone: direct, data-driven, no fluff.
 
-    let parsed: {
-      message: string
-      action?: { type: string; [key: string]: unknown }
-      steps?: Array<{ delay: number; message: string; action: { type: string; [key: string]: unknown } }>
-      insight?: string | null
-    }
+${GEMINI_NO_EM_DASH_RULE}`
 
-    try {
-      const cleaned = raw.replace(/^```json\n?/, '').replace(/\n?```$/, '').trim()
-      parsed = JSON.parse(cleaned)
-    } catch {
-      try {
-        const match = raw.match(/\{[\s\S]*\}/)
-        if (match) parsed = JSON.parse(match[0])
-        else throw new Error('no JSON')
-      } catch {
-        parsed = { message: raw.slice(0, 300), action: { type: 'none' }, insight: null }
+async function draftAgentReasoning(
+  genAI: GoogleGenerativeAI,
+  contextStr: string,
+  userMessage: string,
+  onDelta?: (chunk: string) => void
+): Promise<string> {
+  const model = genAI.getGenerativeModel({
+    model: 'gemini-2.5-flash',
+    systemInstruction: REASONING_SYSTEM,
+    generationConfig: {
+      maxOutputTokens: 8192,
+      temperature: 0.55,
+    },
+  })
+  const prompt = `${contextStr}\n\n---\nUSER MESSAGE (work through this; output is **only** the reasoning document, no JSON):\n${userMessage}`
+
+  if (onDelta) {
+    const streamResult = await model.generateContentStream(prompt)
+    let full = ''
+    for await (const chunk of streamResult.stream) {
+      const t = chunk.text()
+      if (t) {
+        full += t
+        onDelta(t)
       }
     }
+    return full.trim()
+  }
 
-    return NextResponse.json(parsed)
+  const result = await model.generateContent(prompt)
+  return result.response.text().trim()
+}
+
+function formatAgentNum(n: number | null | undefined, prefix = '', suffix = '') {
+  return n != null ? `${prefix}${n.toLocaleString()}${suffix}` : 'N/A'
+}
+
+function buildAgentContextStr(context: unknown): string {
+  if (!context || typeof context !== 'object') return ''
+  const c = context as Record<string, unknown>
+  const clientCsv = c.clientCsv as Record<string, unknown> | null | undefined
+
+  return `
+CURRENT MAP STATE:
+- Active market: ${(c.label as string | null | undefined) ?? 'None'}
+- ZIP/Search: ${(c.zip as string | null | undefined) ?? 'None'}
+- Ranked analysis pins on map: ${c.hasRankedSites ? `yes (${(c.rankedSiteCount as number | undefined) ?? '?'} sites)` : 'no'}
+- Active layers: ${Object.entries((c.layers as Record<string, boolean> | undefined) ?? {}).filter(([, v]) => v).map(([k]) => k).join(', ') || 'none'}
+- Rent/value fill metric (ZORI vs ZHVI): ${(c.activeMetric as string | undefined) ?? 'zori'}
+
+MARKET DATA:
+- Median Rent (ZORI): ${formatAgentNum(c.zori as number | null | undefined, '$', '/mo')}${c.zoriGrowth != null ? ` (${(c.zoriGrowth as number) > 0 ? '+' : ''}${(c.zoriGrowth as number).toFixed(2)}% YoY)` : ''}
+- Home Value (ZHVI): ${formatAgentNum(c.zhvi as number | null | undefined, '$')}${c.zhviGrowth != null ? ` (${(c.zhviGrowth as number) > 0 ? '+' : ''}${(c.zhviGrowth as number).toFixed(2)}% YoY)` : ''}
+- Vacancy Rate: ${c.vacancyRate != null ? c.vacancyRate + '%' : 'N/A'}
+- Days to Pending: ${c.dozPending != null ? c.dozPending + ' days' : 'N/A'}
+- Price Cuts: ${c.priceCuts != null ? c.priceCuts + '%' : 'N/A'}
+- Active Inventory: ${formatAgentNum(c.inventory as number | null | undefined)}
+- Transit Stops: ${formatAgentNum(c.transitStops as number | null | undefined)}
+- Population: ${formatAgentNum(c.population as number | null | undefined)}
+
+CLIENT CSV (last upload on this browser session — included on every agent request while present):
+${clientCsv
+  ? `- File(s): ${(clientCsv.fileName as string | null | undefined) ?? 'unknown'}${clientCsv.fileCount != null && (clientCsv.fileCount as number) > 1 ? ` (${clientCsv.fileCount} CSVs merged)` : ''}
+  ${Array.isArray(clientCsv.fileNames) && clientCsv.fileNames.length ? `- Names: ${(clientCsv.fileNames as string[]).join(', ')}` : ''}
+  - Gemini bucket (first file): ${clientCsv.bucket} / visual: ${clientCsv.visual_bucket}
+  - Metric name (first file): ${clientCsv.metric_name}
+  - Rows ingested (all files): ${clientCsv.rowsIngested}
+  - Map pins (all files, deduped): ${clientCsv.mapPinCount} (triage mapEligible=${clientCsv.mapEligible})
+  - Triage reasoning (concat if multi-file): ${String(clientCsv.reasoning ?? '').slice(0, 800)}`
+  : '- None — user has not uploaded in this session (or cleared). For case studies with CSVs: upload on Client CSV / Data tab first, then paste the brief so this block is filled.'}
+`
+}
+
+function parseGeminiAgentJson(raw: string): {
+  message: string
+  action?: { type: string; [key: string]: unknown }
+  steps?: Array<{ delay: number; message: string; action: { type: string; [key: string]: unknown } }>
+  insight?: string | null
+  trace?: unknown
+} {
+  let parsed: {
+    message: string
+    action?: { type: string; [key: string]: unknown }
+    steps?: Array<{ delay: number; message: string; action: { type: string; [key: string]: unknown } }>
+    insight?: string | null
+    trace?: unknown
+  }
+  try {
+    const cleaned = raw.replace(/^```json\n?/, '').replace(/\n?```$/, '').trim()
+    parsed = JSON.parse(cleaned) as typeof parsed
+  } catch {
+    try {
+      const match = raw.match(/\{[\s\S]*\}/)
+      if (match) parsed = JSON.parse(match[0]) as typeof parsed
+      else throw new Error('no JSON')
+    } catch {
+      parsed = { message: raw.slice(0, 300), action: { type: 'none' }, insight: null }
+    }
+  }
+  return parsed
+}
+
+async function runAgentPipeline(
+  genAI: GoogleGenerativeAI,
+  contextStr: string,
+  userMessage: string,
+  hooks?: {
+    onThinkingDelta?: (chunk: string) => void
+    onReasoningComplete?: () => void
+  }
+): Promise<{
+  message: string
+  action?: { type: string; [key: string]: unknown }
+  steps?: Array<{ delay: number; message: string; action: { type: string; [key: string]: unknown } }>
+  insight?: string | null
+  trace: AgentTrace
+}> {
+  let reasoningDraft = ''
+  if (process.env.SCOUT_AGENT_SKIP_REASONING_PASS !== '1') {
+    try {
+      reasoningDraft = await draftAgentReasoning(
+        genAI,
+        contextStr,
+        userMessage,
+        hooks?.onThinkingDelta
+      )
+    } catch {
+      reasoningDraft = ''
+    }
+  }
+  hooks?.onReasoningComplete?.()
+
+  const reasoningInject =
+    reasoningDraft.length > 0
+      ? `\n\n---\nYOUR PRIOR FULL REASONING (the user sees this in the Thinking panel; your JSON must stay consistent — same MODE, geography, layer keys, and step intent):\n${reasoningDraft}\n---\n`
+      : ''
+
+  const model = genAI.getGenerativeModel({
+    model: 'gemini-2.5-flash',
+    systemInstruction: SYSTEM_PROMPT,
+    generationConfig: { responseMimeType: 'application/json' },
+  })
+
+  const result = await model.generateContent(`${contextStr}${reasoningInject}\nUSER: ${userMessage}`)
+  const raw = result.response.text().trim()
+  const parsed = parseGeminiAgentJson(raw)
+  const steps = parsed.steps as AgentStep[] | undefined
+  const trace = normalizeAgentTrace(parsed.trace, steps ?? null, reasoningDraft || null)
+
+  return {
+    message: parsed.message,
+    action: parsed.action,
+    steps: parsed.steps,
+    insight: parsed.insight,
+    trace,
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = (await request.json()) as {
+      message?: string
+      context?: unknown
+      stream?: boolean
+    }
+    const userMessage = typeof body.message === 'string' ? body.message : ''
+    const contextStr = buildAgentContextStr(body.context)
+    const stream = body.stream === true
+
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
+
+    if (stream) {
+      const encoder = new TextEncoder()
+      const readable = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          const push = (obj: Record<string, unknown>) => {
+            controller.enqueue(encoder.encode(`${JSON.stringify(obj)}\n`))
+          }
+          let pingTimer: ReturnType<typeof setInterval> | null = null
+          const stopPing = () => {
+            if (pingTimer != null) {
+              clearInterval(pingTimer)
+              pingTimer = null
+            }
+          }
+          try {
+            const out = await runAgentPipeline(genAI, contextStr, userMessage, {
+              onThinkingDelta: (delta) => push({ type: 'thinking_delta', delta }),
+              onReasoningComplete: () => {
+                push({ type: 'status', phase: 'json' })
+                // Keep the socket warm: no bytes are sent while the JSON-only Gemini call runs; proxies often idle-close.
+                pingTimer = setInterval(() => push({ type: 'ping' }), 8_000)
+              },
+            })
+            stopPing()
+            push({
+              type: 'done',
+              message: out.message,
+              action: out.action,
+              steps: out.steps,
+              insight: out.insight,
+              trace: out.trace,
+            })
+          } catch (err) {
+            stopPing()
+            push({
+              type: 'error',
+              error: err instanceof Error ? err.message : 'Unexpected error',
+            })
+          } finally {
+            stopPing()
+            controller.close()
+          }
+        },
+      })
+      return new Response(readable, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/x-ndjson; charset=utf-8',
+          'Cache-Control': 'no-cache, no-transform',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      })
+    }
+
+    const out = await runAgentPipeline(genAI, contextStr, userMessage)
+    return NextResponse.json({
+      message: out.message,
+      action: out.action,
+      steps: out.steps,
+      insight: out.insight,
+      trace: out.trace,
+    })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unexpected error'
     return NextResponse.json({ error: message }, { status: 500 })

@@ -38,6 +38,7 @@ NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
 GOOGLE_GEOCODING_API_KEY         # optional server-only Geocoding API key; Client CSV / upload forward-geocode falls back to NEXT_PUBLIC_GOOGLE_MAPS_API_KEY if unset
 NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID   # must be a Vector map ID
 GEMINI_API_KEY
+SCOUT_AGENT_SKIP_REASONING_PASS  # optional; set to 1 to skip the extra Gemini text pass that fills Thinking “Full reasoning” (faster, cheaper)
 GOOGLE_MAPS_STATIC_KEY           # optional; unused by current PDF exports (reserved if static map returns)
 HUD_API_TOKEN                    # optional, falls back to Census ACS rent data
 TRANSITLAND_API_KEY=             # free at transit.land/sign-up (Developer API, 10k queries/month)
@@ -91,6 +92,10 @@ _4.11.2026_
 
 _4.12.2026_
 - `/api/trends`: optional `city` / `state` / `anchor_zip`, clearer JSON errors. Agent documents `set_heading`. `GEMINI_NO_EM_DASH_RULE` across Gemini prompts.
+- `/api/agent` returns normalized **`trace`** (summary, detail, plan, eval, executionSteps derived from `steps`, optional `toolCalls`); `lib/agent-trace.ts`.
+- `/api/agent` runs an optional first Gemini **text** pass for long-form `trace.thinking` (injected into the JSON pass for consistency); `SCOUT_AGENT_SKIP_REASONING_PASS=1` skips it.
+- `/api/agent` with `stream: true` returns **`application/x-ndjson`**: `thinking_delta` lines (Gemini stream) then `status` + final `done` JSON; client `lib/consume-agent-ndjson-stream.ts`.
+- Agent NDJSON stream sends **`ping` keepalives** during the silent JSON map-action call so idle proxies less often drop the connection; route `maxDuration` 120s for long runs.
 
 **Bug Fixes**
 
@@ -121,6 +126,10 @@ _4.11.2026_
 
 _4.12.2026_
 - `/guide` canonical (`/Documentation` → 308); city/borough Trends wiring; guide search/content; Scout assets; slash palette; `/view`, `/tilt`, `/rotate`, `/clear:*`, `/go`, `/layers:`; terminal `/` shortcut, resize, collapse transition; remove executive memo panel (keep `/api/memo`); **`/saved`** nav; **`/save`** (ZIP, aggregate, or map bookmark via `MAP_VIEW_SAVE_ZIP` + coords handoff); **README changelog compressed** to summary bullets.
+- Agent **Show thinking** opens the right panel **Thinking** tab (`AgentThinkingPanel`): **Full reasoning** (Cursor-style prose when the reasoning pass runs), then plan, self-check, and scheduled map actions; full trace when no market is loaded; opening thinking clears an open ranked-site detail so the panel can show the tab.
+- Agent requests use **streaming** reasoning: the Thinking tab opens automatically and **Full reasoning** updates live (with a **Live** badge) until the JSON map-action model finishes.
+- Thinking **Full reasoning** renders as **Markdown** (`react-markdown`, `AgentThinkingMarkdown`) for headings, lists, and emphasis.
+- Thinking pane **auto-scrolls to the bottom** while streaming if you stay near the end; scroll up to read earlier text and auto-follow pauses until the next stream starts.
 
 ## Known Bugs
 
