@@ -235,3 +235,22 @@ When solving a task:
 - Be concise and direct
 - Explain reasoning when non-obvious
 - Ask for clarification instead of guessing
+
+---
+
+## Commit Message Policy
+
+When commiting changes or when a user prompts you to generate a commit message for them:
+
+- Always generate a commit message automatically from the diff
+- Commit messages must be informative and user-facing
+- Include:
+  - what changed
+  - why it changed (if inferable)
+  - impact or behavior change
+- Prefer Conventional Commits format:
+  feat:, fix:, refactor:, chore:, docs:
+- Keep subject line <= 72 characters
+- Write a short body if changes are non-trivial
+
+Never commit with generic messages like "update files" or "misc changes".
