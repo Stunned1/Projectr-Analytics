@@ -139,6 +139,10 @@ _4.12.2026_
 
 - **Zillow `as_of_date` shows future date** - The ZHVF CSV uses forward-looking forecast dates (e.g. `2027-02-28`). This bleeds into the `as_of_date` field on the zip snapshot. The ingestion script should use the ZHVI or ZORI date as the canonical `as_of_date` instead.
 
+- **Google Trends invalid JSON** - `lib/fetchTrends.ts` uses the unofficial `google-trends-api` client and assumes the upstream response is JSON; when Google returns an HTML throttle / anti-bot page instead, `queryTrends()` throws `Google Trends response was not valid JSON` and the dashboard interest section shows an error.
+
+- **Transit lines missing but yellow circles remain** - When `TRANSITLAND_API_KEY` is absent or Transitland returns no drawable routes, `/api/transit` falls back to `lib/fetchGtfs.ts`; if that Overpass query fails and hits the smaller retry, the retry only requests stop nodes and no rail ways, so the map renders yellow subway entrance circles without PathLayer route lines.
+
 ## Minor Gaps
 
 - **Employment Rate (FRED)** - The FRED series search for "employed persons" at the county level doesn't reliably return a consistent series name across all markets. The computation (employed / labor force × 100) is built and ready, but the series lookup needs a more robust matching strategy. Revisit before demo.
