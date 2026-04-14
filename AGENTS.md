@@ -112,3 +112,126 @@ If you add a new environment variable, script, or required setup step, update `#
 - Never leave the README stale - if you touched the code, update the docs
 - Keep entries concise - one sentence per bullet is the target
 - Do not create separate markdown files to document your work - everything goes in `README.md`
+=======
+## Purpose
+This file defines how AI coding agents (e.g., Codex) should operate within this repository.
+
+---
+
+## Mission
+Build a performant, interactive spatial analysis application that integrates map rendering, geospatial queries, and AI-driven insights.
+
+Priorities:
+1. Correctness of spatial logic
+2. Clear separation of frontend, backend, and AI responsibilities
+3. Performance (large datasets, real-time rendering)
+4. Minimal, targeted changes
+
+---
+
+## System Architecture
+
+### Frontend (Next.js + deck.gl + Google Maps)
+- Uses Next.js App Router
+- deck.gl is layered on top of Google Maps (vector mode)
+- Responsible for:
+  - rendering parcels, heatmaps, and boundaries
+  - handling user interaction
+  - updating map state (camera, layers)
+
+### Backend (Supabase + PostGIS)
+- PostgreSQL with PostGIS extensions
+- Responsible for:
+  - spatial queries (distance, containment, nearest neighbor)
+  - aggregations and caching
+- Heavy computation MUST happen here, not in the frontend
+
+### AI Layer (Gemini)
+- Receives geographic context + user constraints
+- Outputs decisions such as:
+  - toggling layers
+  - adjusting camera tilt/zoom
+  - evaluating spatial metrics
+- Does NOT directly manipulate UI or database
+
+---
+
+## Critical Rules
+
+### Separation of Concerns
+- Do NOT move spatial computations to the frontend
+- Do NOT put business logic inside UI components
+- Do NOT let AI directly access database or rendering logic
+
+### Next.js Rules
+- This is NOT standard Next.js behavior
+- Always verify patterns using:
+  node_modules/next/dist/docs/
+- Do not assume App Router conventions without checking
+
+### deck.gl + Maps
+- Use deck.gl for rendering layers only
+- Avoid unnecessary re-renders (performance critical)
+- Keep map state minimal and controlled
+
+### PostGIS
+- Prefer SQL + PostGIS functions over JS implementations
+- Reuse existing queries if possible
+- Avoid duplicating spatial logic in multiple places
+
+---
+
+## Execution Strategy
+
+When solving a task:
+
+1. Identify which layer the task belongs to:
+   - frontend / backend / AI
+
+2. Locate relevant files BEFORE coding
+
+3. If spatial logic is involved:
+   - implement or modify in PostGIS (not JS)
+
+4. If UI change:
+   - update React components without breaking map performance
+
+5. If AI-related:
+   - modify prompt/context flow, not core system behavior
+
+6. Make minimal, targeted changes
+
+---
+
+## AI Integration Rules
+
+- Treat Gemini as a reasoning engine, not a controller
+- Always pass structured context (geo data, constraints)
+- Do NOT hardcode AI outputs into logic
+- Ensure outputs are validated before affecting UI
+
+---
+
+## Validation
+
+- Ensure map rendering remains performant (no unnecessary rerenders)
+- Ensure spatial queries are correct and efficient
+- Check edge cases (empty data, invalid coordinates)
+
+---
+
+## Avoid
+
+- Mixing frontend and backend responsibilities
+- Writing spatial math in JavaScript if PostGIS can handle it
+- Large refactors unless explicitly requested
+- Introducing new dependencies unnecessarily
+- Assuming default Next.js or deck.gl behavior
+
+---
+
+## Communication
+
+- Be concise and direct
+- Explain reasoning when non-obvious
+- Ask for clarification instead of guessing
