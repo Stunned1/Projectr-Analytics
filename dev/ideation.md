@@ -11,7 +11,8 @@ Currently, our path forward is split in two directions (both pointed at slightly
         - How far do they plan to actually take this project?
         - TODO: meet with Projectr team, discuss things like direction and also features
   
-Some other thoughts are whether we want to make this more consumer facing or business facing, which ties in with the questions above. Honestly, a lot of product decisions to be made here...
+Some other thoughts are whether we want to make this more consumer facing or business facing, which ties in with the questions above. Honestly, a lot of product decisions to be made here... 
+- TODO: how are we being judged??
 
 # TODOs
 - Refactor and rearchitect the repository/backend
@@ -22,3 +23,9 @@ Some other thoughts are whether we want to make this more consumer facing or bus
   - More equations and calculations!
 - Delegate work
 - Do it all :)
+
+# DELIVERABLES
+- **Demo video** - very high priority, needs to be well scripted, recorded, and edited
+- `ARCHITECTURE.md` - basically, showing that we actually understand our code/work (feasibility and communication)
+- Optimizations/architecture fixes
+- Partner story and submission form - what is our story? what are we actually solving? **METRICS!!!!**

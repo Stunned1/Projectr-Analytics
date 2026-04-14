@@ -164,6 +164,10 @@ _4.12.2026_
 
 - **Agent stream rerenders** - Streaming `thinking_delta` updates still bubble through the top-level page state, so the map shell can rerender more than necessary until the agent panel is isolated from high-frequency stream updates.
 
+- **Read-heavy runtime** - Most user interactions fan out into repeated reads across market, transit, trends, cycle, parcel, tract, boundary, amenity, POI, and flood routes; writes are mostly limited to ingestion and saved-site mutations, so the current tooling is better at read-heavy workloads than write-heavy ones.
+
+- **NoSQL is not the first fix** - The current scaling pressure is read fan-out and payload shape on top of Postgres/PostGIS, so the near-term fix is caching, tiling, and query-shape work rather than a datastore migration.
+
 ## Client CSV & AI session
 
 - **Where it lives** — The **last normalize** triage + preview live in `sessionStorage` (`projectr-client-upload-session`); pin coordinates live in `projectr-client-upload-markers`. You can **ingest multiple CSVs in one drop** (up to 8); markers are **merged and deduped** by lat/lng/label, previews concatenated (capped), and each file still runs `POST /api/normalize` sequentially (separate Gemini triage + Supabase upserts per file). Rows also **upsert into Supabase** `projectr_master_data` with `data_source = Client Upload` and `submarket_id` from each row’s geography (or the optional form `zip` when the server was given a loaded market). The agent reads the combined snapshot via `mapContext.clientCsv` on every `/api/agent` call. **Pins:** explicit lat/lng columns, **5-digit ZIP** (Zippopotam/Census), then **address / place text** via Google Geocoding when a key is configured (`lib/google-forward-geocode.ts`, wired in `POST /api/normalize`).

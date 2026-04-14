@@ -39,3 +39,18 @@ Scope: Next.js App Router, deck.gl, Supabase/PostGIS, and the Gemini agent pipel
 
 - ZIP geocoding is already cached in `lib/geocoder.ts` with both a Supabase cache table and an in-process LRU, so the main scaling risk is not centroid lookup spam.
 - Client-side request de-duplication already exists in `lib/request-cache.ts`, but several expensive routes still bypass it or return too much data for the current viewport.
+
+## Workload Profile
+
+- The app is read-heavy at runtime: a market load fans out into multiple read paths (`/api/market`, `/api/transit`, `/api/trends`, `/api/cycle`) plus several follow-up map reads for parcels, tracts, boundaries, amenities, POIs, and flood risk.
+- The write-heavy paths are concentrated in ingestion and persistence (`scripts/ingest-zillow.ts`, `scripts/ingest-permits.ts`, and saved-site mutations), so the main scalability issue is read amplification and payload size rather than user-generated writes.
+- That means the tooling choice is part of the issue: the current mix of raw JSON APIs, third-party web fetches, and client-side rerendering works for light usage, but it becomes the bottleneck under repeated reads because the app is paying network and serialization cost over and over instead of amortizing it in tiles, cached joins, or binary payloads.
+
+## System Design Call
+
+- This is not primarily a horizontal-scaling problem yet; the weak point is inefficient read fan-out and payload shape, so throwing more app servers at it will mostly scale the wrong layer.
+- Vertical scaling helps only up to the point where a single request can stay in memory and the database can answer faster, but it does not fix repeated third-party fetches, oversized GeoJSON, or client-side rerender churn.
+- A NoSQL migration is not the right first move because the core workload depends on geospatial joins, filtered aggregates, and transactional persistence for saved sites and cached market state.
+- ACID is still important for the parts of the app that mutate shared state: saved sites, ingest upserts, cache rows, and any future derived tables that need deterministic writes and conflict handling.
+- Postgres/PostGIS is the right system of record for the spatial core, with read optimization through materialized/cache tables, MVT tiles, denormalized lookup tables, and background warming rather than a document-store rewrite.
+- If scale becomes the next ceiling, the right sequence is: optimize query shape, reduce payloads, isolate the hot reads behind caching or tiles, and only then consider horizontal scale at the API edge or read replicas.
