@@ -12,6 +12,7 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { normalizeAgentTrace } from '@/lib/agent-trace'
 import type { AgentStep, AgentTrace } from '@/lib/agent-types'
+import { evaluateAgentRequestPolicy } from '@/lib/agent-request-policy'
 import { GEMINI_NO_EM_DASH_RULE } from '@/lib/gemini-text-rules'
 
 export const dynamic = 'force-dynamic'
@@ -21,7 +22,7 @@ export const maxDuration = 120
 
 const SYSTEM_PROMPT = `You are the Scout AI Agent - a spatial intelligence assistant embedded in a real estate command center dashboard.
 
-You are general-purpose: answer questions, explain metrics, and control the map. You must infer intent from each user message and from CURRENT MAP STATE - do not default every NYC question into a full case study.
+You are domain-specific: answer Scout real estate, market, map, and uploaded-data questions, explain metrics, and control the map. You must infer intent from each user message and from CURRENT MAP STATE - do not default every NYC question into a full case study.
 
 MODE SELECTION (choose once per user message):
 
@@ -319,6 +320,38 @@ async function runAgentPipeline(
   }
 }
 
+function blockedAgentTrace(reason: string): AgentTrace {
+  return {
+    summary: 'Request blocked before model routing.',
+    detail: 'The prompt did not satisfy the Scout real estate, map, market, or uploaded-data request policy.',
+    plan: ['Do not call Gemini', 'Return a local terminal response'],
+    eval: `Policy reason: ${reason}.`,
+  }
+}
+
+function blockedAgentPayload(policy: Exclude<ReturnType<typeof evaluateAgentRequestPolicy>, { allowed: true }>) {
+  return {
+    message: policy.message,
+    action: { type: 'none' },
+    steps: undefined,
+    insight: null,
+    trace: blockedAgentTrace(policy.reason),
+  }
+}
+
+function blockedAgentStreamResponse(payload: ReturnType<typeof blockedAgentPayload>) {
+  const encoder = new TextEncoder()
+  const line = `${JSON.stringify({ type: 'done', ...payload })}\n`
+  return new Response(encoder.encode(line), {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/x-ndjson; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      'X-Content-Type-Options': 'nosniff',
+    },
+  })
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as {
@@ -329,6 +362,13 @@ export async function POST(request: NextRequest) {
     const userMessage = typeof body.message === 'string' ? body.message : ''
     const contextStr = buildAgentContextStr(body.context)
     const stream = body.stream === true
+
+    const policy = evaluateAgentRequestPolicy(userMessage)
+    if (!policy.allowed) {
+      const payload = blockedAgentPayload(policy)
+      if (stream) return blockedAgentStreamResponse(payload)
+      return NextResponse.json(payload)
+    }
 
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
 

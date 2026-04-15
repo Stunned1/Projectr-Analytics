@@ -131,6 +131,10 @@ _4.12.2026_
 - Thinking **Full reasoning** renders as **Markdown** (`react-markdown`, `AgentThinkingMarkdown`) for headings, lists, and emphasis.
 - Thinking pane **auto-scrolls to the bottom** while streaming if you stay near the end; scroll up to read earlier text and auto-follow pauses until the next stream starts.
 
+_4.15.2026_
+- Browser tab icon now uses the Scout logo asset.
+- Intelligence terminal and `/api/agent` now block off-topic prompts before Gemini runs, while every leading `/` input stays on the local slash-command path.
+
 ## Known Bugs
 
 - **DC Metro velocity null** - Zips in the Washington-Arlington-Alexandria metro return `metro_velocity: null` because the metro name is too long to match the short name stored in `zillow_metro_snapshot`. The `getZillowData` function in `app/api/market/route.ts` needs smarter truncation logic for multi-city metro names.
@@ -163,6 +167,7 @@ _4.12.2026_
 - **Large map payloads** - `transit`, `tracts`, and some permit views still return raw JSON / GeoJSON instead of viewport-tiled or binary map data, so very large markets need server-side tiling or stronger bbox filtering to stay smooth.
 
 - **Agent stream rerenders** - Streaming `thinking_delta` updates still bubble through the top-level page state, so the map shell can rerender more than necessary until the agent panel is isolated from high-frequency stream updates.
+- **Reusable analyst workflow packaging** - Scout currently reads as a Projectr-specific consulting workspace; broadening it into a reusable product for other analyst teams would require templated workflows, sharable deliverables, and less client-specific framing in the UX.
 
 ## Client CSV & AI session
 
@@ -176,7 +181,7 @@ _4.12.2026_
 
 - **Shortlist** — `saved_sites` stores label, ZIP/aggregate hint, geo, cycle snapshot, and notes only; it does **not** store CSV blobs or agent transcripts. Restoring a shortlist row reloads that market, not a prior upload or chat (see **Deferred**).
 - **Reset local workspace (QA)** — Use **`/clear:workspace`** on the map intelligence terminal to wipe this tab’s Client CSV session, pins, agent chat, and pending sidebar→map navigation, then reload. Ingested **Client Upload** rows remain in Supabase until you remove them in the database.
-- **Intelligence terminal** — Type **`/`** for suggestions; **`/help`** lists commands; **`/view`**, **`/tilt`**, **`/rotate`**, **`/go`**, **`/layers:`…**, **`/clear:`…** (see changelog); **`/clear:workspace`** runs **Clear local test data** (confirm + reload). **`/clear:terminal`** and **`/clear:memory`** replace the visible transcript with the default greeting only (no echo of the slash command); **`/restart`** clears to the y/n prompt the same way.
+- **Intelligence terminal** — Type **`/`** for suggestions; **`/help`** lists commands; **`/view`**, **`/tilt`**, **`/rotate`**, **`/go`**, **`/layers:`…**, **`/clear:`…** (see changelog); **`/clear:workspace`** runs **Clear local test data** (confirm + reload). **`/clear:terminal`** and **`/clear:memory`** replace the visible transcript with the default greeting only (no echo of the slash command); **`/restart`** clears to the y/n prompt the same way. Inputs starting with **`/`** are always local commands, and unknown commands return an error instead of reaching the AI agent; natural-language prompts are screened for Scout real estate, map, market, or uploaded-data relevance before Gemini runs, both in the terminal and at `/api/agent`.
 
 ## Zillow Research CSVs
 
@@ -205,3 +210,5 @@ npm run ingest:zillow
 - **Multi-market permit comparison** — Permit visualization is currently NYC-only (Socrata DOB feed). Expanding to other cities would require per-jurisdiction ArcGIS FeatureServer URLs or a paid aggregator (Regrid, BuildZoom). Revisit if scoping to additional demo markets.
 
 - **Shortlist attachments (CSV + agent chat)** — Would require `saved_sites` JSONB column(s) or a sibling table, size limits, and UI to “attach workspace” on save plus restore flow (rehydrate markers store + optional transcript). Blocked on schema/auth product decisions.
+
+- **Travel-time accessibility scoring** - Adding Google routing-based catchments or commute-time scoring would strengthen site-selection analysis and the Google technology story, but it is deferred until scope, quota, and UX tradeoffs are defined.

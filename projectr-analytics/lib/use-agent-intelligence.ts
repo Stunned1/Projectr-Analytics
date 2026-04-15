@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import type { AgentAction, AgentMessage, AgentStep, AgentTrace, AnalysisSite, MapContext } from '@/lib/agent-types'
 import { consumeAgentNdjsonStream } from '@/lib/consume-agent-ndjson-stream'
+import { evaluateAgentRequestPolicy } from '@/lib/agent-request-policy'
 import { AGENT_CHAT_STORAGE_KEY } from '@/lib/agent-chat-storage-key'
 import { clearLocalWorkspaceForTesting, clearProjectrBrowserCachesAndReload } from '@/lib/local-workspace-reset'
 import { ALL_LAYERS_OFF } from '@/lib/slash-layer-keys'
@@ -695,13 +696,24 @@ export function useAgentIntelligence(
           { role: 'user', text: userPrompt, ts: Date.now() },
           {
             role: 'agent',
-            text: 'Unknown slash command. Try /help, or use colon forms like /clear:layers, /layers:rent, /go 10001. Anything else (no leading /, or text after a space mid-sentence) goes to the Gemini agent.',
+            text: 'Unknown slash command. Try /help, or use known forms like /clear:layers, /layers:rent, /go 10001. Prompts that start with / are always handled locally and are never sent to the AI agent.',
           },
         ])
         return
       }
 
       if (loading || isRunningSequence) return
+
+      const policy = evaluateAgentRequestPolicy(userPrompt)
+      if (!policy.allowed) {
+        setInput('')
+        setMessages((prev) => [
+          ...prev,
+          { role: 'user', text: userPrompt, ts: Date.now() },
+          { role: 'agent', text: policy.message },
+        ])
+        return
+      }
 
       setCaseStudyBundle({ userText: userPrompt, agentLead: '', insight: null })
       setMessages((prev) => [...prev, { role: 'user', text: userPrompt, ts: Date.now() }])

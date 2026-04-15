@@ -168,7 +168,8 @@ export function buildSlashHelpMessage(): string {
     'Roadmap (not wired yet — tell us what you want first):',
     ...SLASH_COMMAND_IDEAS.map((s) => `  ${s}`),
     '',
-    'Anything without a leading slash (or after a space) is sent to the Gemini agent with live map context — **except** plain **y** / **n** right after a `/restart` prompt (those only confirm or cancel the local wipe).',
+    'Anything starting with `/` is treated as a slash command. Unknown slash commands return a local error and are never sent to the Gemini agent.',
+    'Natural-language prompts without `/` are sent to the Gemini agent only when they look related to Scout real estate, map, market, or uploaded-data work.',
   ]
   return lines.join('\n')
 }
@@ -216,7 +217,7 @@ export function parseTiltSlashCommand(trimmed: string): ParsedTiltSlash | null {
     }
   }
 
-  let token = tokens[0].replace(/%+$/i, '').trim()
+  const token = tokens[0].replace(/%+$/i, '').trim()
   if (token === '') {
     return { kind: 'bad_arg', message: 'Missing a number after `/tilt`. Example: `/tilt 50` (0–100% of max tilt).' }
   }
@@ -465,5 +466,5 @@ export function isSlashCommandHandled(trimmed: string): boolean {
 }
 
 export function isUnknownSlashOnly(trimmed: string): boolean {
-  return /^\/\S+$/.test(trimmed) && !isSlashCommandHandled(trimmed)
+  return trimmed.startsWith('/') && !isSlashCommandHandled(trimmed)
 }
