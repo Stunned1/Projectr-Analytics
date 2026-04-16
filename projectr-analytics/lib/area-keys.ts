@@ -1,5 +1,10 @@
 export type AreaKind = 'county' | 'metro'
 
+const AREA_KEY_ALIASES: Record<string, string[]> = {
+  'metro:TX:houston-the-woodlands-sugar-land': ['metro:TX:houston-pasadena-the-woodlands'],
+  'metro:TX:houston-pasadena-the-woodlands': ['metro:TX:houston-the-woodlands-sugar-land'],
+}
+
 function normalizeAreaSegment(value: string): string {
   return value
     .trim()
@@ -36,6 +41,12 @@ export function buildMetroAreaKey(metroName: string, stateAbbr?: string | null):
   const metro = normalizeAreaSegment(normalizeMetroDisplayName(metroName))
   const state = stateAbbr?.trim().toUpperCase().slice(0, 2)
   return state ? `metro:${state}:${metro}` : `metro:${metro}`
+}
+
+export function expandAreaKeyCandidates(areaKey: string): string[] {
+  const trimmed = areaKey.trim()
+  if (!trimmed) return []
+  return Array.from(new Set([trimmed, ...(AREA_KEY_ALIASES[trimmed] ?? [])]))
 }
 
 export function looksLikeCountyQuery(value: string): boolean {

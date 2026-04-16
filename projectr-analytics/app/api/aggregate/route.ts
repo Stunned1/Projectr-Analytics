@@ -17,6 +17,7 @@ import { supabase } from '@/lib/supabase'
 import { geocodeZip } from '@/lib/geocoder'
 import { fetchFred } from '@/lib/fetchers'
 import { ensureAreaMasterDataCached } from '@/lib/ensure-zip-cache'
+import { expandAreaKeyCandidates } from '@/lib/area-keys'
 
 export const dynamic = 'force-dynamic'
 
@@ -138,6 +139,20 @@ export async function POST(request: NextRequest) {
 
       if (error) throw new Error(error.message)
       directAreaRows = (data ?? []) as CachedRow[]
+
+      if (directAreaRows.length === 0) {
+        const aliasKeys = expandAreaKeyCandidates(areaKey).filter((candidate) => candidate !== areaKey)
+        if (aliasKeys.length > 0) {
+          const { data: aliasData, error: aliasError } = await supabase
+            .from('projectr_master_data')
+            .select('submarket_id, metric_name, metric_value, data_source, time_period')
+            .in('submarket_id', aliasKeys)
+            .order('time_period', { ascending: false, nullsFirst: false })
+
+          if (aliasError) throw new Error(aliasError.message)
+          directAreaRows = (aliasData ?? []) as CachedRow[]
+        }
+      }
     }
 
     const usesDirectAreaMetrics = directAreaRows.some((row) => row.metric_value != null)
