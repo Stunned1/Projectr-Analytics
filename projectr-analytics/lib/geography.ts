@@ -52,6 +52,10 @@ export function isNycZip(zip: string | null | undefined): boolean {
   return getNycBoroughFromZip(zip) !== null
 }
 
+export function getNycBoroughZipRange(borough: NycBoroughName): { min: string; max: string } {
+  return NYC_BOROUGH_ZIP_RANGES[borough]
+}
+
 export function detectNycBoroughFromZips(
   zips: Array<{ zip: string }> | null | undefined
 ): NycBoroughName | null {

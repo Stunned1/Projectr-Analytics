@@ -2,13 +2,14 @@
  * Spatial Analysis API
  * Runs a backend spatial model to surface top N parcels for a given brief.
  *
- * For Manhattan high-density residential:
+ * For NYC borough high-density residential:
  * 1. Pull PLUTO parcels with FAR data (underutilized = built_far < 0.5 * max_allowed_far)
  * 2. Score by: air_rights_sqft (40%) + permit momentum proximity (30%) + ZORI growth (30%)
  * 3. Filter: residential/mixed zoning only, min lot area 2000 sqft, has transit nearby
  * 4. Return top N with full data for sidebar display
  */
 import { type NextRequest, NextResponse } from 'next/server'
+import { getNycBoroughZipRange, isNycBoroughName } from '@/lib/geography'
 import { supabase } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
@@ -63,7 +64,14 @@ interface ScoredSite {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const borough = (body.borough ?? 'manhattan').toLowerCase()
+    const boroughRaw = typeof body.borough === 'string' ? body.borough.trim().toLowerCase() : ''
+    if (!isNycBoroughName(boroughRaw)) {
+      return NextResponse.json(
+        { error: 'Provide a valid NYC borough: manhattan, brooklyn, queens, bronx, or staten island.' },
+        { status: 400 }
+      )
+    }
+    const borough = boroughRaw
     const topN = Math.min(body.top_n ?? 5, 20)
     const minLotArea = body.min_lot_area ?? 2000
     const maxFarUtilization = body.max_far_utilization ?? 0.6
@@ -72,7 +80,8 @@ export async function POST(request: NextRequest) {
     const borocodes: Record<string, string> = {
       manhattan: '1', bronx: '2', brooklyn: '3', queens: '4', 'staten island': '5',
     }
-    const borocode = borocodes[borough] ?? '1'
+    const borocode = borocodes[borough]
+    const zipRange = getNycBoroughZipRange(borough)
 
     // 1. Fetch PLUTO parcels - residential/mixed zones, underutilized
     const zoneFilter = RESIDENTIAL_ZONES.map((z) => `starts_with(zonedist1,'${z}')`).join(' OR ')
@@ -128,12 +137,12 @@ export async function POST(request: NextRequest) {
 
     const permitPoints = (permits ?? []).map((p) => ({ lat: p.lat as number, lng: p.lng as number }))
 
-    // 4. Get ZORI growth for Manhattan ZIPs
+    // 4. Get ZORI growth for the selected borough ZIP range
     const { data: zillowData } = await supabase
       .from('zillow_zip_snapshot')
       .select('zip, zori_growth_12m')
-      .gte('zip', '10001')
-      .lte('zip', '10282')
+      .gte('zip', zipRange.min)
+      .lte('zip', zipRange.max)
 
     const avgZoriGrowth = zillowData?.length
       ? zillowData.reduce((s, r) => s + (r.zori_growth_12m ?? 0), 0) / zillowData.length
@@ -152,7 +161,7 @@ export async function POST(request: NextRequest) {
       ).length
       const momentumScore = Math.min(nearbyPermits * 10, 100)
 
-      // ZORI score - use borough average (all parcels same market)
+      // ZORI score - use borough average (all parcels share the same borough market context)
       const zoriScore = Math.min(Math.max(avgZoriGrowth * 10, 0), 100)
 
       const score = farScore * 0.4 + momentumScore * 0.3 + zoriScore * 0.3

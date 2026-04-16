@@ -22,7 +22,7 @@ export type DocumentationOutlineNode = {
 /** Plain text for onboarding search (matches visible copy + common queries). */
 export const Documentation_ONBOARDING_SEARCH_TEXT = `
 FOR NEW USERS new users onboarding orientation quick command center product features metrics UI
-Load a market sidebar ZIP city state county metro Houston Austin Dallas Texas NYC borough Enter map data panel Analysis Data tabs
+Load a market sidebar ZIP county metro city state Houston Austin Dallas Harris County Dallas-Fort Worth Texas NYC borough Enter map data panel Analysis Data tabs
 cycle momentum PDF brief tables trends exports Layers map layer control top-left choropleth
 transit tracts permits Intelligence terminal bottom agent natural language shortcuts
 Saved tab sidebar saved sites comparison Market Report PDF exported
@@ -32,8 +32,8 @@ export const Documentation_FEATURES: DocumentationFeatureBlock[] = [
   {
     id: 'feature-map-search',
     title: 'Map & search',
-    body: `Load a single ZIP, a city and state, or an NYC borough from the sidebar. Texas markets are the default MVP flow,
-so examples and demos favor Houston, Dallas-Fort Worth, Austin, and San Antonio. The map shows the market footprint,
+    body: `Load a single ZIP, a county, a metro, or a city and state from the sidebar. Texas markets are the default MVP flow,
+so examples and demos favor Houston, Dallas-Fort Worth, Austin, San Antonio, and Harris County. NYC boroughs still work when you need borough-specific analysis. The map shows the market footprint,
 optional ZIP outline, and context ZIPs where applicable. Choropleth fill can display rent (ZORI) or home
 value (ZHVI) when enabled in the layer panel.`,
     searchAliases: 'neighbors boundary footprint geocode place state',

@@ -6,6 +6,7 @@ import { consumeAgentNdjsonStream } from '@/lib/consume-agent-ndjson-stream'
 import { evaluateAgentRequestPolicy } from '@/lib/agent-request-policy'
 import { AGENT_CHAT_STORAGE_KEY } from '@/lib/agent-chat-storage-key'
 import { clearLocalWorkspaceForTesting, clearProjectrBrowserCachesAndReload } from '@/lib/local-workspace-reset'
+import { getNycBoroughFromZip, isNycBoroughName } from '@/lib/geography'
 import { ALL_LAYERS_OFF } from '@/lib/slash-layer-keys'
 import {
   buildSlashHelpMessage,
@@ -182,10 +183,32 @@ export function useAgentIntelligence(
     if (shouldNotifyRef.current?.()) notifyCbRef.current?.()
   }, [])
 
+  const resolveAnalysisBorough = useCallback((action: AgentAction) => {
+    const explicit = action.borough?.trim().toLowerCase()
+    if (isNycBoroughName(explicit)) return explicit
+
+    const label = mapContext.label?.trim().toLowerCase()
+    if (isNycBoroughName(label)) return label
+
+    return getNycBoroughFromZip(mapContext.zip ?? null)
+  }, [mapContext.label, mapContext.zip])
+
   const runAnalysis = useCallback(
     async (action: AgentAction) => {
-      const borough = action.borough ?? 'manhattan'
+      const borough = resolveAnalysisBorough(action)
       const topN = action.top_n ?? 5
+
+      if (!borough) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'agent',
+            text: 'The spatial ranking model is only available for NYC borough workflows. Load Manhattan, Brooklyn, Queens, the Bronx, or Staten Island first, or stay in the shared Texas / county / metro workflow.',
+          },
+        ])
+        maybeNotify()
+        return
+      }
 
       setMessages((prev) => [
         ...prev,
@@ -258,7 +281,7 @@ export function useAgentIntelligence(
         maybeNotify()
       }
     },
-    [onAction, maybeNotify]
+    [onAction, maybeNotify, resolveAnalysisBorough]
   )
 
   const executeStep = useCallback(

@@ -94,7 +94,7 @@ export function tiltSlashUsageLines(): string {
 export function clearSlashUsageLines(): string {
   return [
     'Usage: `/clear:<target>` — no spaces around the colon.',
-    '• `/clear:layers` — turns **off** every map layer and clears the NYC permit-type filter (map view unchanged).',
+    '• `/clear:layers` — turns **off** every map layer and clears any active permit-type filter (map view unchanged).',
     '• `/clear:terminal` — **clean canvas**: only the default greeting remains (the command is not echoed); case-brief bundle unchanged.',
     '• `/clear:memory` or `/clear:mem` — **clean canvas**: default greeting only; clears the case-brief bundle; **does not** reload, change market, or clear Client CSV.',
     '• `/clear:workspace` — **Clear local test data**: confirm, then wipe session keys (upload, pins, chat, pending nav) and **reload** the tab.',
@@ -116,7 +116,7 @@ export function layersSlashUsageLines(): string {
   return [
     'Usage: `/layers:name1,name2,...` — **colon required**; comma-separated names; turns **on** those layers (others unchanged).',
     `• ${layerSlashValidNamesHint()}`,
-    '• Aliases: e.g. `rent` → rent/value fill, `permits` → NYC permits, `client` → Client markers.',
+    '• Aliases: e.g. `rent` → rent/value fill, `client` → Client markers, `permits` → NYC permits (only when the active market is in New York City).',
     '• Empty list or unknown names → error listing bad tokens.',
     '• Duplicates are ignored once.',
   ].join('\n')
@@ -368,7 +368,7 @@ export function saveSlashUsageLines(): string {
   return [
     'Usage: `/save` or `/save <name>` — adds a row to **Saved** (same Supabase flow as the data panel).',
     '• **ZIP loaded** — saves that market (optional name replaces the default place label).',
-    '• **City / county / metro / borough loaded** — saves the area (optional name; reopen uses your sidebar search text when set).',
+    '• **County / metro / city / NYC borough loaded** — saves the area (optional name; reopen uses your sidebar search text when set).',
     '• **Otherwise** — saves the **current map center** as a bookmark (optional name; default label uses rounded coordinates).',
     '• Requires Auth (enable **Anonymous** sign-ins in Supabase if you see a sign-in error).',
   ].join('\n')

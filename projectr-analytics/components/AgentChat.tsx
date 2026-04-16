@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { getNycBoroughFromZip, isNycBoroughName } from '@/lib/geography'
 import { ALL_LAYERS_OFF } from '@/lib/slash-layer-keys'
 import { AGENT_CHAT_STORAGE_KEY } from '@/lib/use-agent-intelligence'
 
@@ -196,9 +197,28 @@ export default function AgentChat({
     return () => { sequenceRef.current.forEach(clearTimeout) }
   }, [])
 
+  const resolveAnalysisBorough = useCallback((action: AgentAction) => {
+    const explicit = action.borough?.trim().toLowerCase()
+    if (isNycBoroughName(explicit)) return explicit
+
+    const label = mapContext.label?.trim().toLowerCase()
+    if (isNycBoroughName(label)) return label
+
+    return getNycBoroughFromZip(mapContext.zip ?? null)
+  }, [mapContext.label, mapContext.zip])
+
   const runAnalysis = useCallback(async (action: AgentAction) => {
-    const borough = action.borough ?? 'manhattan'
+    const borough = resolveAnalysisBorough(action)
     const topN = action.top_n ?? 5
+
+    if (!borough) {
+      setMessages((prev) => [...prev, {
+        role: 'agent',
+        text: 'The spatial ranking model is only available for NYC borough workflows. Load Manhattan, Brooklyn, Queens, the Bronx, or Staten Island first, or stay in the shared Texas / county / metro workflow.',
+      }])
+      if (!isOpen) onNotifyWhileClosed?.()
+      return
+    }
 
     // Add analyzing message
     setMessages((prev) => [...prev, {
@@ -250,7 +270,7 @@ export default function AgentChat({
       }])
       if (!isOpen) onNotifyWhileClosed?.()
     }
-  }, [onAction, isOpen, onNotifyWhileClosed])
+  }, [onAction, isOpen, onNotifyWhileClosed, resolveAnalysisBorough])
 
   const executeStep = useCallback((step: AgentStep) => {
     setMessages((prev) => {
