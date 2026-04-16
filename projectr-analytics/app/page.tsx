@@ -2036,9 +2036,9 @@ export default function Home() {
                     Not on map — you are viewing it here in this <span className="text-foreground">preview table</span>{' '}
                     (first rows returned from normalize). Full series is in Supabase{' '}
                     <span className="text-foreground">projectr_master_data</span> under{' '}
-                    <span className="text-foreground">Client Upload</span>. Rows keyed to the loaded ZIP may also appear
-                    in <span className="text-foreground">All metrics (flat table)</span> above; area-wide or non-ZIP
-                    keys often will not.
+                    <span className="text-foreground">Client Upload</span>. Only rows with a real geography key or
+                    metric value are persisted there, so table-only uploads may stay in this preview path instead of
+                    appearing in <span className="text-foreground">All metrics (flat table)</span> above.
                   </p>
                 )}
               </PanelSection>

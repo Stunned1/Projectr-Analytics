@@ -18,6 +18,7 @@ function legacyToSources(s: ClientUploadSessionLegacy): ClientUploadSourcePart[]
       triage: s.triage,
       rowsIngested: s.rowsIngested,
       previewRows: s.previewRows,
+      parseSummary: s.parseSummary,
       markerCount: s.markerCount,
       mapPinsActive: s.mapPinsActive,
       mapEligible: s.mapEligible,

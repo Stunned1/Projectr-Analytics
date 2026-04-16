@@ -1,14 +1,9 @@
 /** Shared client shape for `POST /api/normalize` success body. */
 
-export interface ClientCsvTriage {
-  bucket: 'GEOSPATIAL' | 'TEMPORAL' | 'TABULAR' | string
-  visual_bucket: string
-  metric_name: string
-  geo_column: string | null
-  value_column: string | null
-  date_column: string | null
-  reasoning: string
-}
+import type { ImportGeminiTriage } from '@/lib/upload/import-decision-model'
+import type { UploadFileMetadata, UploadRawRow } from '@/lib/upload/types'
+
+export type ClientCsvTriage = ImportGeminiTriage
 
 export interface ClientNormalizeMarkerPoint {
   lat: number
@@ -29,6 +24,11 @@ export interface ClientNormalizeApiResult {
   triage: ClientCsvTriage
   rows_ingested: number
   preview_rows: ClientNormalizePreviewRow[]
+  parse_summary?: {
+    file: UploadFileMetadata
+    headers: string[]
+    sample_rows: UploadRawRow[]
+  }
   marker_points?: ClientNormalizeMarkerPoint[]
   map_eligible?: boolean
 }

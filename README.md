@@ -150,6 +150,9 @@ _04.16.2026_
 - `/api/agent` now includes a shared county / metro Texas-style case-study example alongside the NYC-only parcel-model example so non-NYC briefs stay on the shared workflow instead of drifting toward borough logic.
 - Aggregate area loads now run aggregate, cycle, transit, and trends fetches in parallel, and obvious metro-style searches try `/api/metro` before `/api/city` to avoid an unnecessary extra round trip on Texas-style metro queries.
 - Added `/api/permits/texas`, which scopes official TREC place-level residential permit activity to Texas city / county / metro searches, caches hot responses, and resolves place centroids from `zip_metro_lookup` before falling back to Google geocoding.
+- Added a shared CSV import decision-model contract in `lib/upload/import-decision-model.ts` and wired `/api/normalize` to request and parse richer Gemini interpretations, including mapability classification, detected schema, field mappings, confidence, fallback visualization, and user-facing explanation fields.
+- Added a deterministic shared upload parser that now emits canonical headers, raw parsed rows, file metadata, sample rows, and early malformed-file rejection, and wired `/api/normalize` to consume that parser instead of reparsing uploads inline.
+- `/api/normalize` now finalizes Gemini import triage against deterministic parser evidence, falls back to structural heuristics when Gemini is unavailable, and only geo-resolves uploads that actually expose mappable location fields.
 
 **Bug Fixes**
 
@@ -175,6 +178,7 @@ _04.16.2026_
 - `/api/agent` now turns upstream Gemini overload and rate-limit failures into explicit retryable `503` / `429` responses instead of a generic `500`, so Texas-first agent flows fail more cleanly during provider spikes.
 - `CommandMap` no longer re-runs multi-ZIP boundary fanouts on unrelated layer toggles, and stable map callbacks keep the memoized map surface from churning during high-frequency agent-thinking updates.
 - `/api/market` now overlaps Zillow lookup with geocoding and live fetch work so single-ZIP Texas loads spend less time waiting on sequential server calls.
+- Client CSV normalize no longer assigns the active market ZIP to non-spatial uploads, so sidebar-only imports stop masquerading as mapped market data or triggering unnecessary geocoding.
 
 **Map & Visualization**
 
@@ -214,6 +218,7 @@ _04.16.2026_
 - Intelligence terminal greetings, starter chips, and input placeholders now switch between Texas-first shared-market prompts and NYC borough-specific prompts based on the active geography, while export and save copy keep borough workflows secondary unless NYC is actually in play.
 - The shared permit layer now renders Texas residential permit activity as a heatmap when zoomed out and 3D place columns when zoomed in, while NYC keeps the existing raw DOB permit points and type filters.
 - Austin city searches now upgrade that shared permit layer to raw official permit records with category filters, detail cards, and source links, while unsupported Texas geographies still fall back to the cached aggregate permit activity layer.
+- The CSV normalizer card now surfaces mapability status, fallback mode, confidence, and user-facing explanations so phase-2 import classification is visible without opening devtools.
 
 ## Known Bugs
 
@@ -256,7 +261,7 @@ _04.16.2026_
 
 ## Client CSV & AI session
 
-- **Where it lives** — The **last normalize** triage + preview live in `sessionStorage` (`projectr-client-upload-session`); pin coordinates live in `projectr-client-upload-markers`. You can **ingest multiple CSVs in one drop** (up to 8); markers are **merged and deduped** by lat/lng/label, previews concatenated (capped), and each file still runs `POST /api/normalize` sequentially (separate Gemini triage + Supabase upserts per file). Rows also **upsert into Supabase** `projectr_master_data` with `data_source = Client Upload` and `submarket_id` from each row’s geography (or the optional form `zip` when the server was given a loaded market). The agent reads the combined snapshot via `mapContext.clientCsv` on every `/api/agent` call. **Pins:** explicit lat/lng columns, **5-digit ZIP** (Zippopotam/Census), then **address / place text** via Google Geocoding when a key is configured (`lib/google-forward-geocode.ts`, wired in `POST /api/normalize`).
+- **Where it lives** — The **last normalize** triage + preview live in `sessionStorage` (`projectr-client-upload-session`); pin coordinates live in `projectr-client-upload-markers`. You can **ingest multiple CSVs in one drop** (up to 8); markers are **merged and deduped** by lat/lng/label, previews concatenated (capped), and each file still runs `POST /api/normalize` sequentially (separate Gemini triage + Supabase upserts per file). Rows only **upsert into Supabase** `projectr_master_data` when normalize can identify a real geography key or metric value, and `submarket_id` now comes from the row’s own resolved geography rather than the currently loaded market ZIP. The agent reads the combined snapshot via `mapContext.clientCsv` on every `/api/agent` call. **Pins:** explicit lat/lng columns, **5-digit ZIP** (Zippopotam/Census), then **address / place text** via Google Geocoding when a key is configured (`lib/google-forward-geocode.ts`, wired in `POST /api/normalize`).
 
 - **No market loaded** — You can upload first, then chat with the agent: context still includes the CSV block; pins render when the **Client** layer is on (default **on**). If the CSV has mappable rows, the map auto-fits to those pins until you load a ZIP or city.
 - **Case study + CSV** — Upload CSV(s) **before** pasting a ranking brief so `mapContext.clientCsv` is populated; `/api/agent` instructs Gemini (MODE B) to reference uploads, turn on **clientData** when pins exist, and use **focus_data_panel** for temporal-only ingests.
@@ -291,6 +296,7 @@ npm run ingest:zillow
 ## Deferred
 
 - **Client CSV in the command-center sidebar** — The **Client CSV** nav item was removed; `/upload` and the normalize / Client layer pipeline remain for now while the upload workflow is redesigned for another surface (IA TBD). README **Client CSV & AI session** still describes session keys and behavior.
+- **CSV import review and non-map fallback UI** — Phase 0 now defines the shared import decision model, but the dedicated review screen and richer sidebar chart/table fallback surfaces are still pending; today’s upload flow still relies on the legacy normalize card plus preview table.
 
 - **Texas parcel polygons outside NYC-style workflows** — TxGIO parcel coverage is optional, county-scoped, and not normalized into the default MVP path. Wiring parcel polygons across Texas cleanly would require county-on-demand ingest, spatial tiling, and a separate shared parcel contract so statewide loads do not wreck latency.
 

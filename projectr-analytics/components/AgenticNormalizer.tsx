@@ -31,6 +31,23 @@ const VISUAL_LABELS: Record<string, string> = {
   TABULAR: 'Data Grid',
 }
 
+const MAPABILITY_LABELS: Record<string, string> = {
+  map_ready: 'Ready for map',
+  map_normalizable: 'Needs map normalization',
+  non_map_visualizable: 'Sidebar or chart',
+  unusable: 'Unusable',
+}
+
+const FALLBACK_LABELS: Record<string, string> = {
+  map_layer: 'Map layer',
+  raw_table: 'Raw table',
+  time_series_chart: 'Time-series chart',
+  bar_chart: 'Bar chart',
+  summary_cards: 'Summary cards',
+  table_then_chart: 'Table first',
+  none: 'No safe fallback',
+}
+
 function mergeMarkerPoints(lists: ClientNormalizeMarkerPoint[][]): ClientNormalizeMarkerPoint[] {
   const seen = new Set<string>()
   const out: ClientNormalizeMarkerPoint[] = []
@@ -114,17 +131,16 @@ export default function AgenticNormalizer({ currentZip, onIngested }: AgenticNor
             const pts = data.marker_points ?? []
             return {
               fileName: list[i]?.name ?? null,
-              triage: {
-                bucket: data.triage.bucket,
-                visual_bucket: data.triage.visual_bucket,
-                metric_name: data.triage.metric_name,
-                reasoning: data.triage.reasoning,
-                geo_column: data.triage.geo_column,
-                value_column: data.triage.value_column,
-                date_column: data.triage.date_column,
-              },
+              triage: data.triage,
               rowsIngested: data.rows_ingested,
               previewRows: data.preview_rows ?? [],
+              parseSummary: data.parse_summary
+                ? {
+                    file: data.parse_summary.file,
+                    headers: data.parse_summary.headers,
+                    sampleRows: data.parse_summary.sample_rows,
+                  }
+                : undefined,
               markerCount: pts.length,
               mapPinsActive: pts.length > 0,
               mapEligible: data.map_eligible ?? pts.length > 0,
@@ -226,6 +242,19 @@ export default function AgenticNormalizer({ currentZip, onIngested }: AgenticNor
                   <p className="text-[10px]" style={{ color: BUCKET_COLORS[result.triage.bucket] ?? '#888' }}>
                     {result.triage.bucket} → {VISUAL_LABELS[result.triage.visual_bucket] ?? result.triage.visual_bucket}
                   </p>
+                  <div className="mt-1 flex flex-wrap gap-1 text-[9px] text-zinc-300">
+                    <span className="rounded bg-white/6 px-1.5 py-0.5">
+                      {MAPABILITY_LABELS[result.triage.mapability_classification] ??
+                        result.triage.mapability_classification}
+                    </span>
+                    <span className="rounded bg-white/6 px-1.5 py-0.5">
+                      {FALLBACK_LABELS[result.triage.fallback_visualization] ??
+                        result.triage.fallback_visualization}
+                    </span>
+                    <span className="rounded bg-white/6 px-1.5 py-0.5">
+                      {(result.triage.confidence * 100).toFixed(0)}% confidence
+                    </span>
+                  </div>
                 </div>
                 <div className="ml-auto shrink-0 text-right">
                   <p className="text-xs font-semibold text-white">{result.rows_ingested.toLocaleString()}</p>
@@ -240,6 +269,7 @@ export default function AgenticNormalizer({ currentZip, onIngested }: AgenticNor
               )}
 
               <p className="mb-3 text-[11px] italic text-zinc-400">&quot;{result.triage.reasoning}&quot;</p>
+              <p className="mb-3 text-[11px] leading-relaxed text-zinc-300">{result.triage.explanation}</p>
 
               <div className="grid grid-cols-3 gap-1.5 text-[10px]">
                 {result.triage.geo_column && (
@@ -262,12 +292,24 @@ export default function AgenticNormalizer({ currentZip, onIngested }: AgenticNor
                 )}
               </div>
 
+              {result.triage.warnings.length > 0 && (
+                <div className="mt-2 rounded border border-amber-900/40 bg-amber-950/20 px-2 py-1.5 text-[10px] text-amber-200">
+                  {result.triage.warnings[0]}
+                </div>
+              )}
+
               {(result.marker_points?.length ?? 0) > 0 && (
                 <p className="mt-2 text-[10px] text-primary">
                   ✓ {result.marker_points!.length} pin{result.marker_points!.length === 1 ? '' : 's'} in this file →{' '}
                   <span className="font-semibold">Client</span> layer shows all files combined
                 </p>
               )}
+              {result.triage.mapability_classification === 'map_normalizable' &&
+                (result.marker_points?.length ?? 0) === 0 && (
+                  <p className="mt-2 text-[10px] text-amber-300">
+                    ✓ Imported with a table-first fallback while map normalization remains unresolved
+                  </p>
+                )}
               {result.triage.bucket === 'TEMPORAL' && (
                 <p className="mt-2 text-[10px] text-blue-400">
                   ✓ <span className="font-semibold">Data</span> tab — time series ingested

@@ -1,23 +1,14 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
+import type {
+  ClientCsvTriage,
+  ClientNormalizePreviewRow,
+} from '@/lib/normalize-client-types'
+import type { UploadParseSummary } from '@/lib/upload/types'
 
-export type ClientUploadTriageSnapshot = {
-  bucket: string
-  visual_bucket: string
-  metric_name: string
-  reasoning: string
-  geo_column: string | null
-  value_column: string | null
-  date_column: string | null
-}
+export type ClientUploadTriageSnapshot = ClientCsvTriage
 
-export type ClientUploadPreviewRow = {
-  submarket_id: string | null
-  metric_name: string
-  metric_value: number | null
-  time_period: string | null
-  visual_bucket: string
-}
+export type ClientUploadPreviewRow = ClientNormalizePreviewRow
 
 /** One normalized CSV in a batch (single- or multi-file ingest). */
 export type ClientUploadSourcePart = {
@@ -25,6 +16,7 @@ export type ClientUploadSourcePart = {
   triage: ClientUploadTriageSnapshot
   rowsIngested: number
   previewRows: ClientUploadPreviewRow[]
+  parseSummary?: UploadParseSummary
   markerCount: number
   mapPinsActive: boolean
   mapEligible?: boolean
@@ -43,6 +35,7 @@ export type ClientUploadSessionLegacy = {
   triage: ClientUploadTriageSnapshot
   rowsIngested: number
   previewRows: ClientUploadPreviewRow[]
+  parseSummary?: UploadParseSummary
   markerCount: number
   mapPinsActive: boolean
   mapEligible?: boolean
