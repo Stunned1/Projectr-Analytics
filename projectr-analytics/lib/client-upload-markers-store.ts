@@ -1,7 +1,18 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
+import type { UploadRawRow } from '@/lib/upload/types'
 
-export type ClientUploadMarker = { lat: number; lng: number; label: string; value: number | null }
+export type ClientUploadMarker = {
+  lat: number
+  lng: number
+  label: string
+  value: number | null
+  file_name?: string | null
+  metric_name?: string | null
+  submarket_id?: string | null
+  time_period?: string | null
+  row_preview?: UploadRawRow
+}
 
 interface ClientUploadMarkersState {
   markers: ClientUploadMarker[] | null
@@ -17,7 +28,7 @@ export const useClientUploadMarkersStore = create<ClientUploadMarkersState>()(
       clearMarkers: () => set({ markers: null }),
     }),
     {
-      name: 'scout-client-upload-markers',
+      name: 'projectr-client-upload-markers',
       storage: createJSONStorage(() => sessionStorage),
     }
   )

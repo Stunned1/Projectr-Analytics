@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import type {
   ClientCsvTriage,
+  ClientNormalizeRawTable,
   ClientNormalizePreviewRow,
 } from '@/lib/normalize-client-types'
 import type { UploadParseSummary } from '@/lib/upload/types'
@@ -17,6 +18,7 @@ export type ClientUploadSourcePart = {
   rowsIngested: number
   previewRows: ClientUploadPreviewRow[]
   parseSummary?: UploadParseSummary
+  rawTable?: ClientNormalizeRawTable
   markerCount: number
   mapPinsActive: boolean
   mapEligible?: boolean
@@ -36,6 +38,7 @@ export type ClientUploadSessionLegacy = {
   rowsIngested: number
   previewRows: ClientUploadPreviewRow[]
   parseSummary?: UploadParseSummary
+  rawTable?: ClientNormalizeRawTable
   markerCount: number
   mapPinsActive: boolean
   mapEligible?: boolean

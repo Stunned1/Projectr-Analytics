@@ -28,6 +28,8 @@ function hashPreview(preview: string): string {
 
 const ZIP_RE = /^\d{5}$/
 const MAX_UNIQUE_ADDRESS_GEOCODE = 50
+const MAX_RAW_TABLE_ROWS = 40
+const MAX_MARKER_POINTS = 500
 
 function resolveHeader(headers: string[], name: string | null): string | null {
   if (!name?.trim()) return null
@@ -112,11 +114,33 @@ function normalizeTimePeriod(raw: string | null): string | null {
   return Number.isNaN(date.getTime()) ? raw : date.toISOString().split('T')[0]
 }
 
+function compactRowPreview(row: UploadRawRow, limit = 8): UploadRawRow {
+  const preview: UploadRawRow = {}
+  let count = 0
+  for (const [key, value] of Object.entries(row)) {
+    if (count >= limit) break
+    if (value === null || value === undefined) continue
+    if (typeof value === 'string') {
+      const trimmed = value.trim()
+      if (!trimmed) continue
+      preview[key] = trimmed.length > 120 ? `${trimmed.slice(0, 117)}...` : trimmed
+      count += 1
+      continue
+    }
+    preview[key] = value
+    count += 1
+  }
+  return preview
+}
+
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData()
     const file = formData.get('file') as File | null
     const zip = (formData.get('zip') as string | null)?.trim() || null
+    const mode = String(formData.get('mode') ?? 'import').trim().toLowerCase() === 'review'
+      ? 'review'
+      : 'import'
 
     if (!file) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 })
@@ -133,10 +157,10 @@ export async function POST(request: NextRequest) {
 
     const analysisInput = JSON.stringify(analysisSample)
     const cacheKey = hashPreview(analysisInput)
-    let triage = triageCache.get(cacheKey)
+    let triageCandidate = triageCache.get(cacheKey)
     let fallbackWarning: string | null = null
 
-    if (!triage) {
+    if (!triageCandidate) {
       try {
         const model = genAI.getGenerativeModel({
           model: 'gemini-2.5-flash',
@@ -150,21 +174,21 @@ export async function POST(request: NextRequest) {
         if (!parsed) {
           fallbackWarning = 'Gemini returned invalid import JSON, so Projectr fell back to structural import heuristics.'
         } else {
-          triage = finalizeImportGeminiTriage(parsed, {
+          triageCandidate = finalizeImportGeminiTriage(parsed, {
             file: parsedFile.file,
             headers,
             sampleRows: parsedFile.sampleRows,
             hints: parsedFile.hints,
           })
-          triageCache.set(cacheKey, triage)
+          triageCache.set(cacheKey, triageCandidate)
         }
       } catch {
         fallbackWarning = 'Gemini import triage was unavailable, so Projectr used structural import heuristics for this file.'
       }
     }
 
-    triage =
-      triage ??
+    let triage: ImportGeminiTriage =
+      triageCandidate ??
       finalizeImportGeminiTriage(null, {
         file: parsedFile.file,
         headers,
@@ -208,6 +232,7 @@ export async function POST(request: NextRequest) {
       _lat: number | null
       _lng: number | null
       _label: string
+      _rowPreview: UploadRawRow
     }
 
     const insertRows: RowAcc[] = dataRows.map((row: UploadRawRow) => {
@@ -240,6 +265,7 @@ export async function POST(request: NextRequest) {
         _lat: latOk ? lat : null,
         _lng: lngOk ? lng : null,
         _label,
+        _rowPreview: compactRowPreview(row),
       }
     })
 
@@ -321,7 +347,7 @@ export async function POST(request: NextRequest) {
       triage.bucket === 'GEOSPATIAL' &&
       (triage.visual_bucket === 'MARKER' || triage.visual_bucket === 'HEATMAP')
 
-    const markerPoints = mapVisual
+    const markerCandidates = mapVisual
       ? kept
           .filter((r) => r._lat != null && r._lng != null)
           .map((r) => ({
@@ -329,25 +355,60 @@ export async function POST(request: NextRequest) {
             lng: r._lng!,
             value: r.metric_value,
             label: r._label,
+            file_name: file.name,
+            metric_name: r.metric_name,
+            submarket_id: r.submarket_id,
+            time_period: r.time_period,
+            row_preview: r._rowPreview,
           }))
       : []
+    const markerPoints =
+      markerCandidates.length > MAX_MARKER_POINTS
+        ? markerCandidates.slice(0, MAX_MARKER_POINTS)
+        : markerCandidates
+
+    if (markerCandidates.length > MAX_MARKER_POINTS) {
+      triage = {
+        ...triage,
+        warnings: [
+          ...triage.warnings,
+          `Map preview capped at ${MAX_MARKER_POINTS.toLocaleString()} markers to keep the client layer responsive.`,
+        ],
+      }
+    }
 
     const dbRows = kept
       .filter((r) => r.metric_value !== null || r.submarket_id !== null)
       .map((r) => {
-      const { _lat, _lng, _label, ...rest } = r
+      const { _lat, _lng, _label, _rowPreview, ...rest } = r
       void _label
+      void _rowPreview
       const geometry =
         rest.geometry ?? (_lat != null && _lng != null ? `POINT(${_lng} ${_lat})` : null)
       return { ...rest, geometry }
       })
 
-    if (dbRows.length > 0) {
-      const { error } = await supabase.from('projectr_master_data').upsert(dbRows as never[], {
-        onConflict: 'submarket_id,metric_name,time_period,data_source',
-        ignoreDuplicates: true,
-      })
-      if (error) throw new Error(error.message)
+    let committed = mode === 'import'
+    let persistenceWarning: string | null = null
+    if (mode === 'import' && dbRows.length > 0) {
+      try {
+        const { error } = await supabase.from('projectr_master_data').upsert(dbRows as never[], {
+          onConflict: 'submarket_id,metric_name,time_period,data_source',
+          ignoreDuplicates: true,
+        })
+        if (error) throw new Error(error.message)
+      } catch (error) {
+        committed = false
+        persistenceWarning =
+          error instanceof Error ? error.message : 'Projectr could not persist this import to Supabase.'
+        triage = {
+          ...triage,
+          warnings: [
+            ...triage.warnings,
+            'Projectr imported this dataset locally, but server persistence failed. Map and sidebar workflows still work in this browser session.',
+          ],
+        }
+      }
     }
 
     const preview_rows = kept.slice(0, 8).map((r) => ({
@@ -363,8 +424,16 @@ export async function POST(request: NextRequest) {
       rows_ingested: kept.length,
       preview_rows,
       parse_summary: analysisSample,
+      raw_table: {
+        headers,
+        rows: dataRows.slice(0, MAX_RAW_TABLE_ROWS),
+        total_rows: dataRows.length,
+        truncated: dataRows.length > MAX_RAW_TABLE_ROWS,
+      },
       marker_points: markerPoints,
-      map_eligible: markerPoints.length > 0,
+      map_eligible: markerCandidates.length > 0,
+      committed,
+      persistence_warning: persistenceWarning,
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unexpected error'

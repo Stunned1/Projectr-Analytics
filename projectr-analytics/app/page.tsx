@@ -6,12 +6,13 @@ import AgenticNormalizer from '@/components/AgenticNormalizer'
 import MarketReportExport from '@/components/MarketReportExport'
 import { AgentThinkingPanel } from '@/components/AgentThinkingPanel'
 import AgentTerminal, { type AgentTerminalSize } from '@/components/AgentTerminal'
+import { ImportedDataPanel } from '@/components/ImportedDataPanel'
 import type { AgentAction, AgentTrace, AnalysisSite } from '@/lib/agent-types'
 import type { CycleAnalysis } from '@/lib/cycle/types'
 import type { MapLayersSnapshot } from '@/lib/report/types'
 import { parseCycleAnalysisField } from '@/lib/report/validate-cycle'
 import { useSitesStore } from '@/lib/sites-store'
-import { useClientUploadMarkersStore } from '@/lib/client-upload-markers-store'
+import { useClientUploadMarkersStore, type ClientUploadMarker } from '@/lib/client-upload-markers-store'
 import { useClientUploadSessionStore } from '@/lib/client-upload-session-store'
 import type { NormalizerIngestPayload } from '@/lib/normalize-client-types'
 import { aggregateClientUploadSession } from '@/lib/client-upload-session-aggregate'
@@ -675,6 +676,7 @@ export default function Home() {
   /** User 3D pill (45°) when agent has not overridden tilt. */
   const [map3DEnabled, setMap3DEnabled] = useState(false)
   const [analysisSites, setAnalysisSites] = useState<AnalysisSite[]>([])
+  const [selectedUploadedMarker, setSelectedUploadedMarker] = useState<ClientUploadMarker | null>(null)
   const [agentPermitFilter, setAgentPermitFilter] = useState<string[] | null>(null)
   const [selectedSite, setSelectedSite] = useState<AnalysisSite | null>(null)
   const [agentFlyTo, setAgentFlyTo] = useState<{ lat: number; lng: number } | null>(null)
@@ -720,6 +722,9 @@ export default function Home() {
   }, [])
 
   const handleNormalizerIngested = useCallback((payload: NormalizerIngestPayload) => {
+    setSelectedUploadedMarker(null)
+    setMarketPanelTab('data')
+    setPanelOpen(true)
     const pts = payload.mergedMarkerPoints
     if (pts.length > 0) {
       setAgentLayerOverrides((prev) => ({ ...prev, clientData: true }))
@@ -728,6 +733,13 @@ export default function Home() {
       setAgentFlyTo({ lat, lng })
     } else {
       setAgentLayerOverrides((prev) => ({ ...prev, clientData: false }))
+    }
+  }, [])
+
+  const handleUploadedMarkerSelect = useCallback((marker: ClientUploadMarker | null) => {
+    setSelectedSite(null)
+    setSelectedUploadedMarker(marker)
+    if (marker) {
       setMarketPanelTab('data')
       setPanelOpen(true)
     }
@@ -1361,7 +1373,7 @@ export default function Home() {
 
   const rightPanelVisible =
     panelOpen &&
-    (result != null || aggregateData != null || selectedSite != null || agentSidebarTrace != null)
+    (result != null || aggregateData != null || selectedSite != null || agentSidebarTrace != null || clientUploadAgg != null)
 
   const sidebarActiveMarket =
     result != null
@@ -1425,6 +1437,7 @@ export default function Home() {
           map3DActive={map3DActive}
           onToggleMap3D={handleMap3DToggle}
           mapViewportRef={mapViewportRef}
+          onUploadedMarkerSelect={handleUploadedMarkerSelect}
         />
         </div>
 
@@ -1563,7 +1576,8 @@ export default function Home() {
           agentSidebarTrace != null &&
           !selectedSite &&
           !result &&
-          !aggregateData && (
+          !aggregateData &&
+          !clientUploadAgg && (
             <div className="flex min-h-0 min-w-[360px] flex-1 flex-col overflow-hidden">
               <AgentThinkingPanel
                 trace={agentSidebarTrace}
@@ -1576,6 +1590,36 @@ export default function Home() {
               />
             </div>
           )}
+
+        {panelOpen && !selectedSite && !result && !aggregateData && clientUploadAgg && (
+          <div className="flex min-h-0 min-w-[360px] flex-1 flex-col overflow-hidden">
+            <div className="shrink-0 border-b border-border/50 p-4 pb-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <h2 className="text-base font-bold leading-tight text-foreground">Imported Data</h2>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {clientUploadAgg.fileNameLabel ?? 'Last imported dataset'}
+                  </p>
+                </div>
+                <div className="flex flex-shrink-0 items-center gap-1.5">
+                  <button type="button" onClick={() => setPanelOpen(false)} className="text-xl leading-none text-muted-foreground hover:text-foreground">×</button>
+                </div>
+              </div>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+              <PanelSection title="Imported datasets">
+                <ImportedDataPanel
+                  session={clientUploadSession}
+                  selectedMarker={selectedUploadedMarker}
+                  onClearSelectedMarker={() => setSelectedUploadedMarker(null)}
+                />
+              </PanelSection>
+              <PanelSection title="Agentic Normalizer">
+                <AgenticNormalizer onIngested={handleNormalizerIngested} />
+              </PanelSection>
+            </div>
+          </div>
+        )}
 
         {panelOpen && selectedSite != null && (
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -1994,53 +2038,12 @@ export default function Home() {
             </details>
 
             {clientUploadAgg && (
-              <PanelSection title="Client CSV (last upload)">
-                <p className="mb-2 text-[10px] leading-relaxed text-muted-foreground">
-                  {clientUploadAgg.fileNameLabel && (
-                    <span className="font-mono text-foreground/90">{clientUploadAgg.fileNameLabel}</span>
-                  )}{' '}
-                  {clientUploadAgg.sourceCount > 1 ? (
-                    <span className="text-zinc-500">({clientUploadAgg.sourceCount} files)</span>
-                  ) : null}{' '}
-                  · {clientUploadAgg.triage.bucket} / {clientUploadAgg.triage.visual_bucket} ·{' '}
-                  {clientUploadAgg.rowsIngested} rows
-                  {clientUploadAgg.mapPinsActive ? (
-                    <span className="text-primary"> · {clientUploadAgg.markerCount} map pin(s)</span>
-                  ) : null}
-                </p>
-                <p className="mb-2 text-[10px] italic text-zinc-500">&quot;{clientUploadAgg.reasoning}&quot;</p>
-                <div className="max-h-40 overflow-auto rounded border border-border/50 text-[10px]">
-                  <table className="w-full border-collapse">
-                    <thead>
-                      <tr className="border-b border-border/60 bg-muted/30 text-left text-[9px] uppercase text-muted-foreground">
-                        <th className="p-1.5">Geo</th>
-                        <th className="p-1.5">Metric</th>
-                        <th className="p-1.5">Value</th>
-                        <th className="p-1.5">Period</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {clientUploadAgg.previewRows.map((r, i) => (
-                        <tr key={i} className="border-b border-border/40">
-                          <td className="p-1.5 font-mono text-foreground/90">{r.submarket_id ?? '—'}</td>
-                          <td className="p-1.5 text-muted-foreground">{r.metric_name}</td>
-                          <td className="p-1.5">{r.metric_value != null ? r.metric_value.toLocaleString() : '—'}</td>
-                          <td className="p-1.5 text-zinc-500">{r.time_period ?? '—'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                {!clientUploadAgg.mapPinsActive && (
-                  <p className="mt-2 text-[10px] text-muted-foreground">
-                    Not on map — you are viewing it here in this <span className="text-foreground">preview table</span>{' '}
-                    (first rows returned from normalize). Full series is in Supabase{' '}
-                    <span className="text-foreground">projectr_master_data</span> under{' '}
-                    <span className="text-foreground">Client Upload</span>. Only rows with a real geography key or
-                    metric value are persisted there, so table-only uploads may stay in this preview path instead of
-                    appearing in <span className="text-foreground">All metrics (flat table)</span> above.
-                  </p>
-                )}
+              <PanelSection title="Imported Data">
+                <ImportedDataPanel
+                  session={clientUploadSession}
+                  selectedMarker={selectedUploadedMarker}
+                  onClearSelectedMarker={() => setSelectedUploadedMarker(null)}
+                />
               </PanelSection>
             )}
 

@@ -12,6 +12,7 @@ import { Layers } from 'lucide-react'
 import { dedupedFetchJson } from '@/lib/request-cache'
 import type { Site } from '@/lib/sites-store'
 import type { AnalysisSite } from '@/lib/agent-types'
+import type { ClientUploadMarker } from '@/lib/client-upload-markers-store'
 import { detectNycBoroughFromZips, isNycZip } from '@/lib/geography'
 import { fetchMomentumScores, normalizeMomentumZipList } from '@/lib/momentum-client'
 import { cn } from '@/lib/utils'
@@ -688,7 +689,7 @@ interface CommandMapProps {
   transitData: TransitData | null
   cityZips?: Array<{ zip: string; lat: number | null; lng: number | null; zori_latest: number | null; zhvi_latest: number | null; city: string; state: string | null }> | null
   boroughBoundary?: object | null
-  uploadedMarkers?: Array<{ lat: number; lng: number; value: number | null; label: string }> | null
+  uploadedMarkers?: ClientUploadMarker[] | null
   /** Saved analyst shortlist - always drawn while browsing other ZIPs. */
   shortlistSites?: Site[]
   /** Analysis result sites from agent spatial model - glowing pins */
@@ -713,6 +714,7 @@ interface CommandMapProps {
   onToggleMap3D: () => void
   /** When set, updated on map idle for `/save` without a loaded market. */
   mapViewportRef?: MutableRefObject<MapViewportSnapshot | null>
+  onUploadedMarkerSelect?: (marker: ClientUploadMarker | null) => void
 }
 
 function CommandMap({
@@ -737,6 +739,7 @@ function CommandMap({
   map3DActive,
   onToggleMap3D,
   mapViewportRef,
+  onUploadedMarkerSelect,
 }: CommandMapProps) {
   const perfDebug = process.env.NEXT_PUBLIC_PERF_DEBUG === '1'
 
@@ -1942,16 +1945,20 @@ function CommandMap({
           lineWidthMinPixels: 1,
           pickable: true,
           onHover: (info: PickingInfo) => {
-            const d = info.object as { label: string; value: number | null } | undefined
+            const d = info.object as ClientUploadMarker | undefined
             if (d) setTooltipStable({ x: info.x, y: info.y, text: `📍 ${d.label}${d.value != null ? ': $' + d.value.toLocaleString() : ''}` })
             else setTooltipStable(null)
+          },
+          onClick: (info: PickingInfo) => {
+            const d = info.object as ClientUploadMarker | undefined
+            onUploadedMarkerSelect?.(d ?? null)
           },
         })
       )
     }
 
     return result
-  }, [visiblePrimaryBoundary, visibleNeighborBoundaries, visibleCityBoundaries, boroughBoundary, transitStops, transitRoutes, parcelData, parcelColorMode, tractData, amenityPoints, poiPoints, floodData, nycPermitData, texasRawPermitData, texasPermitActivity, permitHeatPoints, permitTypeFilter, texasRawPermitCategoryFilter, agentPermitFilter, mapZoom, momentumScores, effectiveLayers, colorScale, primaryMetricValue, effectiveMetric, zip, setTooltipStable, uploadedMarkers, shortlistSites, analysisSites, nycFeatureAvailable, texasPermitAvailable, usingTexasRawPermits])
+  }, [visiblePrimaryBoundary, visibleNeighborBoundaries, visibleCityBoundaries, boroughBoundary, transitStops, transitRoutes, parcelData, parcelColorMode, tractData, amenityPoints, poiPoints, floodData, nycPermitData, texasRawPermitData, texasPermitActivity, permitHeatPoints, permitTypeFilter, texasRawPermitCategoryFilter, agentPermitFilter, mapZoom, momentumScores, effectiveLayers, colorScale, primaryMetricValue, effectiveMetric, zip, setTooltipStable, uploadedMarkers, shortlistSites, analysisSites, nycFeatureAvailable, texasPermitAvailable, usingTexasRawPermits, onUploadedMarkerSelect])
 
   const handleToggle = useCallback((key: keyof LayerState) => {
     const nextKey =

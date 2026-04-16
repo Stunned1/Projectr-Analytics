@@ -8,6 +8,7 @@ import { PENDING_NAV_KEY } from '@/lib/pending-navigation'
 export const LOCAL_WORKSPACE_SESSION_KEYS: readonly string[] = [
   'projectr-client-upload-session',
   'projectr-client-upload-markers',
+  'scout-client-upload-markers',
   AGENT_CHAT_STORAGE_KEY,
   PENDING_NAV_KEY,
 ]

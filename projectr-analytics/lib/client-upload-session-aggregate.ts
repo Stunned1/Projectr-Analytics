@@ -19,6 +19,7 @@ function legacyToSources(s: ClientUploadSessionLegacy): ClientUploadSourcePart[]
       rowsIngested: s.rowsIngested,
       previewRows: s.previewRows,
       parseSummary: s.parseSummary,
+      rawTable: s.rawTable,
       markerCount: s.markerCount,
       mapPinsActive: s.mapPinsActive,
       mapEligible: s.mapEligible,
