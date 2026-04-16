@@ -159,6 +159,7 @@ _04.16.2026_
 - `/api/aggregate` now accepts shared county / metro `area_key` lookups, prefers direct precomputed area rows from `projectr_master_data`, and skips ZIP cold-fills on that fast path.
 - `/api/aggregate` now fetches ZIP snapshots, metro lookup, and only the metric rows it actually needs in parallel, which trims county / metro payload size and avoids extra ZIP-weight lookups for large Texas areas.
 - `/api/county` now falls back to Census county FIPS plus `zip_geocode_cache` when `zip_metro_lookup.county_name` is unusable for Texas rows, restoring live `Harris County, TX` and `Travis County, TX` searches in the running app.
+- `CommandMap` now keeps the deck.gl overlay attached across layer updates so Texas county / metro searches stop losing visible map layers after navigation, and momentum scores are cached by ZIP set instead of re-fetching on unrelated layer toggles.
 
 **Map & Visualization**
 

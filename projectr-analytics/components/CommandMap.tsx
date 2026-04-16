@@ -349,17 +349,19 @@ function DeckGlOverlay({ layers }: { layers: Layer[] }) {
   /** Vector Map ID: interleaved mode avoids `getViewports()[0]` being undefined during Maps’ WebGL draw. */
   const deck = useMemo(() => new GoogleMapsOverlay({ interleaved: true }), [])
   const map = useMap()
+  const attachedMapRef = useRef<google.maps.Map | null>(null)
 
   useEffect(() => {
     if (!map) return
     let cancelled = false
-    let attached = false
     const attach = () => {
-      if (cancelled || attached) return
+      if (cancelled || attachedMapRef.current === map) return
       try {
+        if (attachedMapRef.current && attachedMapRef.current !== map) {
+          deck.setMap(null)
+        }
         deck.setMap(map)
-        attached = true
-        deck.setProps({ layers })
+        attachedMapRef.current = map
       } catch {
         /* map not ready */
       }
@@ -371,13 +373,8 @@ function DeckGlOverlay({ layers }: { layers: Layer[] }) {
       cancelled = true
       google.maps.event.removeListener(once)
       window.clearTimeout(fallback)
-      try {
-        deck.setMap(null)
-      } catch {
-        /* ignore */
-      }
     }
-  }, [map, deck, layers])
+  }, [map, deck])
 
   useEffect(() => {
     if (!map) return
@@ -387,6 +384,17 @@ function DeckGlOverlay({ layers }: { layers: Layer[] }) {
       /* ignore */
     }
   }, [layers, deck, map])
+
+  useEffect(() => {
+    return () => {
+      try {
+        deck.setMap(null)
+        attachedMapRef.current = null
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [deck])
 
   return null
 }
@@ -612,6 +620,8 @@ function CommandMap({
   const [permitTypeFilter, setPermitTypeFilter] = useState<Set<string>>(new Set())
   const [mapZoom, setMapZoom] = useState(11)
   const handleZoomChange = useCallback((zoom: number) => { setMapZoom(zoom) }, [])
+  const momentumCacheRef = useRef(new globalThis.Map<string, Record<string, number>>())
+  const momentumInflightRef = useRef(new globalThis.Map<string, Promise<Record<string, number>>>())
   const fitClientMarkersOnly =
     !zip &&
     !(cityZips && cityZips.length > 0) &&
@@ -647,6 +657,17 @@ function CommandMap({
     layerStateResync && layerStateResync.id.toString() !== layerStateSnapshot.key
       ? layerStateResync.state
       : layerStateSnapshot.value
+  const momentumEnabled = Boolean(localLayers.momentum || agentLayerOverrides?.momentum)
+  const momentumZipKey = useMemo(() => {
+    const allZips = Array.from(
+      new Set([
+        ...(cityZips?.map((z) => z.zip) ?? []),
+        ...(zip ? [zip] : []),
+        ...visibleNeighborBoundaries.map((n) => n.zip),
+      ].filter(Boolean))
+    )
+    return allZips.length > 0 ? allZips.sort().join(',') : null
+  }, [cityZips, zip, visibleNeighborBoundaries])
 
   const setTooltipStable = useCallback((next: { x: number; y: number; text: string } | null) => {
     setTooltip((prev) => {
@@ -661,32 +682,50 @@ function CommandMap({
 
   // Fetch momentum scores when layer is toggled on and we have ZIPs loaded
   useEffect(() => {
-    const isOn = (localLayers.momentum || agentLayerOverrides?.momentum)
-    if (!isOn) return
+    if (!momentumEnabled || !momentumZipKey) return
 
-    const allZips = [
-      ...(cityZips?.map((z) => z.zip) ?? []),
-      ...(zip ? [zip] : []),
-      ...visibleNeighborBoundaries.map((n) => n.zip),
-    ].filter(Boolean)
+    const cached = momentumCacheRef.current.get(momentumZipKey)
+    if (cached) {
+      setMomentumScores(cached)
+      return
+    }
 
-    if (!allZips.length) return
-
-    fetch('/api/momentum', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ zips: allZips }),
-    })
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.scores) {
-          const scoreMap: Record<string, number> = {}
-          for (const s of d.scores) scoreMap[s.zip] = s.score
-          setMomentumScores(scoreMap)
-        }
+    let cancelled = false
+    const zips = momentumZipKey.split(',')
+    const request =
+      momentumInflightRef.current.get(momentumZipKey) ??
+      fetch('/api/momentum', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ zips }),
       })
-      .catch(() => {})
-  }, [localLayers.momentum, agentLayerOverrides, zip, cityZips, visibleNeighborBoundaries])
+        .then((r) => r.json())
+        .then((d) => {
+          const scoreMap: Record<string, number> = {}
+          if (Array.isArray(d.scores)) {
+            for (const s of d.scores) {
+              if (typeof s?.zip === 'string' && typeof s?.score === 'number') {
+                scoreMap[s.zip] = s.score
+              }
+            }
+          }
+          momentumCacheRef.current.set(momentumZipKey, scoreMap)
+          return scoreMap
+        })
+        .catch(() => ({}))
+        .finally(() => {
+          momentumInflightRef.current.delete(momentumZipKey)
+        })
+
+    momentumInflightRef.current.set(momentumZipKey, request)
+    request.then((scoreMap: Record<string, number>) => {
+      if (!cancelled) setMomentumScores(scoreMap)
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [momentumEnabled, momentumZipKey])
 
   // Fetch city ZIP boundaries when city search is performed
   useEffect(() => {
