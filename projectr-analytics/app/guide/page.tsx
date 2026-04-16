@@ -375,7 +375,7 @@ export default function DocumentationPage() {
                           <ol className="list-decimal space-y-3 pl-5 text-sm leading-relaxed text-foreground/90 marker:text-primary marker:font-semibold">
                             <li>
                               <span className="font-semibold text-primary">Load a market: </span>
-                              In the sidebar, enter a ZIP, city and state (e.g. Austin, TX), or an NYC borough name, then
+                              In the sidebar, enter a ZIP, city and state (e.g. Houston, TX or Austin, TX), or an NYC borough name, then
                               press Enter. The map and data panel update together.
                             </li>
                             <li>

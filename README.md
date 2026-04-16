@@ -17,6 +17,44 @@ A geospatial data engine and automated reporting platform for real estate analyt
 * **Intelligence:** Gemini 2.5 Flash
 * **Reporting:** @react-pdf/renderer
 
+## Texas MVP
+
+Texas is the default MVP experience. NYC-specific parcel, permit, and borough-analysis workflows remain in the product, but they should stay geography-gated rather than drive the default story or shared architecture.
+
+### Texas MVP source inventory
+
+| Source | Coverage | Granularity | Access method | Reusable vs Texas-only | Scout schema mapping | Performance / storage plan |
+|---|---|---|---|---|---|---|
+| Zillow ZIP + metro CSVs | U.S. ZIPs + metros | Monthly snapshots + ZORI time series | Local CSV ingest via `npm run ingest:zillow` | National reusable | `zillow_zip_snapshot`, `zillow_metro_snapshot`, `zip_metro_lookup`, `zillow_zori_monthly` | Precompute snapshots and metro lookup once; serve cached tables only at runtime |
+| Census ACS | U.S. ZIP / tract / block group | Annual / 5-year ACS vintages | Live API fetch, cached into `projectr_master_data` | National reusable | `projectr_master_data` tabular + tract / block-group responses | Cache normalized rows per ZIP; avoid repeated cold fetches |
+| FRED | U.S. county | Monthly + annual | Live API fetch, cached into `projectr_master_data` | National reusable | `projectr_master_data` time series (`Unemployment_Rate`, `Employment_Rate`, `Real_GDP`) | Cache latest county series; avoid repeated county searches when aggregate views reopen |
+| HUD | U.S. ZIP | Annual-ish benchmark rent | Live API with ACS fallback, cached into `projectr_master_data` | National reusable | `projectr_master_data` tabular `FMR_*BR` metrics | Store normalized bedroom rows; no runtime bedroom transforms |
+| Google Trends | U.S. geo search interest | Weekly | Live API route | National reusable | Route payload only; report payload stores summarized series | Keep fetch deduped and scoped to anchor ZIP / city-state; do not persist large raw responses |
+| Transitland / OSM | U.S. transit + amenities context | Current snapshot | Live API routes | National reusable | Route payloads only | Keep viewport / radius scoped; no raw persistence by default |
+| Overture POIs | U.S. POIs | Current snapshot | Live API route | National reusable | Route payloads only | Keep radius-limited response; avoid global preload |
+| Flood source already wired | U.S. where available | Current snapshot | Live API route | National reusable | Route payloads only | Keep radius-limited response; avoid heavy default layers |
+| [TREC Housing Activity](https://trerc.tamu.edu/data/housing-activity/state/texas/) | Texas state / MSA / county | Monthly | Official site export / manual CSV-Excel capture from housing-activity pages | Texas-only | Normalize county + metro metrics into `projectr_master_data`; raw export stays source-side | Precompute county / metro rows from exports; avoid runtime MLS rollups or broad joins |
+| [TREC Building Permits](https://trerc.tamu.edu/data/building-permits/) | National data surfaced for Texas state / MSA / county / permit office | Monthly cumulative + annual | Official custom query/export from Building Permits page | Reusable data, Texas-first MVP usage | Store Texas-specific raw/source extracts only if needed; publish normalized county + metro permit metrics into `projectr_master_data` | Prefer pre-aggregated county / metro outputs; no raw permit-office joins on user requests |
+| [Texas Demographic Center estimates](https://demographics.texas.gov/index/Census/Estimates) | Texas county / place / MSA / COG | Annual plus January snapshot | Official download tool / file downloads | Texas-only | Normalize county + metro population totals / growth into `projectr_master_data` | Store per-vintage rows and latest aggregates; serve latest rows by geography key |
+| [Texas Demographic Center projections](https://demographics.texas.gov/Projections/) | Texas county / MSA / COG | Annual 2020-2060 | Official custom download + downloadable files | Texas-only | Keep full projections in source/raw tables, publish selected planning metrics into `projectr_master_data` | Precompute common horizons; do not join full projection matrices at runtime |
+| [TxGIO land parcels](https://gio.texas.gov/stratmap/land-parcels.html) | Texas county parcel coverage varies | County refresh cadence varies; TxGIO attempts annual refreshes | DataHub shapefile / geodatabase download | Texas-only optional | Raw spatial source tables only when needed; not part of default MVP query path | Lazy county ingest only; never load statewide parcel payloads in the default map flow |
+| [TxGIO address points](https://gio.texas.gov/stratmap/address-points.html) | Texas statewide aggregated address points | Iterative / ongoing updates | DataHub download | Texas-only optional | Optional raw geocoding / QA table, not a default end-user metric source | Keep offline or county-scoped; do not add to normal market-load payloads |
+
+### Texas architecture note
+
+- Shared core: keep `/api/market`, `/api/city`, `/api/aggregate`, shared map layers, and PDF/report payloads geography-neutral around ZIP / county / metro keys.
+- Texas adapters: TREC and TDC ingestors should emit normalized metric rows into `projectr_master_data`, using Texas-specific raw/source tables only when the source shape cannot be represented cleanly as shared metrics.
+- NYC gated features: PLUTO parcels, NYC DOB permits, borough search, and `run_analysis` stay intact, but appear only when the active geography is New York City.
+- Expansion path: future states should add source adapters that map into the same shared geography keys instead of adding more state-specific UI branches.
+
+### Texas performance note
+
+- Do not fetch or render NYC-only parcel / DOB permit data outside NYC; keep those layers hard-gated by geography.
+- Prefer precomputed county / metro aggregates from Texas exports over runtime joins across raw MLS, permit-office, or demographic files.
+- Reuse cached tract / block-group / metro lookup responses for common Texas geographies; keep Texas default loads to ZIP / city / metro payloads.
+- Optional Texas parcel and address datasets should stay lazy and county-scoped so statewide MVP load time remains fast.
+- Remaining hotspot: aggregate cold starts still backfill `projectr_master_data` per ZIP before returning; Texas adapters should pre-populate cached county / metro rows to remove that latency from common Texas workflows.
+
 ## Setup
 
 ### Prerequisites
@@ -51,8 +89,9 @@ TRANSITLAND_API_KEY=             # free at transit.land/sign-up (Developer API, 
 4. `npm run ingest:zillow` - loads Zillow data into Supabase
 5. `npm run populate:centroids` - run 6-7 times until "All centroids already populated" (geocodes ~7,661 ZIPs)
 6. `npm run ingest:permits` - ingests NYC DOB building permits into `nyc_permits` table (all 5 boroughs, NB/A1/A2/DM, 2022+); takes ~10-20 min
-7. `npm run dev`
-8. Optional before demos/recordings: with `npm run dev` running, `npm run warm:demo` - warms cache for ZIPs 11201, 10001, and 60614 via market/transit/trends/cycle APIs (`WARM_BASE_URL` overrides default `http://127.0.0.1:3000`).
+7. Optional Texas source loads after downloading official exports locally: `npm run ingest:texas:housing -- --file <path-to-trec-housing-export>`, `npm run ingest:texas:permits -- --file <path-to-trec-building-permits-export>`, and `npm run ingest:texas:demographics -- --file <path-to-tdc-export> [--dataset estimates|projections]`; each script normalizes county / metro rows into `projectr_master_data`.
+8. `npm run dev`
+9. Optional before demos/recordings: with `npm run dev` running, `npm run warm:demo` - warms cache for ZIPs 11201, 10001, and 60614 via market/transit/trends/cycle APIs (`WARM_BASE_URL` overrides default `http://127.0.0.1:3000`).
 
 ### Known setup issues
 - **Shortlist / `saved_sites`** - enable **Anonymous sign-ins** under Supabase Authentication → Providers (or use email/OAuth); the app calls `signInAnonymously()` when there is no session so `saved_sites` inserts satisfy RLS.
@@ -79,6 +118,9 @@ _4.12.2026_
 _4.11.2026_
 - `POST /api/normalize`: Google forward-geocode for non-ZIP place cells (≤50 strings/upload), `lib/google-forward-geocode.ts`.
 
+_04.16.2026_
+- Added shared Texas source adapters plus `ingest:texas:housing`, `ingest:texas:permits`, and `ingest:texas:demographics` so TREC and Texas Demographic Center exports normalize county / metro rows into `projectr_master_data`.
+
 **Infrastructure**
 
 _4.8.2026_
@@ -97,6 +139,10 @@ _4.12.2026_
 - `/api/agent` with `stream: true` returns **`application/x-ndjson`**: `thinking_delta` lines (Gemini stream) then `status` + final `done` JSON; client `lib/consume-agent-ndjson-stream.ts`.
 - Agent NDJSON stream sends **`ping` keepalives** during the silent JSON map-action call so idle proxies less often drop the connection; route `maxDuration` 120s for long runs.
 
+_04.16.2026_
+- Added shared geography gating and Texas MVP source / architecture / performance notes so Texas becomes the default product framing without deleting NYC-specific workflows.
+- Added `/api/county`, `/api/metro`, and `/api/area-metrics`, and wired aggregate search to fall through from city lookups to county / metro lookups for Texas-friendly county / ZIP / metro workflows.
+
 **Bug Fixes**
 
 _4.11.2026_
@@ -104,6 +150,11 @@ _4.11.2026_
 
 _4.12.2026_
 - Deck `interleaved: true` (vector map); React 19 perf logging guard; PDF font/arrow fixes; `/api/aggregate` vacancy, BPS year bars, migration, cold ZIP fill; FRED NYC borough county names; remove bad `reservedRightPx`; `AgentTerminal` bottom anchor fix.
+
+_04.16.2026_
+- Non-NYC markets no longer keep NYC parcel / permit layers active or fetch PLUTO / DOB payloads, and single-ZIP tract loads now reuse the shared cached request path.
+- `CommandMap` now uses keyed ZIP / city boundary snapshots and versioned layer resync state so market-mode switches stop rendering stale overlays without synchronous effect resets.
+- Repo-blocking React 19 lint errors were removed from the PDF export routes, `AgentTerminal`, and `ShortlistPanel`; full lint now passes with warnings only.
 
 **Map & Visualization**
 
@@ -134,6 +185,9 @@ _4.12.2026_
 _4.15.2026_
 - Browser tab icon now uses the Scout logo asset.
 - Intelligence terminal and `/api/agent` now block off-topic prompts before Gemini runs, while every leading `/` input stays on the local slash-command path.
+
+_04.16.2026_
+- Search, guide, and agent copy now lead with Texas market examples while keeping NYC borough entry points available only when relevant.
 
 ## Known Bugs
 
@@ -168,6 +222,8 @@ _4.15.2026_
 
 - **Agent stream rerenders** - Streaming `thinking_delta` updates still bubble through the top-level page state, so the map shell can rerender more than necessary until the agent panel is isolated from high-frequency stream updates.
 - **Reusable analyst workflow packaging** - Scout currently reads as a Projectr-specific consulting workspace; broadening it into a reusable product for other analyst teams would require templated workflows, sharable deliverables, and less client-specific framing in the UX.
+- **Texas direct area metrics are route-level only** - County / metro searches now resolve and the ingestors normalize direct Texas rows into `projectr_master_data`, but the default stat cards still summarize ZIP aggregates; use `/api/area-metrics` when you need the direct county / metro source rows.
+- **Texas export fixtures** - The new TREC / Texas Demographic Center ingestors are header-alias based and compile cleanly, but there are no sample source exports checked into the repo; run them against real files before relying on every column mapping in production.
 
 ## Client CSV & AI session
 

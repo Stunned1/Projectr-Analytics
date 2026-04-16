@@ -12,6 +12,7 @@ import { Layers } from 'lucide-react'
 import { dedupedFetchJson } from '@/lib/request-cache'
 import type { Site } from '@/lib/sites-store'
 import type { AnalysisSite } from '@/lib/agent-types'
+import { detectNycBoroughFromZips, isNycZip } from '@/lib/geography'
 import { cn } from '@/lib/utils'
 
 function shortlistPinColor(stage: string | undefined): [number, number, number, number] {
@@ -73,22 +74,6 @@ interface ZipBoundary {
   zhvi: number | null
 }
 
-interface BlockGroupFeature {
-  type: 'Feature'
-  geometry: object
-  properties: {
-    GEOID: string
-    population: number
-    housing_units: number
-    owner_occupied: number
-  }
-}
-
-interface BlockGroupCollection {
-  type: 'FeatureCollection'
-  features: BlockGroupFeature[]
-}
-
 interface POIPoint {
   id: string
   position: [number, number]
@@ -139,6 +124,26 @@ export interface LayerState {
   clientData: boolean
 }
 
+interface KeyedValue<T> {
+  key: string | null
+  value: T
+}
+
+const DEFAULT_LAYER_STATE: LayerState = {
+  zipBoundary: true,
+  transitStops: true,
+  rentChoropleth: true,
+  blockGroups: false,
+  parcels: false,
+  tracts: false,
+  amenityHeatmap: false,
+  floodRisk: false,
+  nycPermits: false,
+  pois: false,
+  momentum: false,
+  clientData: true,
+}
+
 /** Pill colors - reused for collapsed layer “active” dot stack (CommandMap chrome). */
 const LAYER_DOT_INDICATORS: Array<{
   key: keyof LayerState
@@ -158,12 +163,6 @@ const LAYER_DOT_INDICATORS: Array<{
   { key: 'momentum', color: '#d946ef', label: 'Momentum' },
   { key: 'clientData', color: '#D76B3D', label: 'Client markers', needsClientMarkers: true },
 ]
-
-interface MapViewState {
-  lat: number
-  lng: number
-  zoom: number
-}
 
 interface PermitPayload {
   id: string
@@ -225,32 +224,6 @@ function hasFeatures(value: unknown): value is { features: unknown[] } {
   if (!value || typeof value !== 'object') return false
   return Array.isArray((value as { features?: unknown[] }).features)
 }
-
-// ── Dev sidebar registry ──────────────────────────────────────────────────────
-
-const DATA_LAYER_REGISTRY = [
-  { label: 'ZIP Boundary', source: 'Census TIGER', visualized: true, layerType: 'GeoJsonLayer (outline)' },
-  { label: 'Rent/value fill', source: 'Zillow Research', visualized: true, layerType: 'GeoJsonLayer choropleth - ZORI or ZHVI (metric toggle)' },
-  { label: 'Transit Stops', source: 'GTFS / OSM', visualized: true, layerType: 'ScatterplotLayer (cyan dots)' },
-  { label: 'Census Tracts', source: 'Census TIGER + ACS', visualized: true, layerType: 'GeoJsonLayer (rent/income choropleth)' },
-  { label: 'Amenity Heatmap', source: 'OpenStreetMap', visualized: true, layerType: 'HeatmapLayer (weighted by amenity type)' },
-  { label: 'Flood Risk Zones', source: 'FEMA NFHL', visualized: true, layerType: 'GeoJsonLayer (red = high risk)' },
-  { label: 'NYC Parcels (PLUTO)', source: 'NYC Open Data', visualized: true, layerType: 'ColumnLayer (3D columns - height = assessed value/sqft)' },
-  { label: 'Block Groups', source: 'Census TIGER + ACS', visualized: true, layerType: 'GeoJsonLayer (population density - replaced by Tracts)' },
-  { label: 'Vacancy Rate', source: 'Census ACS', visualized: false, layerType: null, note: 'Now included in Tracts layer' },
-  { label: 'PoP Momentum Score', source: 'Computed', visualized: false, layerType: null, note: 'Computed API exists; no map layer yet' },
-  { label: 'Unemployment Rate', source: 'FRED', visualized: false, layerType: null, note: 'County aggregate - sidebar chart only' },
-  { label: 'Real GDP', source: 'FRED', visualized: false, layerType: null, note: 'County aggregate - sidebar chart only' },
-  { label: 'Median Household Income', source: 'Census ACS', visualized: false, layerType: null, note: 'Now included in Tracts layer' },
-  { label: 'FMR by Bedroom', source: 'HUD / Census ACS', visualized: false, layerType: null, note: 'No spatial variation within ZIP' },
-  { label: 'Days on Market', source: 'Zillow Metro', visualized: false, layerType: null, note: 'Metro-level - stat card only' },
-  { label: 'Google Trends Score', source: 'Google Trends', visualized: false, layerType: null, note: 'City/state sentiment - sidebar sparkline only' },
-  { label: 'Permit Pin Locations', source: 'ArcGIS REST', visualized: false, layerType: null, note: 'DEFERRED - jurisdiction-specific feeds required' },
-]
-
-// Reuse expensive county blockgroup responses across CommandMap remounts.
-const BLOCKGROUP_CACHE: Record<string, BlockGroupCollection> = {}
-let commandMapRenderCounter = 0
 
 // ── Color scale: blue (low rent) → red (high rent) ───────────────────────────
 // Normalized across the set of loaded ZIPs for relative contrast
@@ -376,11 +349,9 @@ function DeckGlOverlay({ layers }: { layers: Layer[] }) {
   /** Vector Map ID: interleaved mode avoids `getViewports()[0]` being undefined during Maps’ WebGL draw. */
   const deck = useMemo(() => new GoogleMapsOverlay({ interleaved: true }), [])
   const map = useMap()
-  const [overlayReady, setOverlayReady] = useState(false)
 
   useEffect(() => {
     if (!map) return
-    setOverlayReady(false)
     let cancelled = false
     let attached = false
     const attach = () => {
@@ -388,7 +359,7 @@ function DeckGlOverlay({ layers }: { layers: Layer[] }) {
       try {
         deck.setMap(map)
         attached = true
-        setOverlayReady(true)
+        deck.setProps({ layers })
       } catch {
         /* map not ready */
       }
@@ -405,18 +376,17 @@ function DeckGlOverlay({ layers }: { layers: Layer[] }) {
       } catch {
         /* ignore */
       }
-      setOverlayReady(false)
     }
-  }, [map, deck])
+  }, [map, deck, layers])
 
   useEffect(() => {
-    if (!map || !overlayReady) return
+    if (!map) return
     try {
       deck.setProps({ layers })
     } catch {
       /* ignore */
     }
-  }, [layers, deck, map, overlayReady])
+  }, [layers, deck, map])
 
   return null
 }
@@ -627,10 +597,9 @@ function CommandMap({
 }: CommandMapProps) {
   const perfDebug = process.env.NEXT_PUBLIC_PERF_DEBUG === '1'
 
-  const [primaryBoundary, setPrimaryBoundary] = useState<GeoJSON | null>(null)
-  const [neighborBoundaries, setNeighborBoundaries] = useState<ZipBoundary[]>([])
-  const [cityBoundaries, setCityBoundaries] = useState<ZipBoundary[]>([])
-  const [blockGroupData, setBlockGroupData] = useState<BlockGroupCollection | null>(null)
+  const [primaryBoundaryState, setPrimaryBoundaryState] = useState<KeyedValue<GeoJSON | null>>({ key: null, value: null })
+  const [neighborBoundariesState, setNeighborBoundariesState] = useState<KeyedValue<ZipBoundary[]>>({ key: null, value: [] })
+  const [cityBoundariesState, setCityBoundariesState] = useState<KeyedValue<ZipBoundary[]>>({ key: null, value: [] })
   const [parcelData, setParcelData] = useState<{ parcels: ParcelPayload[]; stats: { p25_per_sqft: number; p75_per_sqft: number; p75_air_rights: number; max_air_rights: number; underbuilt_count: number; top_underbuilt: unknown[] } } | null>(null)
   const [tractData, setTractData] = useState<TractCollection | null>(null)
   const [amenityPoints, setAmenityPoints] = useState<AmenityPoint[]>([])
@@ -648,32 +617,36 @@ function CommandMap({
     !(cityZips && cityZips.length > 0) &&
     (uploadedMarkers?.length ?? 0) > 0
   const [selectedPermit, setSelectedPermit] = useState<PermitPayload | null>(null)
-  const [layers, setLayers] = useState<LayerState>({
-    zipBoundary: true,
-    transitStops: true,
-    rentChoropleth: true,
-    blockGroups: false,
-    parcels: false,
-    tracts: false,
-    amenityHeatmap: false,
-    floodRisk: false,
-    nycPermits: false,
-    pois: false,
-    momentum: false,
-    clientData: true,
-  })
+  const [layerStateSnapshot, setLayerStateSnapshot] = useState<KeyedValue<LayerState>>({ key: '0', value: DEFAULT_LAYER_STATE })
   const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null)
   const [activeMetric, setActiveMetric] = useState<'zori' | 'zhvi'>('zori')
   const [parcelColorMode, setParcelColorMode] = useState<'landuse' | 'airRights'>('landuse')
   const [layerPanelOpen, setLayerPanelOpen] = useState(false)
-  const lastLayerResyncId = useRef(0)
+  const renderCounterRef = useRef(0)
   const mapId = process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID ?? process.env.NEXT_PUBLIC_GOOGLE_MAPS_ID ?? undefined
-
-  useEffect(() => {
-    if (!layerStateResync || layerStateResync.id === lastLayerResyncId.current) return
-    lastLayerResyncId.current = layerStateResync.id
-    setLayers(layerStateResync.state)
-  }, [layerStateResync])
+  const detectedNycBorough = useMemo(() => detectNycBoroughFromZips(cityZips), [cityZips])
+  const nycFeatureAvailable = detectedNycBorough !== null || isNycZip(marketData?.zip ?? zip ?? null)
+  const cityBoundaryKey = useMemo(
+    () => (cityZips?.length ? cityZips.map((z) => z.zip).join(',') : null),
+    [cityZips]
+  )
+  const zipBoundaryKey = cityBoundaryKey ? null : zip ?? null
+  const visibleCityBoundaries = useMemo(
+    () => (cityBoundaryKey && cityBoundariesState.key === cityBoundaryKey ? cityBoundariesState.value : []),
+    [cityBoundariesState, cityBoundaryKey]
+  )
+  const visiblePrimaryBoundary = useMemo(
+    () => (zipBoundaryKey && primaryBoundaryState.key === zipBoundaryKey ? primaryBoundaryState.value : null),
+    [primaryBoundaryState, zipBoundaryKey]
+  )
+  const visibleNeighborBoundaries = useMemo(
+    () => (zipBoundaryKey && neighborBoundariesState.key === zipBoundaryKey ? neighborBoundariesState.value : []),
+    [neighborBoundariesState, zipBoundaryKey]
+  )
+  const localLayers =
+    layerStateResync && layerStateResync.id.toString() !== layerStateSnapshot.key
+      ? layerStateResync.state
+      : layerStateSnapshot.value
 
   const setTooltipStable = useCallback((next: { x: number; y: number; text: string } | null) => {
     setTooltip((prev) => {
@@ -688,13 +661,13 @@ function CommandMap({
 
   // Fetch momentum scores when layer is toggled on and we have ZIPs loaded
   useEffect(() => {
-    const isOn = (layers.momentum || agentLayerOverrides?.momentum)
+    const isOn = (localLayers.momentum || agentLayerOverrides?.momentum)
     if (!isOn) return
 
     const allZips = [
       ...(cityZips?.map((z) => z.zip) ?? []),
       ...(zip ? [zip] : []),
-      ...neighborBoundaries.map((n) => n.zip),
+      ...visibleNeighborBoundaries.map((n) => n.zip),
     ].filter(Boolean)
 
     if (!allZips.length) return
@@ -713,52 +686,26 @@ function CommandMap({
         }
       })
       .catch(() => {})
-  }, [layers.momentum, agentLayerOverrides, zip, cityZips, neighborBoundaries])
+  }, [localLayers.momentum, agentLayerOverrides, zip, cityZips, visibleNeighborBoundaries])
 
   // Fetch city ZIP boundaries when city search is performed
   useEffect(() => {
-    if (!cityZips?.length) { setCityBoundaries([]); return }
-    setCityBoundaries([])
-    // Also clear single-ZIP layers when switching to city mode
-    setPrimaryBoundary(null)
-    setNeighborBoundaries([])
+    if (!cityZips?.length || !cityBoundaryKey) return
+    let cancelled = false
 
-    // Fetch borough parcels if this is an NYC borough search
-    // Detect by checking if all ZIPs are in the same NYC borough range
-    const firstZip = cityZips[0]?.zip ?? ''
-    const nycBoroughMap: Record<string, string> = {
-      '10': 'manhattan', '11': 'bronx',
-    }
-    const manhattanZips = cityZips.every((z) => z.zip >= '10001' && z.zip <= '10282')
-    const bronxZips = cityZips.every((z) => z.zip >= '10451' && z.zip <= '10475')
-    const brooklynZips = cityZips.every((z) => z.zip >= '11200' && z.zip <= '11256')
-    const queensZips = cityZips.every((z) => z.zip >= '11100' && z.zip <= '11436')
-    const siZips = cityZips.every((z) => z.zip >= '10300' && z.zip <= '10315')
-
-    const detectedBorough = manhattanZips ? 'manhattan'
-      : bronxZips ? 'bronx'
-      : brooklynZips ? 'brooklyn'
-      : queensZips ? 'queens'
-      : siZips ? 'staten island'
-      : null
-
-    void nycBoroughMap // suppress unused warning
-    void firstZip
-
-    if (detectedBorough) {
-      dedupedFetchJson<ParcelResponse>(`/api/parcels?borough=${encodeURIComponent(detectedBorough)}`)
+    if (detectedNycBorough) {
+      dedupedFetchJson<ParcelResponse>(`/api/parcels?borough=${encodeURIComponent(detectedNycBorough)}`)
         .then((d) => {
-          if (Array.isArray(d.parcels) && d.stats) {
+          if (!cancelled && Array.isArray(d.parcels) && d.stats) {
             setParcelData({ parcels: d.parcels, stats: d.stats })
           }
         })
         .catch(() => {})
 
       // Fetch permits for this borough - load full scatter data upfront, derive heatmap client-side
-      const boroughParam = detectedBorough.toUpperCase().replace(' ', '+')
-      dedupedFetchJson<PermitResponse>(`/api/permits?borough=${encodeURIComponent(detectedBorough.toUpperCase())}&zoom=14`)
+      dedupedFetchJson<PermitResponse>(`/api/permits?borough=${encodeURIComponent(detectedNycBorough.toUpperCase())}&zoom=14`)
         .then((d) => {
-          if (d.permits) {
+          if (!cancelled && d.permits) {
             setNycPermitData(d.permits)
             // Build heatmap points client-side from the same data
             setPermitHeatPoints(d.permits.map((p) => ({
@@ -768,7 +715,6 @@ function CommandMap({
           }
         })
         .catch(() => {})
-      void boroughParam
     }
 
     // Fetch tracts for NYC boroughs using known county FIPS
@@ -779,10 +725,12 @@ function CommandMap({
       queens: { state: '36', county: '081' },
       'staten island': { state: '36', county: '085' },
     }
-    if (detectedBorough && boroughFips[detectedBorough]) {
-      const { state, county } = boroughFips[detectedBorough]
+    if (detectedNycBorough && boroughFips[detectedNycBorough]) {
+      const { state, county } = boroughFips[detectedNycBorough]
       dedupedFetchJson<TractCollection>(`/api/tracts?state=${state}&county=${county}`)
-        .then((d) => { if (d.features) setTractData(d) })
+        .then((d) => {
+          if (!cancelled && d.features) setTractData(d)
+        })
         .catch(() => {})
     }
 
@@ -791,13 +739,19 @@ function CommandMap({
     if (first?.lat && first?.lng) {
       const { lat: cLat, lng: cLng } = first
       dedupedFetchJson<{ points?: AmenityPoint[] }>(`/api/amenities?lat=${cLat}&lng=${cLng}&radius=0.12`)
-        .then((d) => { if (d.points) setAmenityPoints(d.points) })
+        .then((d) => {
+          if (!cancelled && d.points) setAmenityPoints(d.points)
+        })
         .catch(() => {})
       dedupedFetchJson<{ points?: POIPoint[] }>(`/api/pois?lat=${cLat}&lng=${cLng}&radius=3000`)
-        .then((d) => { if (d.points) setPoiPoints(d.points) })
+        .then((d) => {
+          if (!cancelled && d.points) setPoiPoints(d.points)
+        })
         .catch(() => {})
       dedupedFetchJson<FloodCollection>(`/api/floodrisk?lat=${cLat}&lng=${cLng}&radius=0.12`)
-        .then((d) => { if (d.features) setFloodData(d) })
+        .then((d) => {
+          if (!cancelled && d.features) setFloodData(d)
+        })
         .catch(() => {})
     }
 
@@ -805,40 +759,40 @@ function CommandMap({
     const sample = cityZips.filter((z) => z.lat && z.lng).slice(0, 30)
     Promise.allSettled(
       sample.map((z) =>
-        fetch('/api/boundaries?zip=' + z.zip)
-          .then((r) => r.json())
+        dedupedFetchJson<GeoJSON>('/api/boundaries?zip=' + z.zip)
           .then((geojson) => ({ zip: z.zip, geojson, zori: z.zori_latest, zhvi: z.zhvi_latest }))
       )
     ).then((results) => {
+      if (cancelled) return
       const loaded: ZipBoundary[] = results
-        .filter((r): r is PromiseFulfilledResult<ZipBoundary> => r.status === 'fulfilled' && r.value.geojson?.features?.length > 0)
+        .filter((r): r is PromiseFulfilledResult<ZipBoundary> => r.status === 'fulfilled' && hasFeatures(r.value.geojson) && r.value.geojson.features.length > 0)
         .map((r) => r.value)
-      setCityBoundaries(loaded)
+      setCityBoundariesState({ key: cityBoundaryKey, value: loaded })
     })
-  }, [cityZips])
+    return () => {
+      cancelled = true
+    }
+  }, [cityZips, cityBoundaryKey, detectedNycBorough])
 
   // Fetch primary boundary + transit + neighbors when zip changes
   useEffect(() => {
-    if (!zip) {
-      // Aggregate / cold map: drop single-ZIP polygons so they do not sit under city choropleth
-      setPrimaryBoundary(null)
-      setNeighborBoundaries([])
-      return
-    }
-    // Clear city mode layers when switching to ZIP mode
-    setCityBoundaries([])
-    // Skip neighbor loading when city mode is active - city ZIPs provide the context
-    const inCityMode = (cityZips?.length ?? 0) > 0
+    if (!zip || !zipBoundaryKey) return
+    let cancelled = false
 
     // Primary boundary
     dedupedFetchJson<GeoJSON>('/api/boundaries?zip=' + zip)
-      .then((d) => { if (hasFeatures(d)) setPrimaryBoundary(d) })
+      .then((d) => {
+        if (cancelled) return
+        setPrimaryBoundaryState({ key: zipBoundaryKey, value: hasFeatures(d) ? d : null })
+      })
       .catch(() => {})
     dedupedFetchJson<{ zips?: NeighborZip[] }>('/api/neighbors?zip=' + zip)
       .then(async (d) => {
-        if (inCityMode) return // city ZIPs already provide context
         const neighbors: NeighborZip[] = d.zips ?? []
-        if (!neighbors.length) return
+        if (!neighbors.length || cancelled) {
+          setNeighborBoundariesState({ key: zipBoundaryKey, value: [] })
+          return
+        }
 
         // Fetch boundaries for all neighbors in parallel (limit for perf/GPU load)
         const sample = neighbors.slice(0, 10)
@@ -852,37 +806,25 @@ function CommandMap({
           if (r.status !== 'fulfilled') return []
           return hasFeatures(r.value.geojson) && r.value.geojson.features.length > 0 ? [r.value] : []
         })
-        setNeighborBoundaries(loaded)
+        if (!cancelled) {
+          setNeighborBoundariesState({ key: zipBoundaryKey, value: loaded })
+        }
       })
       .catch(() => {})
-  }, [zip, cityZips])
+    return () => {
+      cancelled = true
+    }
+  }, [zip, zipBoundaryKey])
 
-  // Fetch block groups + parcels when we have geo data
+  // Fetch parcels + tract / amenity context when we have geo data
   useEffect(() => {
     if (!marketData?.geo) return
     const { lat, lng, stateFips, countyFips } = marketData.geo
 
-    // Block groups - need state + county FIPS
-    if (stateFips && countyFips && countyFips !== '000') {
-      const countyKey = `${stateFips}-${countyFips}`
-      const cached = BLOCKGROUP_CACHE[countyKey]
-      const blockgroupsPromise: Promise<BlockGroupCollection> = cached
-        ? Promise.resolve(cached)
-        : fetch(`/api/blockgroups?state=${stateFips}&county=${countyFips}`)
-            .then((r) => r.json())
+    const activeZip = marketData?.zip ?? null
 
-      blockgroupsPromise
-        .then((d) => {
-          if (d.features?.length) {
-            BLOCKGROUP_CACHE[countyKey] = d
-            setBlockGroupData(d)
-          }
-        })
-        .catch(() => {})
-    }
-
-    // NYC parcels (PLUTO) - ZIP mode or borough mode
-    if (marketData?.zip) {
+    // NYC-only map layers stay off outside NYC to avoid wasted fetches and broken controls.
+    if (activeZip && isNycZip(activeZip)) {
       dedupedFetchJson<ParcelResponse>(`/api/parcels?zip=${marketData.zip}`)
         .then((d) => {
           if (Array.isArray(d.parcels) && d.stats) {
@@ -907,8 +849,7 @@ function CommandMap({
 
     // Census Tracts with rent/income data
     if (stateFips && countyFips && countyFips !== '000') {
-      fetch(`/api/tracts?state=${stateFips}&county=${countyFips}`)
-        .then((r) => r.json())
+      dedupedFetchJson<TractCollection>(`/api/tracts?state=${stateFips}&county=${countyFips}`)
         .then((d: TractCollection) => { if (d.features) setTractData(d) })
         .catch(() => {})
     }
@@ -958,13 +899,17 @@ function CommandMap({
 
   // Merge agent layer overrides into local layer state (`permits` is agent JSON alias for nycPermits)
   const effectiveLayers = useMemo((): LayerState => {
-    const merged = { ...layers, ...agentLayerOverrides } as LayerState & { permits?: boolean }
+    const merged = { ...localLayers, ...agentLayerOverrides } as LayerState & { permits?: boolean }
     if (agentLayerOverrides && Object.prototype.hasOwnProperty.call(agentLayerOverrides, 'permits')) {
       merged.nycPermits = Boolean(agentLayerOverrides.permits)
     }
+    if (!nycFeatureAvailable) {
+      merged.parcels = false
+      merged.nycPermits = false
+    }
     delete merged.permits
     return merged as LayerState
-  }, [layers, agentLayerOverrides])
+  }, [localLayers, agentLayerOverrides, nycFeatureAvailable])
 
   // Agent can override the active metric
   const effectiveMetric = agentMetric ?? activeMetric
@@ -982,10 +927,10 @@ function CommandMap({
       ? marketData?.zillow?.zhvi_latest ?? null
       : marketData?.zillow?.zori_latest ?? null
     const vals: (number | null)[] = [primaryValue]
-    neighborBoundaries.forEach((n) => vals.push(effectiveMetric === 'zhvi' ? n.zhvi : n.zori))
-    cityBoundaries.forEach((n) => vals.push(effectiveMetric === 'zhvi' ? n.zhvi : n.zori))
+    visibleNeighborBoundaries.forEach((n) => vals.push(effectiveMetric === 'zhvi' ? n.zhvi : n.zori))
+    visibleCityBoundaries.forEach((n) => vals.push(effectiveMetric === 'zhvi' ? n.zhvi : n.zori))
     return vals
-  }, [effectiveMetric, marketData, neighborBoundaries, cityBoundaries])
+  }, [effectiveMetric, marketData, visibleNeighborBoundaries, visibleCityBoundaries])
 
   const colorScale = useMemo(() => buildColorScale(allMetricValues), [allMetricValues])
 
@@ -997,8 +942,8 @@ function CommandMap({
     const result: Layer[] = []
 
     // City ZIP boundaries (rendered first when in city mode)
-    if (effectiveLayers.zipBoundary && cityBoundaries.length > 0) {
-      cityBoundaries.forEach((n) => {
+    if (effectiveLayers.zipBoundary && visibleCityBoundaries.length > 0) {
+      visibleCityBoundaries.forEach((n) => {
         const metricValue = effectiveMetric === 'zhvi' ? n.zhvi : n.zori
         result.push(
           new GeoJsonLayer({
@@ -1042,9 +987,9 @@ function CommandMap({
     // Momentum choropleth - overlays ZIP boundaries with score-based color
     if (effectiveLayers.momentum && Object.keys(momentumScores).length > 0) {
       const allBoundaries = [
-        ...(primaryBoundary ? [{ zip: zip ?? '', geojson: primaryBoundary }] : []),
-        ...neighborBoundaries.map((n) => ({ zip: n.zip, geojson: n.geojson })),
-        ...cityBoundaries.map((n) => ({ zip: n.zip, geojson: n.geojson })),
+        ...(visiblePrimaryBoundary ? [{ zip: zip ?? '', geojson: visiblePrimaryBoundary }] : []),
+        ...visibleNeighborBoundaries.map((n) => ({ zip: n.zip, geojson: n.geojson })),
+        ...visibleCityBoundaries.map((n) => ({ zip: n.zip, geojson: n.geojson })),
       ]
       allBoundaries.forEach(({ zip: z, geojson }) => {
         const score = momentumScores[z] ?? null
@@ -1082,8 +1027,8 @@ function CommandMap({
     }
 
     // Neighbor ZIP boundaries (rendered first, behind primary)
-    if (effectiveLayers.zipBoundary && neighborBoundaries.length > 0) {
-      neighborBoundaries.forEach((n) => {
+    if (effectiveLayers.zipBoundary && visibleNeighborBoundaries.length > 0) {
+      visibleNeighborBoundaries.forEach((n) => {
         const metricValue = effectiveMetric === 'zhvi' ? n.zhvi : n.zori
         result.push(
           new GeoJsonLayer({
@@ -1110,11 +1055,11 @@ function CommandMap({
 
     // Primary ZIP boundary (on top, brighter outline)
     // When block groups are active, show outline only - block groups provide the color
-    if (effectiveLayers.zipBoundary && primaryBoundary) {
+    if (effectiveLayers.zipBoundary && visiblePrimaryBoundary) {
       result.push(
         new GeoJsonLayer({
           id: 'zip-primary',
-          data: primaryBoundary,
+          data: visiblePrimaryBoundary,
           stroked: true,
           filled: true,
           getFillColor: effectiveLayers.rentChoropleth ? colorScale(primaryMetricValue) : [255, 255, 255, 30],
@@ -1576,17 +1521,29 @@ function CommandMap({
     }
 
     return result
-  }, [primaryBoundary, neighborBoundaries, cityBoundaries, boroughBoundary, transitStops, transitRoutes, blockGroupData, parcelData, parcelColorMode, tractData, amenityPoints, poiPoints, floodData, nycPermitData, permitHeatPoints, permitTypeFilter, agentPermitFilter, mapZoom, momentumScores, effectiveLayers, colorScale, primaryMetricValue, effectiveMetric, zip, setTooltipStable, uploadedMarkers, shortlistSites, analysisSites])
+  }, [visiblePrimaryBoundary, visibleNeighborBoundaries, visibleCityBoundaries, boroughBoundary, transitStops, transitRoutes, parcelData, parcelColorMode, tractData, amenityPoints, poiPoints, floodData, nycPermitData, permitHeatPoints, permitTypeFilter, agentPermitFilter, mapZoom, momentumScores, effectiveLayers, colorScale, primaryMetricValue, effectiveMetric, zip, setTooltipStable, uploadedMarkers, shortlistSites, analysisSites])
 
   const handleToggle = useCallback((key: keyof LayerState) => {
-    setLayers((prev) => ({ ...prev, [key]: !effectiveLayers[key] }))
+    const nextKey =
+      layerStateResync && layerStateResync.id.toString() !== layerStateSnapshot.key
+        ? layerStateResync.id.toString()
+        : layerStateSnapshot.key
+    const nextBase =
+      layerStateResync && layerStateResync.id.toString() !== layerStateSnapshot.key
+        ? layerStateResync.state
+        : layerStateSnapshot.value
+    setLayerStateSnapshot({
+      key: nextKey,
+      value: { ...nextBase, [key]: !effectiveLayers[key] },
+    })
     onClearAgentOverride?.(key)
-  }, [effectiveLayers, onClearAgentOverride])
+  }, [effectiveLayers, layerStateResync, layerStateSnapshot, onClearAgentOverride])
 
-  if (typeof window !== 'undefined' && perfDebug) {
-    commandMapRenderCounter += 1
-    console.log('[perf] CommandMap render #', commandMapRenderCounter)
-  }
+  useEffect(() => {
+    if (typeof window === 'undefined' || !perfDebug) return
+    renderCounterRef.current += 1
+    console.log('[perf] CommandMap render #', renderCounterRef.current)
+  })
 
   return (
     <div className="relative isolate h-full min-h-0 min-w-0 w-full">
@@ -1600,7 +1557,7 @@ function CommandMap({
           gestureHandling="greedy"
           style={{ width: '100%', height: '100%' }}
         >
-          <MapFitter boundary={primaryBoundary ?? (cityBoundaries[0]?.geojson ?? null)} zip={zip ?? cityZips?.[0]?.zip ?? null} />
+          <MapFitter boundary={visiblePrimaryBoundary ?? (visibleCityBoundaries[0]?.geojson ?? null)} zip={zip ?? cityZips?.[0]?.zip ?? null} />
           <UploadedMarkersFitter markers={uploadedMarkers ?? null} active={fitClientMarkersOnly} />
           <TiltController tilt={mapTilt} heading={mapHeading} />
           <ZoomTracker onZoomChange={handleZoomChange} />
@@ -1621,7 +1578,7 @@ function CommandMap({
       )}
 
       {/* Permit detail panel */}
-      {selectedPermit && (
+      {nycFeatureAvailable && effectiveLayers.nycPermits && selectedPermit && (
         <div className="absolute bottom-4 left-4 z-40 w-72 rounded-xl overflow-hidden shadow-2xl"
           style={{ background: 'rgba(6,6,6,0.88)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.08)' }}>
           <div className="flex items-start justify-between px-4 pt-3 pb-2" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
@@ -1768,17 +1725,17 @@ function CommandMap({
                 color: '#a78bfa',
                 title: 'Color ZIP polygons by rent (ZORI) or home value (ZHVI) from Zillow. Turn on, then choose Fill metric below.',
               },
-              { key: 'parcels' as const, label: 'Parcels', color: '#fbbf24', zipOnly: true },
+              { key: 'parcels' as const, label: 'Parcels (NYC)', color: '#fbbf24', nycOnly: true },
               { key: 'tracts' as const, label: 'Tracts', color: '#2dd4bf' },
               { key: 'amenityHeatmap' as const, label: 'Amenity', color: '#facc15' },
               { key: 'floodRisk' as const, label: 'Flood', color: '#f87171' },
-              { key: 'nycPermits' as const, label: 'Permits', color: '#D76B3D' },
+              { key: 'nycPermits' as const, label: 'Permits (NYC)', color: '#D76B3D', nycOnly: true },
               { key: 'pois' as const, label: 'POIs', color: '#f59e0b' },
               { key: 'momentum' as const, label: 'Momentum', color: '#a78bfa' },
               { key: 'clientData' as const, label: 'Client', color: '#D76B3D', showWhen: !!uploadedMarkers?.length },
-            ]).filter(({ zipOnly, showWhen }) => {
+            ]).filter(({ nycOnly, showWhen }) => {
               if (showWhen === false) return false
-              if (zipOnly) return (!cityZips?.length) || parcelData !== null
+              if (nycOnly) return nycFeatureAvailable
               return true
             }).map(({ key, label, color, title }) => {
               const active = effectiveLayers[key] ?? false
@@ -1806,7 +1763,7 @@ function CommandMap({
         <div className="mx-3 h-px bg-border/70" />
 
         {/* Parcel color mode - only shown when parcels layer is on */}
-        {effectiveLayers.parcels && parcelData && (
+        {effectiveLayers.parcels && nycFeatureAvailable && parcelData && (
           <>
             <div className="px-3 py-2">
               <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-500 mb-1.5">Parcel Color</p>
@@ -1837,7 +1794,7 @@ function CommandMap({
         )}
 
         {/* Permit type filter - only shown when permits layer is on */}
-        {effectiveLayers.nycPermits && (
+        {effectiveLayers.nycPermits && nycFeatureAvailable && (
           <>
             <div className="px-3 py-2">
               <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-500 mb-1.5">Permit Type</p>
@@ -1917,9 +1874,9 @@ function CommandMap({
           </>
         )}
 
-        {neighborBoundaries.length > 0 && (
+        {visibleNeighborBoundaries.length > 0 && (
           <div className="px-3 pb-2">
-            <p className="text-[10px] text-zinc-600">{neighborBoundaries.length} nearby ZIPs</p>
+            <p className="text-[10px] text-zinc-600">{visibleNeighborBoundaries.length} nearby ZIPs</p>
           </div>
         )}
           </div>

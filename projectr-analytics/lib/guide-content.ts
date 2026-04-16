@@ -22,7 +22,7 @@ export type DocumentationOutlineNode = {
 /** Plain text for onboarding search (matches visible copy + common queries). */
 export const Documentation_ONBOARDING_SEARCH_TEXT = `
 FOR NEW USERS new users onboarding orientation quick command center product features metrics UI
-Load a market sidebar ZIP city state Austin borough NYC Enter map data panel Analysis Data tabs
+Load a market sidebar ZIP city state Houston Austin Dallas Texas NYC borough Enter map data panel Analysis Data tabs
 cycle momentum PDF brief tables trends exports Layers map layer control top-left choropleth
 transit tracts permits Intelligence terminal bottom agent natural language shortcuts
 Saved tab sidebar saved sites comparison Market Report PDF exported
@@ -32,7 +32,8 @@ export const Documentation_FEATURES: DocumentationFeatureBlock[] = [
   {
     id: 'feature-map-search',
     title: 'Map & search',
-    body: `Load a single ZIP, a city and state, or an NYC borough from the sidebar. The map shows the market footprint,
+    body: `Load a single ZIP, a city and state, or an NYC borough from the sidebar. Texas markets are the default MVP flow,
+so examples and demos favor Houston, Dallas-Fort Worth, Austin, and San Antonio. The map shows the market footprint,
 optional ZIP outline, and context ZIPs where applicable. Choropleth fill can display rent (ZORI) or home
 value (ZHVI) when enabled in the layer panel.`,
     searchAliases: 'neighbors boundary footprint geocode place state',
@@ -40,9 +41,9 @@ value (ZHVI) when enabled in the layer panel.`,
   {
     id: 'feature-layer-panel',
     title: 'Layer panel',
-    body: `Toggle vector layers: transit (routes and stops), Census tracts, block groups, NYC parcels, NYC building
-permits, flood zones, amenity heatmap, and optional client CSV pins when a session upload exists. Layer availability can depend on
-geography (for example borough-level behavior in NYC).`,
+    body: `Toggle vector layers: transit (routes and stops), Census tracts, block groups, flood zones, amenity heatmap,
+and optional client CSV pins when a session upload exists. NYC parcels and NYC building permits appear only when the active
+geography is in New York City.`,
     searchAliases: 'DOB FEMA NFHL OSM GTFS PLUTO routes stops heatmap',
   },
   {
@@ -70,10 +71,10 @@ removed while the workflow is relocated. See README Deferred.`,
   {
     id: 'feature-shortlist-pdf',
     title: 'Saved & PDF',
-    body: `Use Save Site for a ZIP or Save for a whole city/borough area from the data panel; open the sidebar Saved tab
+    body: `Use Save Site for a ZIP or Save for a whole city / area from the data panel; open the sidebar Saved tab
 to see every row, edit labels and notes, and use comparison checkboxes. When two or more sites are selected, the
 Market Report PDF can include a comparison layout.`,
-    searchAliases: 'saved sites shortlist comparison checkboxes notes aggregate borough',
+    searchAliases: 'saved sites shortlist comparison checkboxes notes aggregate borough area',
   },
   {
     id: 'feature-map-view',

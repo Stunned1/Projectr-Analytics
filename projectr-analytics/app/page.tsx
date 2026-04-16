@@ -11,7 +11,6 @@ import type { CycleAnalysis } from '@/lib/cycle/types'
 import type { MapLayersSnapshot } from '@/lib/report/types'
 import { parseCycleAnalysisField } from '@/lib/report/validate-cycle'
 import { useSitesStore } from '@/lib/sites-store'
-import type { Site } from '@/lib/sites-store'
 import { useClientUploadMarkersStore } from '@/lib/client-upload-markers-store'
 import { useClientUploadSessionStore } from '@/lib/client-upload-session-store'
 import type { NormalizerIngestPayload } from '@/lib/normalize-client-types'
@@ -35,8 +34,10 @@ import {
 } from '@/lib/agent-map-layers'
 import { ALL_LAYERS_OFF } from '@/lib/slash-layer-keys'
 import { normalizeHeadingDegrees } from '@/lib/slash-commands'
+import { looksLikeCountyQuery } from '@/lib/area-keys'
 import { normalizeUsStateToAbbr } from '@/lib/us-state-abbr'
 import { MAP_VIEW_SAVE_ZIP } from '@/lib/saved-viewport'
+import { isNycBoroughName } from '@/lib/geography'
 
 const CommandMap = dynamic(() => import('@/components/CommandMap'), { ssr: false })
 
@@ -126,8 +127,6 @@ interface CityZip {
   zhvi_growth_12m: number | null
 }
 
-const NYC_BOROUGHS = new Set(['manhattan', 'brooklyn', 'queens', 'bronx', 'staten island'])
-
 interface MarketData {
   zip: string
   cached: boolean
@@ -170,7 +169,7 @@ function defaultHumanSiteLabel(market: MarketData): string {
   return `ZIP ${market.zip}`
 }
 
-/** Map pin anchor for a city/borough ZIP list (first ZIP with coords, else geocode first ZIP). */
+/** Map pin anchor for a multi-ZIP area list (first ZIP with coords, else geocode first ZIP). */
 async function resolveAggregateAnchorGeo(cityZips: CityZip[]): Promise<{ zip: string; lat: number; lng: number } | null> {
   const withGeo = cityZips.find((z) => z.lat != null && z.lng != null && /^\d{5}$/.test(z.zip))
   const fallback = cityZips.find((z) => /^\d{5}$/.test(z.zip))
@@ -820,12 +819,12 @@ export default function Home() {
     population: result?.data.find((r) => r.metric_name === 'Total_Population')?.metric_value ?? aggregateData?.total_population,
   }
 
-  async function fetchAggregate(zips: string[], label: string) {
+  async function fetchAggregate(zips: string[], label: string, areaKey?: string | null) {
     try {
       const res = await fetch('/api/aggregate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ zips, label }),
+        body: JSON.stringify({ zips, label, areaKey }),
       })
       const data = await res.json()
       if (!data.error) {
@@ -968,7 +967,7 @@ export default function Home() {
     setTransit(null)
     try {
       const lowerInput = trimmed.toLowerCase().replace(/,.*$/, '').trim()
-      if (NYC_BOROUGHS.has(lowerInput)) {
+      if (isNycBoroughName(lowerInput)) {
         try {
           const res = await fetch(`/api/borough?name=${encodeURIComponent(lowerInput)}`)
           const data = await res.json()
@@ -1008,16 +1007,85 @@ export default function Home() {
           setError(`Could not parse state "${stateRaw}". Try a full name (e.g. New Jersey) or USPS code (NJ).`)
           return
         }
+        if (looksLikeCountyQuery(cityName)) {
+          try {
+            const url = `/api/county?county=${encodeURIComponent(cityName)}${stateForApi ? `&state=${encodeURIComponent(stateForApi)}` : ''}`
+            const res = await fetch(url)
+            const data = await res.json()
+            if (data.error || !data.zips?.length) {
+              setError(typeof data.error === 'string' && data.error ? data.error : `No data found for "${trimmed}"`)
+              return
+            }
+            setCityZips(data.zips)
+            setBoroughBoundary(null)
+            setResult(null)
+            setTrends(null)
+            setPanelOpen(true)
+            fetchAggregate(
+              data.zips.map((z: CityZip) => z.zip),
+              typeof data.label === 'string' && data.label ? data.label : trimmed,
+              typeof data.area_key === 'string' ? data.area_key : null
+            )
+            void fetchTrendsForMultiZipArea(data.zips, {
+              cityForKeyword: typeof data.county === 'string' ? data.county : cityName,
+              state: (stateForApi || data.state || data.zips[0]?.state || '').toString().trim().toUpperCase().slice(0, 2),
+            })
+            const centroidZipCounty = data.zips.find((z: CityZip) => z.lat && z.lng)?.zip
+            if (centroidZipCounty) {
+              fetch(`/api/transit?zip=${centroidZipCounty}`)
+                .then((r) => r.json())
+                .then((d) => { if (!d.error) setTransit({ ...d, zip: centroidZipCounty }) })
+                .catch(() => {})
+            } else {
+              setTransit(null)
+            }
+            return
+          } catch {
+            setError('Failed to fetch county data')
+            return
+          }
+        }
         try {
           const url = `/api/city?city=${encodeURIComponent(cityName)}${stateForApi ? `&state=${encodeURIComponent(stateForApi)}` : ''}`
           const res = await fetch(url)
           const data = await res.json()
           if (data.error || !data.zips?.length) {
-            setError(
-              typeof data.error === 'string' && data.error
-                ? data.error
-                : `No data found for "${trimmed}". Try "City, State" or "City, ST" (e.g. Newark, New Jersey).`
+            const metroUrl = `/api/metro?metro=${encodeURIComponent(cityName)}${stateForApi ? `&state=${encodeURIComponent(stateForApi)}` : ''}`
+            const metroRes = await fetch(metroUrl)
+            const metroData = await metroRes.json()
+            if (metroData.error || !metroData.zips?.length) {
+              setError(
+                typeof metroData.error === 'string' && metroData.error
+                  ? metroData.error
+                  : typeof data.error === 'string' && data.error
+                    ? data.error
+                    : `No data found for "${trimmed}". Try "City, State", "County, ST", or a metro name such as "Dallas-Fort Worth, TX".`
+              )
+              return
+            }
+            setCityZips(metroData.zips)
+            setBoroughBoundary(null)
+            setResult(null)
+            setTrends(null)
+            setPanelOpen(true)
+            fetchAggregate(
+              metroData.zips.map((z: CityZip) => z.zip),
+              typeof metroData.label === 'string' && metroData.label ? metroData.label : cityName,
+              typeof metroData.area_key === 'string' ? metroData.area_key : null
             )
+            void fetchTrendsForMultiZipArea(metroData.zips, {
+              cityForKeyword: typeof metroData.metro_name === 'string' ? metroData.metro_name : cityName,
+              state: (stateForApi || metroData.state || metroData.zips[0]?.state || '').toString().trim().toUpperCase().slice(0, 2),
+            })
+            const centroidZipMetro = metroData.zips.find((z: CityZip) => z.lat && z.lng)?.zip
+            if (centroidZipMetro) {
+              fetch(`/api/transit?zip=${centroidZipMetro}`)
+                .then((r) => r.json())
+                .then((d) => { if (!d.error) setTransit({ ...d, zip: centroidZipMetro }) })
+                .catch(() => {})
+            } else {
+              setTransit(null)
+            }
             return
           }
           setCityZips(data.zips)
@@ -1033,7 +1101,11 @@ export default function Home() {
               .slice(0, 2) || ''
           const aggregateLabel =
             stateRaw ? `${cityName}, ${stateRaw}` : stateForApi ? `${cityName}, ${stateForApi}` : cityName
-          fetchAggregate(data.zips.map((z: CityZip) => z.zip), aggregateLabel)
+          fetchAggregate(
+            data.zips.map((z: CityZip) => z.zip),
+            aggregateLabel,
+            typeof data.area_key === 'string' ? data.area_key : null
+          )
           void fetchTrendsForMultiZipArea(data.zips, { cityForKeyword: cityName, state: st })
           // Fetch transit for the centroid ZIP
           const centroidZipCity = data.zips.find((z: CityZip) => z.lat && z.lng)?.zip

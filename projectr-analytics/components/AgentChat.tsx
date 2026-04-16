@@ -100,9 +100,9 @@ const ACTION_LABELS: Record<string, string> = {
 }
 
 const SUGGESTIONS = [
-  'Show me flood risk zones',
+  'Load Houston, TX and show transit connectivity',
   "What's the vacancy rate here?",
-  'Highlight transit connectivity',
+  'Compare rent momentum across Dallas and Austin',
 ]
 
 interface CaseStudyBundle {
@@ -143,7 +143,7 @@ function writePersistedChat(messages: Message[], bundle: CaseStudyBundle | null)
 
 const DEFAULT_GREETING: Message = {
   role: 'agent',
-  text: 'Spatial analyst ready. Paste a case study or ask me to navigate markets, toggle layers, or run a site analysis.',
+  text: 'Spatial analyst ready. Start with a Texas market, ask for map layers, or paste a site-selection brief. NYC parcel analysis stays available when the market is in New York City.',
 }
 
 export default function AgentChat({
@@ -203,7 +203,7 @@ export default function AgentChat({
     // Add analyzing message
     setMessages((prev) => [...prev, {
       role: 'agent',
-      text: `Running spatial model across ${borough} parcels...`,
+      text: `Running NYC spatial model across ${borough} parcels...`,
       isAnalyzing: true,
     }])
 
@@ -580,7 +580,7 @@ export default function AgentChat({
             ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder={isRunningSequence ? 'Analysis in progress...' : 'Ask or paste a case study...'}
+            placeholder={isRunningSequence ? 'Analysis in progress...' : 'Ask about Houston, Dallas, Austin, or paste a market brief...'}
             disabled={loading || isRunningSequence}
             className="flex-1 bg-transparent text-[13px] text-white placeholder-zinc-600 focus:outline-none disabled:opacity-50"
           />

@@ -15,6 +15,26 @@ function slugify(s: string): string {
     .slice(0, 48) || 'case-brief'
 }
 
+async function renderCaseBriefPdf(args: {
+  brief: CaseBriefPdfBriefShape
+  generatedAt: string
+  mapLabel: string | null
+  logoDataUri: string | null
+  sites: CaseBriefSitePayload[]
+  mapContext: Record<string, unknown>
+}) {
+  return renderToBuffer(
+    <CaseBriefPdfDocument
+      brief={args.brief}
+      generatedAt={args.generatedAt}
+      mapLabel={args.mapLabel}
+      logoDataUri={args.logoDataUri}
+      sitesRaw={args.sites}
+      mapContext={args.mapContext}
+    />
+  )
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
@@ -34,16 +54,14 @@ export async function POST(request: NextRequest) {
 
     const mapLabel = typeof ctx.label === 'string' ? ctx.label : null
     const logoDataUri = loadScoutLogoDataUri()
-    const buffer = await renderToBuffer(
-      <CaseBriefPdfDocument
-        brief={brief as CaseBriefPdfBriefShape}
-        generatedAt={generatedAt}
-        mapLabel={mapLabel}
-        logoDataUri={logoDataUri}
-        sitesRaw={sites}
-        mapContext={ctx}
-      />
-    )
+    const buffer = await renderCaseBriefPdf({
+      brief: brief as CaseBriefPdfBriefShape,
+      generatedAt,
+      mapLabel,
+      logoDataUri,
+      sites,
+      mapContext: ctx,
+    })
 
     const filename = `Scout-Case-Brief-${mapLabel ? slugify(mapLabel) : 'report'}.pdf`
 

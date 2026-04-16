@@ -8,7 +8,7 @@ import { cycleAnalysisToSignalIndicators } from '@/lib/report/cycle-signals'
 import { buildSignalIndicators, confidenceFromSignals } from '@/lib/report/signals'
 import { resolveZoriSeriesForReport } from '@/lib/report/fetch-zori-series'
 import { generateBriefWithGemini } from '@/lib/report/gemini-brief'
-import { generateMarketDossierWithGemini } from '@/lib/report/gemini-market-dossier'
+import { generateMarketDossierWithGemini, type MarketDossierGemini } from '@/lib/report/gemini-market-dossier'
 import { parseCycleAnalysisField } from '@/lib/report/validate-cycle'
 import { MarketReportDocument, type SiteCompareRow } from '@/lib/report/pdf-document'
 import { loadScoutLogoDataUri } from '@/lib/report/load-scout-logo'
@@ -144,6 +144,36 @@ function validatePayload(body: unknown): ClientReportPayload | null {
   return payload
 }
 
+async function renderMarketReportPdf(args: {
+  payload: ClientReportPayload
+  brief: { cycleHeadline: string; narrative: string; confidenceLine: string }
+  dossier: MarketDossierGemini
+  signals: SignalIndicator[]
+  cycleAnalysis: CycleAnalysis | null
+  zoriSeries: Awaited<ReturnType<typeof resolveZoriSeriesForReport>>['series']
+  zoriSeriesSource: Awaited<ReturnType<typeof resolveZoriSeriesForReport>>['source']
+  trendsSeries: ClientReportPayload['trends']['series']
+  metro: MetroBenchmark | null
+  logoDataUri: string | null
+  siteRows: SiteCompareRow[] | null
+}) {
+  return renderToBuffer(
+    <MarketReportDocument
+      payload={args.payload}
+      brief={args.brief}
+      dossier={args.dossier}
+      signals={args.signals}
+      cycleAnalysis={args.cycleAnalysis}
+      zoriSeries={args.zoriSeries}
+      zoriSeriesSource={args.zoriSeriesSource}
+      trendsSeries={args.trendsSeries}
+      metro={args.metro}
+      logoDataUri={args.logoDataUri}
+      siteRows={args.siteRows}
+    />
+  )
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
@@ -198,24 +228,19 @@ export async function POST(request: NextRequest) {
     })
 
     const logoDataUri = loadScoutLogoDataUri()
-
-    const doc = (
-      <MarketReportDocument
-        payload={payload}
-        brief={brief}
-        dossier={dossier}
-        signals={signals}
-        cycleAnalysis={cycle}
-        zoriSeries={zoriSeries}
-        zoriSeriesSource={zoriSeriesSource}
-        trendsSeries={trendsSeries}
-        metro={metro}
-        logoDataUri={logoDataUri}
-        siteRows={siteRows && siteRows.length >= 2 ? siteRows : null}
-      />
-    )
-
-    const buffer = await renderToBuffer(doc)
+    const buffer = await renderMarketReportPdf({
+      payload,
+      brief,
+      dossier,
+      signals,
+      cycleAnalysis: cycle,
+      zoriSeries,
+      zoriSeriesSource,
+      trendsSeries,
+      metro,
+      logoDataUri,
+      siteRows: siteRows && siteRows.length >= 2 ? siteRows : null,
+    })
 
     const safeName = payload.marketLabel.replace(/[^\w\s-]/g, '').trim().slice(0, 60) || 'market-brief'
     return new NextResponse(new Uint8Array(buffer), {

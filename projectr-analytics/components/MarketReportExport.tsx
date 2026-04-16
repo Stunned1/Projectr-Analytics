@@ -73,7 +73,7 @@ export default function MarketReportExport({
         }),
       }
     }
-    return { ok: false, reason: 'Run a ZIP or city/borough search first.' }
+    return { ok: false, reason: 'Run a ZIP, city, or NYC borough search first.' }
   }, [aggregateData, cityZips, comparisonPins, cycleAnalysis, mapLayersSnapshot, result, trends, uploadedMarkers])
 
   const downloadPdf = useCallback(async () => {
@@ -129,7 +129,7 @@ export default function MarketReportExport({
       </button>
       {error && <p className="text-red-400 text-[10px]">{error}</p>}
       <p className="text-zinc-600 text-[9px] leading-relaxed">
-        Multi-page analyst brief: cycle headline, signals, metrics vs metro, charts, and site comparison
+        Multi-page market brief: cycle headline, signals, metrics vs metro, charts, and site comparison
         when 2+ saved sites are checked for compare or 2+ uploaded CSV pins are on the map.
       </p>
     </div>
