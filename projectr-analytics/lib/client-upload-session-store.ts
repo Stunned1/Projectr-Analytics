@@ -32,6 +32,8 @@ export type ClientUploadSourcePart = {
   rowsIngested: number
   previewRows: ClientUploadPreviewRow[]
   parseSummary?: UploadParseSummary
+  workingRows?: UploadParseSummary['sampleRows']
+  workingRowsKey?: string | null
   rawTable?: ClientNormalizeRawTable
   markerPoints?: ClientNormalizeMarkerPoint[]
   markerCount: number
@@ -57,6 +59,8 @@ export type ClientUploadSessionLegacy = {
   rowsIngested: number
   previewRows: ClientUploadPreviewRow[]
   parseSummary?: UploadParseSummary
+  workingRows?: UploadParseSummary['sampleRows']
+  workingRowsKey?: string | null
   rawTable?: ClientNormalizeRawTable
   markerPoints?: ClientNormalizeMarkerPoint[]
   markerCount: number
@@ -69,6 +73,26 @@ export type ClientUploadSessionLegacy = {
 }
 
 export type ClientUploadSession = ClientUploadSessionNew | ClientUploadSessionLegacy
+
+function stripSourceWorkingRows<T extends ClientUploadSourcePart | ClientUploadSessionLegacy>(source: T): T {
+  return {
+    ...source,
+    workingRows: undefined,
+  }
+}
+
+function stripSessionWorkingRows(session: ClientUploadSession | null): ClientUploadSession | null {
+  if (!session) return null
+
+  if ('sources' in session) {
+    return {
+      ...session,
+      sources: session.sources.map((source) => stripSourceWorkingRows(source)),
+    }
+  }
+
+  return stripSourceWorkingRows(session)
+}
 
 interface ClientUploadSessionState {
   session: ClientUploadSession | null
@@ -88,6 +112,9 @@ export const useClientUploadSessionStore = create<ClientUploadSessionState>()(
     {
       name: 'projectr-client-upload-session',
       storage: createJSONStorage(() => sessionStorage),
+      partialize: (state) => ({
+        session: stripSessionWorkingRows(state.session),
+      }),
     }
   )
 )

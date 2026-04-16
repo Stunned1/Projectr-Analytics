@@ -179,6 +179,8 @@ _04.16.2026_
 - `CommandMap` no longer re-runs multi-ZIP boundary fanouts on unrelated layer toggles, and stable map callbacks keep the memoized map surface from churning during high-frequency agent-thinking updates.
 - `/api/market` now overlaps Zillow lookup with geocoding and live fetch work so single-ZIP Texas loads spend less time waiting on sequential server calls.
 - Client CSV normalize no longer assigns the active market ZIP to non-spatial uploads, so sidebar-only imports stop masquerading as mapped market data or triggering unnecessary geocoding.
+- Client CSV imports now commit the reviewed Gemini interpretation through import, preserve full parsed rows for sidebar/chart/normalize-for-map flows instead of truncating to the raw-table preview sample, and keep `map_normalizable` datasets marked as map-eligible even before markers resolve.
+- Client CSV full-row datasets now persist outside `sessionStorage` in browser IndexedDB, imported row tables render in paged batches instead of mounting the full dataset at once, and reload fallback warnings stay explicit when durable row storage is unavailable.
 
 **Map & Visualization**
 

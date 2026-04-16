@@ -24,6 +24,20 @@ export function getImportedSourceKey(source: ClientUploadSourcePart, index: numb
   return `${source.fileName ?? 'file'}:${index}`
 }
 
+function hasFullImportedWorkingRows(source: ClientUploadSourcePart): boolean {
+  return (source.workingRows?.length ?? 0) > 0
+}
+
+export function isImportedWorkingRowsHydrating(source: ClientUploadSourcePart): boolean {
+  return !hasFullImportedWorkingRows(source) && Boolean(source.workingRowsKey)
+}
+
+function getImportedWorkingRows(source: ClientUploadSourcePart): UploadRawRow[] {
+  if (hasFullImportedWorkingRows(source)) return source.workingRows ?? []
+  if (source.workingRowsKey) return []
+  return source.rawTable?.rows ?? source.parseSummary?.sampleRows ?? []
+}
+
 export function getImportedDatasetView(source: ClientUploadSourcePart): ImportedDatasetView {
   if (source.mapPinsActive) return 'map'
   if (
@@ -51,7 +65,7 @@ function formatCompactNumber(value: number): string {
 }
 
 function getPrimaryNumericSeries(source: ClientUploadSourcePart): Array<{ raw: UploadRawRow; value: number }> {
-  const rows = source.rawTable?.rows ?? []
+  const rows = getImportedWorkingRows(source)
   const valueKey = source.triage.value_column
   if (!valueKey) return []
 
@@ -108,7 +122,7 @@ export function buildImportedSummaryStats(source: ClientUploadSourcePart): Impor
 }
 
 export function buildImportedChartModel(source: ClientUploadSourcePart): ImportedChartModel | null {
-  const rows = source.rawTable?.rows ?? []
+  const rows = getImportedWorkingRows(source)
   if (rows.length === 0) return null
 
   const valueKey = source.triage.value_column
@@ -177,11 +191,11 @@ export function buildImportedChartModel(source: ClientUploadSourcePart): Importe
 }
 
 export function getImportedTableHeaders(source: ClientUploadSourcePart): string[] {
-  return source.rawTable?.headers ?? source.parseSummary?.headers ?? []
+  return source.rawTable?.headers ?? source.parseSummary?.headers ?? (source.workingRows?.length ? Object.keys(source.workingRows[0] ?? {}) : [])
 }
 
 export function getImportedTableRows(source: ClientUploadSourcePart): UploadRawRow[] {
-  return source.rawTable?.rows ?? source.parseSummary?.sampleRows ?? []
+  return getImportedWorkingRows(source)
 }
 
 export function formatImportedCell(value: UploadCellValue): string {

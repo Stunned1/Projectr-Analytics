@@ -2,12 +2,24 @@
 
 import { useState, useRef, useCallback } from 'react'
 import { useClientUploadMarkersStore } from '@/lib/client-upload-markers-store'
-import { useClientUploadSessionStore } from '@/lib/client-upload-session-store'
+import {
+  useClientUploadSessionStore,
+  type ClientUploadSourcePart,
+  type ClientUploadVisualizationMode,
+  type ClientUploadWorkflowStatus,
+} from '@/lib/client-upload-session-store'
+import {
+  buildClientUploadWorkingRowsKey,
+  collectClientUploadWorkingRowsKeys,
+  deleteClientUploadWorkingRowsMany,
+  putClientUploadWorkingRows,
+} from '@/lib/client-upload-working-rows'
 import type {
   ClientNormalizeApiResult,
   ClientNormalizeMarkerPoint,
   NormalizerIngestPayload,
 } from '@/lib/normalize-client-types'
+import type { UploadParseResult } from '@/lib/upload/types'
 
 const MAX_FILES_PER_DROP = 8
 type NormalizerStage = 'idle' | 'reviewing' | 'reviewed' | 'importing' | 'imported'
@@ -84,6 +96,7 @@ export default function AgenticNormalizer({ currentZip, onIngested }: AgenticNor
   const [stage, setStage] = useState<NormalizerStage>('idle')
   const [results, setResults] = useState<ClientNormalizeApiResult[]>([])
   const [reviewFiles, setReviewFiles] = useState<File[]>([])
+  const [reviewParses, setReviewParses] = useState<UploadParseResult[]>([])
   const [resultNames, setResultNames] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
   const [fileLabel, setFileLabel] = useState<string | null>(null)
@@ -92,11 +105,19 @@ export default function AgenticNormalizer({ currentZip, onIngested }: AgenticNor
   const loading = stage === 'reviewing' || stage === 'importing'
 
   const requestNormalize = useCallback(
-    async (file: File, mode: 'review' | 'import'): Promise<ClientNormalizeApiResult> => {
+    async (
+      file: File,
+      mode: 'review' | 'import',
+      reviewed?: ClientNormalizeApiResult | null
+    ): Promise<ClientNormalizeApiResult> => {
       const formData = new FormData()
       formData.append('file', file)
       formData.append('mode', mode)
       if (currentZip) formData.append('zip', currentZip)
+      if (mode === 'import' && reviewed?.review_fingerprint && reviewed?.triage) {
+        formData.append('review_fingerprint', reviewed.review_fingerprint)
+        formData.append('reviewed_triage', JSON.stringify(reviewed.triage))
+      }
 
       const res = await fetch('/api/normalize', { method: 'POST', body: formData })
       const data = (await res.json()) as ClientNormalizeApiResult & { error?: string }
@@ -109,34 +130,58 @@ export default function AgenticNormalizer({ currentZip, onIngested }: AgenticNor
   )
 
   const persistImportedSession = useCallback(
-    (list: File[], normalized: ClientNormalizeApiResult[]) => {
+    async (
+      list: File[],
+      normalized: ClientNormalizeApiResult[],
+      parsedFiles: UploadParseResult[]
+    ) => {
+      const previousSession = useClientUploadSessionStore.getState().session
+      const previousWorkingRowsKeys = collectClientUploadWorkingRowsKeys(previousSession)
+      const ingestedAt = new Date().toISOString()
       const perFileMarkers = normalized.map((d) => d.marker_points ?? [])
       const merged = mergeMarkerPoints(perFileMarkers)
       const hasPins = merged.length > 0
 
-      setMarkers(hasPins ? merged : null)
-      setSession({
-        ingestedAt: new Date().toISOString(),
-        sources: normalized.map((data, i) => {
+      const sources: ClientUploadSourcePart[] = await Promise.all(
+        normalized.map(async (data, i) => {
           const pts = data.marker_points ?? []
-          const workflowStatus =
+          const fileName = list[i]?.name ?? null
+          const workingRows = parsedFiles[i]?.rows ?? []
+          const workingRowsKey = buildClientUploadWorkingRowsKey(ingestedAt, i, fileName)
+          let rowStorageWarning: string | null = null
+
+          try {
+            await putClientUploadWorkingRows(workingRowsKey, workingRows)
+          } catch {
+            rowStorageWarning =
+              'Full imported rows are available in this tab, but durable browser storage was unavailable, so reloading may fall back to preview rows only.'
+          }
+
+          const workflowStatus: ClientUploadWorkflowStatus =
             pts.length > 0
               ? 'mapped'
               : data.triage.mapability_classification === 'unusable'
                 ? 'errored'
                 : 'sidebar_only'
-          const visualizationMode =
+          const visualizationMode: ClientUploadVisualizationMode =
             pts.length > 0
               ? 'map'
               : data.triage.fallback_visualization === 'time_series_chart' ||
                   data.triage.fallback_visualization === 'bar_chart'
                 ? 'chart'
                 : 'table'
+          const inferredMapEligible =
+            data.triage.mapability_classification === 'map_ready' ||
+            data.triage.mapability_classification === 'map_normalizable'
+          const persistenceWarning = [data.persistence_warning, rowStorageWarning].filter(Boolean).join(' ') || null
+
           return {
-            fileName: list[i]?.name ?? null,
+            fileName,
             triage: data.triage,
             rowsIngested: data.rows_ingested,
             previewRows: data.preview_rows ?? [],
+            workingRows,
+            workingRowsKey: rowStorageWarning ? null : workingRowsKey,
             parseSummary: data.parse_summary
               ? {
                   file: data.parse_summary.file,
@@ -148,12 +193,15 @@ export default function AgenticNormalizer({ currentZip, onIngested }: AgenticNor
             markerPoints: pts,
             markerCount: pts.length,
             mapPinsActive: pts.length > 0,
-            mapEligible: data.map_eligible ?? pts.length > 0,
+            mapEligible: data.map_eligible === true || inferredMapEligible,
             workflowStatus,
             visualizationMode,
-            persistenceWarning: data.persistence_warning ?? null,
+            persistenceWarning,
             normalization: {
-              status: pts.length > 0 && data.triage.mapability_classification === 'map_normalizable' ? 'resolved' : 'idle',
+              status:
+                pts.length > 0 && data.triage.mapability_classification === 'map_normalizable'
+                  ? 'resolved'
+                  : 'idle',
               attemptedCount: 0,
               resolvedCount: pts.length,
               failedCount: 0,
@@ -164,7 +212,21 @@ export default function AgenticNormalizer({ currentZip, onIngested }: AgenticNor
                   : null,
             },
           }
-        }),
+        })
+      )
+
+      const nextWorkingRowsKeys = sources
+        .map((source) => source.workingRowsKey?.trim() ?? '')
+        .filter((key): key is string => key.length > 0)
+      const staleWorkingRowsKeys = previousWorkingRowsKeys.filter((key) => !nextWorkingRowsKeys.includes(key))
+      if (staleWorkingRowsKeys.length > 0) {
+        void deleteClientUploadWorkingRowsMany(staleWorkingRowsKeys)
+      }
+
+      setMarkers(hasPins ? merged : null)
+      setSession({
+        ingestedAt,
+        sources,
       })
       onIngested?.({ results: normalized, mergedMarkerPoints: merged })
     },
@@ -183,20 +245,30 @@ export default function AgenticNormalizer({ currentZip, onIngested }: AgenticNor
       setError(null)
       setResults([])
       setReviewFiles(list)
+      setReviewParses([])
       setResultNames(list.map((f) => f.name))
       setFileLabel(list.length === 1 ? list[0].name : `${list.length} files`)
 
       try {
         const reviewed: ClientNormalizeApiResult[] = []
+        const parsed: UploadParseResult[] = []
+        const { parseUploadFile } = await import('@/lib/upload')
         for (const file of list) {
-          reviewed.push(await requestNormalize(file, 'review'))
+          const [reviewedResult, parsedResult] = await Promise.all([
+            requestNormalize(file, 'review'),
+            parseUploadFile(file),
+          ])
+          reviewed.push(reviewedResult)
+          parsed.push(parsedResult)
         }
         setResults(reviewed)
+        setReviewParses(parsed)
         setStage('reviewed')
       } catch (err) {
         setStage('idle')
         setResults([])
         setReviewFiles([])
+        setReviewParses([])
         setError(err instanceof Error ? err.message : 'Failed to review file(s)')
       }
     },
@@ -210,23 +282,24 @@ export default function AgenticNormalizer({ currentZip, onIngested }: AgenticNor
     setError(null)
     try {
       const committed: ClientNormalizeApiResult[] = []
-      for (const file of reviewFiles) {
-        committed.push(await requestNormalize(file, 'import'))
+      for (const [index, file] of reviewFiles.entries()) {
+        committed.push(await requestNormalize(file, 'import', results[index] ?? null))
       }
-      persistImportedSession(reviewFiles, committed)
+      await persistImportedSession(reviewFiles, committed, reviewParses)
       setResults(committed)
       setStage('imported')
     } catch (err) {
       setStage('reviewed')
       setError(err instanceof Error ? err.message : 'Failed to import file(s)')
     }
-  }, [persistImportedSession, requestNormalize, reviewFiles])
+  }, [persistImportedSession, requestNormalize, results, reviewFiles, reviewParses])
 
   const clearReview = useCallback(() => {
     setStage('idle')
     setError(null)
     setResults([])
     setReviewFiles([])
+    setReviewParses([])
     setResultNames([])
     setFileLabel(null)
   }, [])

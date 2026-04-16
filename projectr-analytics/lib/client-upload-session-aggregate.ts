@@ -22,6 +22,8 @@ function legacyToSources(s: ClientUploadSessionLegacy): ClientUploadSourcePart[]
       rowsIngested: s.rowsIngested,
       previewRows: s.previewRows,
       parseSummary: s.parseSummary,
+      workingRows: s.workingRows,
+      workingRowsKey: s.workingRowsKey,
       rawTable: s.rawTable,
       markerPoints: s.markerPoints,
       markerCount: s.markerCount,
@@ -61,7 +63,10 @@ function normalizeSourcePart(source: ClientUploadSourcePart): ClientUploadSource
   const markerPoints = source.markerPoints ?? []
   const markerCount = markerPoints.length > 0 ? markerPoints.length : source.markerCount
   const mapPinsActive = source.mapPinsActive || markerPoints.length > 0
-  const mapEligible = source.mapEligible ?? mapPinsActive
+  const inferredMapEligible =
+    source.triage.mapability_classification === 'map_ready' ||
+    source.triage.mapability_classification === 'map_normalizable'
+  const mapEligible = source.mapEligible === true || inferredMapEligible
 
   return {
     ...source,
@@ -69,9 +74,12 @@ function normalizeSourcePart(source: ClientUploadSourcePart): ClientUploadSource
     markerCount,
     mapPinsActive,
     mapEligible,
-    workflowStatus: source.workflowStatus ?? inferWorkflowStatus({ ...source, markerPoints, markerCount, mapPinsActive, mapEligible }),
+    workflowStatus:
+      source.workflowStatus ??
+      inferWorkflowStatus({ ...source, markerPoints, markerCount, mapPinsActive, mapEligible }),
     visualizationMode:
-      source.visualizationMode ?? inferVisualizationMode({ ...source, markerPoints, markerCount, mapPinsActive, mapEligible }),
+      source.visualizationMode ??
+      inferVisualizationMode({ ...source, markerPoints, markerCount, mapPinsActive, mapEligible }),
     persistenceWarning: source.persistenceWarning ?? null,
     normalization:
       source.normalization ?? {

@@ -35,6 +35,8 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData()
     const file = formData.get('file') as File | null
     const zip = (formData.get('zip') as string | null)?.trim() || null
+    const reviewFingerprint = (formData.get('review_fingerprint') as string | null)?.trim() || null
+    const reviewedTriageRaw = (formData.get('reviewed_triage') as string | null)?.trim() || null
     const mode = String(formData.get('mode') ?? 'import').trim().toLowerCase() === 'review'
       ? 'review'
       : 'import'
@@ -56,6 +58,30 @@ export async function POST(request: NextRequest) {
     const cacheKey = hashPreview(analysisInput)
     let triageCandidate = triageCache.get(cacheKey)
     let fallbackWarning: string | null = null
+
+    if (mode === 'import' && reviewedTriageRaw) {
+      if (!reviewFingerprint || reviewFingerprint !== cacheKey) {
+        return NextResponse.json(
+          { error: 'Reviewed import fingerprint does not match the uploaded file.' },
+          { status: 400 }
+        )
+      }
+
+      const reviewedTriage = parseImportGeminiTriage(reviewedTriageRaw, headers)
+      if (!reviewedTriage) {
+        return NextResponse.json(
+          { error: 'Reviewed import interpretation was invalid.' },
+          { status: 400 }
+        )
+      }
+
+      triageCandidate = finalizeImportGeminiTriage(reviewedTriage, {
+        file: parsedFile.file,
+        headers,
+        sampleRows: parsedFile.sampleRows,
+        hints: parsedFile.hints,
+      })
+    }
 
     if (!triageCandidate) {
       try {
@@ -302,6 +328,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       triage,
+      review_fingerprint: cacheKey,
       rows_ingested: kept.length,
       preview_rows,
       parse_summary: analysisSample,
@@ -312,7 +339,9 @@ export async function POST(request: NextRequest) {
         truncated: dataRows.length > MAX_RAW_TABLE_ROWS,
       },
       marker_points: markerPoints,
-      map_eligible: markerCandidates.length > 0,
+      map_eligible:
+        triage.mapability_classification === 'map_ready' ||
+        triage.mapability_classification === 'map_normalizable',
       committed,
       persistence_warning: persistenceWarning,
     })

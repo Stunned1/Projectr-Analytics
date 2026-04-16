@@ -8,6 +8,10 @@ import AgenticNormalizer from '@/components/AgenticNormalizer'
 import CommandCenterSidebar from '@/components/CommandCenterSidebar'
 import { ImportedDataPanel } from '@/components/ImportedDataPanel'
 import SitesBootstrap from '@/components/SitesBootstrap'
+import {
+  collectClientUploadWorkingRowsKeys,
+  deleteClientUploadWorkingRowsMany,
+} from '@/lib/client-upload-working-rows'
 import { useClientUploadMarkersStore } from '@/lib/client-upload-markers-store'
 import { aggregateClientUploadSession } from '@/lib/client-upload-session-aggregate'
 import { useClientUploadSessionStore } from '@/lib/client-upload-session-store'
@@ -25,6 +29,7 @@ export default function ClientUploadPage() {
 
   function clearImportedWorkspace() {
     clearMarkers()
+    void deleteClientUploadWorkingRowsMany(collectClientUploadWorkingRowsKeys(clientUploadSession))
     clearSession()
   }
 

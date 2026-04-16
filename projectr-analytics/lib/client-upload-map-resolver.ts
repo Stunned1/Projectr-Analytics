@@ -42,7 +42,7 @@ function dedupeMarkers(markers: ClientNormalizeMarkerPoint[]): ClientNormalizeMa
 
 function buildCandidates(source: ClientUploadSourcePart, currentZip?: string | null) {
   const headers = source.rawTable?.headers ?? []
-  const rows = source.rawTable?.rows ?? []
+  const rows = source.workingRows ?? (source.workingRowsKey ? [] : source.rawTable?.rows ?? [])
   if (headers.length === 0 || rows.length === 0) return []
 
   return buildUploadMarkerCandidateRows({

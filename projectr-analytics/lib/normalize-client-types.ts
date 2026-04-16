@@ -34,6 +34,7 @@ export interface ClientNormalizeRawTable {
 
 export interface ClientNormalizeApiResult {
   triage: ClientCsvTriage
+  review_fingerprint?: string | null
   rows_ingested: number
   preview_rows: ClientNormalizePreviewRow[]
   parse_summary?: {

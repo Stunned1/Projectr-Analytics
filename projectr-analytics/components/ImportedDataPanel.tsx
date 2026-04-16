@@ -1,7 +1,8 @@
 'use client'
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useClientUploadMarkersStore, type ClientUploadMarker } from '@/lib/client-upload-markers-store'
+import { getClientUploadWorkingRows } from '@/lib/client-upload-working-rows'
 import { resolveImportedSourceToMarkers, buildImportedResolvePreview } from '@/lib/client-upload-map-resolver'
 import {
   getImportedDatasetView,
@@ -11,6 +12,7 @@ import {
   getImportedSourceKey,
   getImportedTableHeaders,
   getImportedTableRows,
+  isImportedWorkingRowsHydrating,
 } from '@/lib/client-upload-presentation'
 import { useClientUploadSessionStore, type ClientUploadSession } from '@/lib/client-upload-session-store'
 import {
@@ -49,6 +51,9 @@ const VISUALIZATION_MODE_LABELS: Record<string, string> = {
   chart: 'Chart',
   table: 'Table',
 }
+
+const INITIAL_TABLE_ROW_LIMIT = 100
+const TABLE_ROW_PAGE_SIZE = 100
 
 function SourceBadge({ label }: { label: string }) {
   return (
@@ -202,6 +207,9 @@ export function ImportedDataPanel({
   })
   const [resolvingSourceKey, setResolvingSourceKey] = useState<string | null>(null)
   const [resolveError, setResolveError] = useState<string | null>(null)
+  const [hydratingRowsSourceKey, setHydratingRowsSourceKey] = useState<string | null>(null)
+  const [workingRowsError, setWorkingRowsError] = useState<string | null>(null)
+  const [tableRowLimit, setTableRowLimit] = useState(INITIAL_TABLE_ROW_LIMIT)
   let selectedSourceKey: string | null = null
   if (sources.length > 0) {
     if (selectedMarker?.file_name) {
@@ -241,7 +249,18 @@ export function ImportedDataPanel({
           : selectedView
   const summaryStats = selectedSource ? buildImportedSummaryStats(selectedSource) : []
   const tableHeaders = selectedSource ? getImportedTableHeaders(selectedSource) : []
-  const tableRows = selectedSource ? getImportedTableRows(selectedSource) : []
+  const tableRows = useMemo(
+    () => (selectedSource ? getImportedTableRows(selectedSource) : []),
+    [selectedSource]
+  )
+  const visibleTableRows = useMemo(
+    () => tableRows.slice(0, tableRowLimit),
+    [tableRowLimit, tableRows]
+  )
+  const totalTableRows = selectedSource?.rawTable?.total_rows ?? selectedSource?.rowsIngested ?? tableRows.length
+  const hasMoreTableRows = visibleTableRows.length < tableRows.length
+  const selectedSourceNeedsWorkingRows = selectedSource ? isImportedWorkingRowsHydrating(selectedSource) : false
+  const rowsHydrationInFlight = hydratingRowsSourceKey === selectedSourceKey
   const resolvePreview = useMemo(
     () =>
       selectedSource
@@ -254,6 +273,74 @@ export function ImportedDataPanel({
     selectedMarker.file_name != null &&
     selectedMarker.file_name === selectedSource?.fileName
   const resolveInFlight = resolvingSourceKey === selectedSourceKey
+
+  useEffect(() => {
+    setTableRowLimit(INITIAL_TABLE_ROW_LIMIT)
+    setWorkingRowsError(null)
+  }, [selectedSourceKey])
+
+  useEffect(() => {
+    if (
+      selectedSourceIndex < 0 ||
+      !selectedSourceKey ||
+      !selectedSource?.workingRowsKey ||
+      !selectedSourceNeedsWorkingRows
+    ) {
+      return
+    }
+
+    let cancelled = false
+    setHydratingRowsSourceKey(selectedSourceKey)
+    setWorkingRowsError(null)
+
+    void getClientUploadWorkingRows(selectedSource.workingRowsKey)
+      .then((rows) => {
+        if (cancelled) return
+
+        if (rows && rows.length > 0) {
+          updateSession((currentSession) =>
+            updateSessionSourceAtIndex(currentSession, selectedSourceIndex, (source) => ({
+              ...source,
+              workingRows: rows,
+            }))
+          )
+          return
+        }
+
+        const message =
+          'Full imported rows could not be restored after reload, so Projectr is falling back to preview rows only.'
+        setWorkingRowsError(message)
+        updateSession((currentSession) =>
+          updateSessionSourceAtIndex(currentSession, selectedSourceIndex, (source) => ({
+            ...source,
+            workingRowsKey: null,
+            persistenceWarning: [source.persistenceWarning, message].filter(Boolean).join(' ') || null,
+          }))
+        )
+      })
+      .catch(() => {
+        if (cancelled) return
+
+        const message =
+          'Projectr could not reopen the full imported dataset from browser storage, so preview rows are being used instead.'
+        setWorkingRowsError(message)
+        updateSession((currentSession) =>
+          updateSessionSourceAtIndex(currentSession, selectedSourceIndex, (source) => ({
+            ...source,
+            workingRowsKey: null,
+            persistenceWarning: [source.persistenceWarning, message].filter(Boolean).join(' ') || null,
+          }))
+        )
+      })
+      .finally(() => {
+        if (cancelled) return
+        setHydratingRowsSourceKey((currentKey) => (currentKey === selectedSourceKey ? null : currentKey))
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [selectedSource, selectedSourceIndex, selectedSourceKey, selectedSourceNeedsWorkingRows, updateSession])
 
   const persistVisualizationMode = useCallback(
     (mode: 'map' | 'chart' | 'table') => {
@@ -302,13 +389,16 @@ export function ImportedDataPanel({
       updateSession((currentSession) =>
         updateSessionSourceAtIndex(currentSession, selectedSourceIndex, (source) => {
           const markers = resolved.markers
-          const resolvedCount = resolved.normalization.resolvedCount
+          const inferredMapEligible =
+            source.triage.mapability_classification === 'map_ready' ||
+            source.triage.mapability_classification === 'map_normalizable'
+          const mapEligible = source.mapEligible === true || inferredMapEligible
           return {
             ...source,
             markerPoints: markers,
             markerCount: markers.length,
             mapPinsActive: markers.length > 0,
-            mapEligible: markers.length > 0,
+            mapEligible,
             workflowStatus:
               markers.length > 0
                 ? 'mapped'
@@ -318,10 +408,6 @@ export function ImportedDataPanel({
             visualizationMode: markers.length > 0 ? 'map' : source.visualizationMode ?? 'table',
             normalization: resolved.normalization,
             persistenceWarning: source.persistenceWarning ?? null,
-            previewRows:
-              resolvedCount > 0
-                ? source.previewRows
-                : source.previewRows,
           }
         })
       )
@@ -439,9 +525,11 @@ export function ImportedDataPanel({
         ))}
       </div>
 
-      {(selectedSource.persistenceWarning || selectedSource.triage.warnings.length > 0) && (
+      {(selectedSource.persistenceWarning || selectedSource.triage.warnings.length > 0 || rowsHydrationInFlight || workingRowsError) && (
         <div className="rounded-lg border border-amber-900/40 bg-amber-950/20 px-3 py-2 text-[10px] text-amber-200">
-          {selectedSource.persistenceWarning ?? selectedSource.triage.warnings[0]}
+          {rowsHydrationInFlight
+            ? 'Loading the full imported dataset from browser storage…'
+            : workingRowsError ?? selectedSource.persistenceWarning ?? selectedSource.triage.warnings[0]}
         </div>
       )}
 
@@ -465,11 +553,13 @@ export function ImportedDataPanel({
             </div>
             <button
               type="button"
-              disabled={resolveInFlight || resolvePreview.candidateRows === 0}
+              disabled={resolveInFlight || rowsHydrationInFlight || resolvePreview.candidateRows === 0}
               onClick={() => void handleResolveGeography()}
               className="rounded-md border border-primary/35 bg-primary/10 px-3 py-1.5 text-[11px] font-semibold text-primary transition-colors hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {resolveInFlight
+              {rowsHydrationInFlight
+                ? 'Loading rows…'
+                : resolveInFlight
                 ? 'Resolving…'
                 : selectedSource.normalization?.status === 'resolved'
                   ? 'Re-run geography normalization'
@@ -581,9 +671,9 @@ export function ImportedDataPanel({
         <div>
           <div className="mb-2 flex items-center justify-between gap-2">
             <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Raw table</p>
-            {selectedSource.rawTable?.truncated ? (
+            {totalTableRows > 0 ? (
               <p className="text-[10px] text-zinc-500">
-                Showing {tableRows.length} of {selectedSource.rawTable.total_rows.toLocaleString()} rows
+                Showing {visibleTableRows.length.toLocaleString()} of {totalTableRows.toLocaleString()} rows
               </p>
             ) : null}
           </div>
@@ -599,7 +689,7 @@ export function ImportedDataPanel({
                 </tr>
               </thead>
               <tbody>
-                {tableRows.map((row, index) => (
+                {visibleTableRows.map((row, index) => (
                   <tr key={index} className="border-b border-border/40 last:border-b-0">
                     {tableHeaders.map((header) => (
                       <td key={`${index}:${header}`} className="p-1.5 align-top text-zinc-300">
@@ -611,6 +701,17 @@ export function ImportedDataPanel({
               </tbody>
             </table>
           </div>
+          {hasMoreTableRows ? (
+            <div className="mt-2 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setTableRowLimit((current) => current + TABLE_ROW_PAGE_SIZE)}
+                className="rounded-md border border-white/10 px-2.5 py-1 text-[10px] text-zinc-300 transition-colors hover:border-white/20 hover:text-white"
+              >
+                Load {Math.min(TABLE_ROW_PAGE_SIZE, tableRows.length - visibleTableRows.length).toLocaleString()} more rows
+              </button>
+            </div>
+          ) : null}
         </div>
       )}
     </div>
