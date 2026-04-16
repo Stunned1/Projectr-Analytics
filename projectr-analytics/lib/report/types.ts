@@ -62,7 +62,7 @@ export interface ClientReportPayload {
     keyword_scope: string
   }
   pins: ClientReportPin[]
-  /** City/borough mode: ZIPs used to average monthly ZORI for the PDF chart. */
+  /** Multi-ZIP area mode: ZIPs used to average monthly ZORI for the PDF chart. */
   zori_peer_zips?: string[] | null
   /** Deterministic cycle classifier + narrative (from GET /api/cycle); PDF uses when present. */
   cycleAnalysis?: CycleAnalysis | null

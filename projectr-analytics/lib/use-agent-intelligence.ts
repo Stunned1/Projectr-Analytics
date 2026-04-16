@@ -62,7 +62,7 @@ type PersistedAgentSession = {
 
 const DEFAULT_GREETING: AgentMessage = {
   role: 'agent',
-  text: 'Engine ready. Enter a command or paste an analyst brief.',
+  text: 'Engine ready. Load a Texas ZIP, county, or metro, or paste an analyst brief. NYC parcel workflows appear only in New York City.',
 }
 
 function readPersistedSession(): PersistedAgentSession | null {
@@ -696,7 +696,7 @@ export function useAgentIntelligence(
           { role: 'user', text: userPrompt, ts: Date.now() },
           {
             role: 'agent',
-            text: 'Unknown slash command. Try /help, or use known forms like /clear:layers, /layers:rent, /go 10001. Prompts that start with / are always handled locally and are never sent to the AI agent.',
+            text: 'Unknown slash command. Try /help, or use known forms like /clear:layers, /layers:rent, /go 77002, or /go Harris County, TX. Prompts that start with / are always handled locally and are never sent to the AI agent.',
           },
         ])
         return

@@ -1,5 +1,5 @@
 /**
- * Structured market intelligence for the Market Report PDF (ZIP / city / borough).
+ * Structured market intelligence for the Market Report PDF (ZIP / city / county / metro / borough).
  * Separate from the short cycle headline JSON in `gemini-brief.ts`.
  */
 import { GoogleGenerativeAI } from '@google/generative-ai'
@@ -123,7 +123,7 @@ function buildDossierContext(input: {
 const DOSSIER_JSON_INSTRUCTION = `Return ONLY valid JSON (no markdown). All strings plain text, no leading/trailing double-quotes inside values.
 
 {
-  "geographyContext": "1-2 sentences: clarify whether this is a single ZIP, a city aggregate, or borough-style geography and what that implies for interpreting metrics.",
+  "geographyContext": "1-2 sentences: clarify whether this is a single ZIP or a multi-ZIP city, county, metro, or NYC borough aggregate and what that implies for interpreting metrics.",
   "executiveSummary": "4-6 dense sentences: mandate-style overview for an IC - tie rent, vacancy, permits, labor, and (if present) cycle position; cite specific numbers from context only.",
   "demandAndDemographics": { "title": "Demand & demographics", "body": "3-5 sentences on population, income, rent burden proxies, migration if present, and demand read." },
   "supplyAndConstruction": { "title": "Supply & construction", "body": "3-5 sentences on permit pipeline / BPS units, supply risk, construction cycle vs. demand." },
@@ -170,7 +170,7 @@ export async function generateMarketDossierWithGemini(input: {
   })
 
   const fallback: MarketDossierGemini = {
-    geographyContext: `This report covers ${input.payload.marketLabel}${input.payload.primaryZip ? ` (anchor ZIP ${input.payload.primaryZip})` : ''}. Metrics may reflect a single ZIP or an aggregate across multiple ZIPs when in city or borough mode.`,
+    geographyContext: `This report covers ${input.payload.marketLabel}${input.payload.primaryZip ? ` (anchor ZIP ${input.payload.primaryZip})` : ''}. Metrics may reflect a single ZIP or an aggregate across multiple ZIPs when in city, county, metro, or borough mode.`,
     executiveSummary: input.brief.narrative,
     demandAndDemographics: {
       title: 'Demand & demographics',

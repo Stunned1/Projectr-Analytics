@@ -22,7 +22,7 @@ export type DocumentationOutlineNode = {
 /** Plain text for onboarding search (matches visible copy + common queries). */
 export const Documentation_ONBOARDING_SEARCH_TEXT = `
 FOR NEW USERS new users onboarding orientation quick command center product features metrics UI
-Load a market sidebar ZIP city state Houston Austin Dallas Texas NYC borough Enter map data panel Analysis Data tabs
+Load a market sidebar ZIP city state county metro Houston Austin Dallas Texas NYC borough Enter map data panel Analysis Data tabs
 cycle momentum PDF brief tables trends exports Layers map layer control top-left choropleth
 transit tracts permits Intelligence terminal bottom agent natural language shortcuts
 Saved tab sidebar saved sites comparison Market Report PDF exported
@@ -74,7 +74,7 @@ removed while the workflow is relocated. See README Deferred.`,
     body: `Use Save Site for a ZIP or Save for a whole city / area from the data panel; open the sidebar Saved tab
 to see every row, edit labels and notes, and use comparison checkboxes. When two or more sites are selected, the
 Market Report PDF can include a comparison layout.`,
-    searchAliases: 'saved sites shortlist comparison checkboxes notes aggregate borough area',
+    searchAliases: 'saved sites shortlist comparison checkboxes notes aggregate county metro borough area',
   },
   {
     id: 'feature-map-view',

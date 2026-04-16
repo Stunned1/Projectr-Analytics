@@ -99,6 +99,15 @@ interface TrendsData {
 
 interface AggregateData {
   label: string
+  area_key?: string | null
+  area_kind?: 'county' | 'metro' | null
+  uses_direct_area_metrics?: boolean
+  area_metrics?: Array<{
+    metric_name: string
+    metric_value: number
+    time_period: string | null
+    data_source: string
+  }>
   zip_count: number
   total_population: number | null
   zillow: { avg_zori: number | null; avg_zhvi: number | null; zori_growth_12m: number | null; zhvi_growth_12m: number | null }
@@ -224,13 +233,34 @@ function trendsShapeForReport(t: TrendsData | null): { series: { date: string; v
 }
 
 const MONEY_METRICS = ['Rent', 'Income', 'FMR', 'Value', 'Price']
-const RATE_METRICS = ['Unemployment', 'Rate']
+const RATE_METRICS = ['Unemployment', 'Rate', 'Pct', 'Ratio']
+const CORE_AGGREGATE_AREA_METRICS = new Set([
+  'Total_Population',
+  'Projected_Total_Population',
+  'Total_Housing_Units',
+  'Vacancy_Rate',
+  'Median_Household_Income',
+  'Median_Gross_Rent',
+  'Moved_From_Different_State',
+  'Permit_Units',
+  'Permit_Value_USD',
+  'Unemployment_Rate',
+  'Employment_Rate',
+  'Real_GDP',
+])
 
 function formatMetricValue(name: string, value: number) {
   if (MONEY_METRICS.some((k) => name.includes(k))) return fmtMoney(value)
   if (RATE_METRICS.some((k) => name.includes(k))) return fmtNum(value, '%')
   if (name === 'Population_Growth_3yr') return fmtNum(value, '%')
   return fmtNum(value)
+}
+
+function formatAggregateScopeLabel(aggregate: AggregateData) {
+  const zipLabel = `${aggregate.zip_count} ZIP code${aggregate.zip_count === 1 ? '' : 's'}`
+  if (aggregate.area_kind === 'county') return `County view · ${zipLabel}`
+  if (aggregate.area_kind === 'metro') return `Metro view · ${zipLabel}`
+  return `${zipLabel} · aggregated`
 }
 
 // ── Small components ──────────────────────────────────────────────────────────
@@ -1174,7 +1204,7 @@ export default function Home() {
 
   const hasStatsBar = !!(result || aggregateData)
   const intelligenceContextSubtitle = useMemo(() => {
-    if (aggregateData) return `${aggregateData.label} · ${aggregateData.zip_count} ZIPs`
+    if (aggregateData) return `${aggregateData.label} · ${formatAggregateScopeLabel(aggregateData)}`
     if (result && cityZips && cityZips.length > 1) {
       const place = cityZips[0]?.city ?? result.zillow?.city ?? result.zip
       return `${place} · ${cityZips.length} ZIPs`
@@ -1182,6 +1212,11 @@ export default function Home() {
     if (result) return `${result.zillow?.city ?? result.zip} · ${result.zip}`
     return 'No market loaded'
   }, [aggregateData, result, cityZips])
+  const supplementalAreaMetrics = useMemo(
+    () =>
+      aggregateData?.area_metrics?.filter((row) => !CORE_AGGREGATE_AREA_METRICS.has(row.metric_name)) ?? [],
+    [aggregateData]
+  )
 
   const statsBubbleBottomClass = useMemo(() => {
     if (!hasStatsBar) return 'bottom-5'
@@ -1222,8 +1257,8 @@ export default function Home() {
       : cityZips != null && cityZips.length > 0
         ? {
             kind: 'aggregate' as const,
-            title: cityZips[0]?.city ?? '',
-            subtitle: `${cityZips.length} ZIPs · ${cityZips[0]?.state ?? '-'}`,
+            title: aggregateData?.label ?? cityZips[0]?.city ?? '',
+            subtitle: aggregateData ? formatAggregateScopeLabel(aggregateData) : `${cityZips.length} ZIPs · ${cityZips[0]?.state ?? '-'}`,
           }
         : null
 
@@ -1441,7 +1476,7 @@ export default function Home() {
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <h2 className="text-base font-bold leading-tight text-foreground">{aggregateData.label}</h2>
-                  <p className="mt-0.5 text-xs text-muted-foreground">{aggregateData.zip_count} ZIP codes · aggregated</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{formatAggregateScopeLabel(aggregateData)}</p>
                 </div>
                 <div className="flex flex-shrink-0 items-center gap-1.5">
                   <button type="button" onClick={() => setPanelOpen(false)} className="text-xl leading-none text-muted-foreground hover:text-foreground">×</button>
@@ -1519,6 +1554,20 @@ export default function Home() {
                 <MetricRow metricKey="migration" label="Migration movers (diff. state)" value={fmtNum(aggregateData.housing.migration_movers)} />
               )}
             </PanelSection>
+
+            {supplementalAreaMetrics.length > 0 && (
+              <PanelSection title="Area Source Metrics">
+                {supplementalAreaMetrics.map((row) => (
+                  <MetricRow
+                    key={`${row.metric_name}:${row.data_source}:${row.time_period ?? ''}`}
+                    metricKey={metricKeyFromDataRow(row.metric_name) ?? undefined}
+                    label={row.metric_name.replace(/_/g, ' ')}
+                    value={formatMetricValue(row.metric_name, row.metric_value)}
+                    sub={[row.data_source, row.time_period?.slice(0, 7)].filter(Boolean).join(' · ')}
+                  />
+                ))}
+              </PanelSection>
+            )}
 
             {aggregateData.permits.total_units != null && aggregateData.permits.total_units > 0 && (
               <PanelSection title="Building Permits (2021–2023)">
@@ -1875,7 +1924,7 @@ export default function Home() {
                     (first rows returned from normalize). Full series is in Supabase{' '}
                     <span className="text-foreground">projectr_master_data</span> under{' '}
                     <span className="text-foreground">Client Upload</span>. Rows keyed to the loaded ZIP may also appear
-                    in <span className="text-foreground">All metrics (flat table)</span> above; borough-wide or non-ZIP
+                    in <span className="text-foreground">All metrics (flat table)</span> above; area-wide or non-ZIP
                     keys often will not.
                   </p>
                 )}

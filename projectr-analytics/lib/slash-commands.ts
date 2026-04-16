@@ -24,7 +24,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   },
   {
     command: 'go',
-    summary: '`/go <zip | city | borough>` — same as sidebar search / agent navigate',
+    summary: '`/go <zip | city | county | metro>` — same as sidebar search / agent navigate',
   },
   {
     command: 'save',
@@ -105,7 +105,7 @@ export function clearSlashUsageLines(): string {
 
 export function goSlashUsageLines(): string {
   return [
-    'Usage: `/go <query>` — one line of text (ZIP, city, borough, or `City, ST`).',
+    'Usage: `/go <query>` — one line of text (ZIP, city, county, metro, or `City, ST`).',
     '• Runs the same navigation as the sidebar search (Enter).',
     '• Empty query after `/go` is rejected.',
     '• Extra leading/trailing spaces are trimmed.',
@@ -355,7 +355,7 @@ export function parseGoSlashCommand(trimmed: string): ParsedGoSlash | null {
   const query = (m[1] ?? '').trim().replace(/\s+/g, ' ')
   if (!query) return { kind: 'usage' }
   if (query.length > 500) {
-    return { kind: 'bad_arg', message: 'Search text is too long (max 500 characters). Try a shorter city, ZIP, or borough.' }
+    return { kind: 'bad_arg', message: 'Search text is too long (max 500 characters). Try a shorter city, county, metro, or ZIP.' }
   }
   return { kind: 'run', query }
 }
@@ -368,7 +368,7 @@ export function saveSlashUsageLines(): string {
   return [
     'Usage: `/save` or `/save <name>` — adds a row to **Saved** (same Supabase flow as the data panel).',
     '• **ZIP loaded** — saves that market (optional name replaces the default place label).',
-    '• **City / borough loaded** — saves the area (optional name; reopen uses your sidebar search text when set).',
+    '• **City / county / metro / borough loaded** — saves the area (optional name; reopen uses your sidebar search text when set).',
     '• **Otherwise** — saves the **current map center** as a bookmark (optional name; default label uses rounded coordinates).',
     '• Requires Auth (enable **Anonymous** sign-ins in Supabase if you see a sign-in error).',
   ].join('\n')

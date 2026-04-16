@@ -1,12 +1,58 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { hydrateAreaZipResults } from '@/lib/area-search'
 import { buildCountyAreaKey, normalizeCountyDisplayName } from '@/lib/area-keys'
+import { geoTrendsStub } from '@/lib/geocoder'
 import { supabase } from '@/lib/supabase'
 import { normalizeUsStateToAbbr } from '@/lib/us-state-abbr'
 
 export const dynamic = 'force-dynamic'
 
 const MAX_COUNTY_ZIPS = 400
+type CountyLookupRow = {
+  zip: string
+  city: string
+  state: string | null
+  metro_name: string | null
+  lat: number | null
+  lng: number | null
+  county_name?: string | null
+}
+
+async function resolveCountyFips(countyName: string, stateAbbr: string): Promise<string | null> {
+  const stateFips = geoTrendsStub(countyName, stateAbbr).stateFips
+  if (!stateFips) return null
+
+  try {
+    const params = new URLSearchParams({
+      get: 'NAME',
+      for: 'county:*',
+      in: `state:${stateFips}`,
+    })
+    if (process.env.CENSUS_API_KEY) {
+      params.set('key', process.env.CENSUS_API_KEY)
+    }
+
+    const res = await fetch(`https://api.census.gov/data/2020/dec/pl?${params.toString()}`, {
+      next: { revalidate: 86400 },
+      signal: AbortSignal.timeout(10000),
+    })
+    if (!res.ok) return null
+
+    const rows = (await res.json()) as string[][]
+    const countyBase = countyName.replace(/\s+county$/i, '').trim().toLowerCase()
+    for (const row of rows.slice(1)) {
+      const [name, , countyFips] = row
+      const base = String(name ?? '')
+        .replace(/\s+County,.*$/i, '')
+        .trim()
+        .toLowerCase()
+      if (base === countyBase && countyFips) return countyFips
+    }
+    return null
+  } catch {
+    return null
+  }
+}
 
 export async function GET(request: NextRequest) {
   const countyRaw = request.nextUrl.searchParams.get('county')?.trim()
@@ -34,7 +80,7 @@ export async function GET(request: NextRequest) {
 
     const { data: exactRows } = await query.ilike('county_name', countyName)
 
-    let rows = exactRows ?? []
+    let rows: CountyLookupRow[] = (exactRows ?? []) as CountyLookupRow[]
     if (rows.length === 0) {
       const fuzzyPattern = `%${countyName.replace(/\s+county$/i, '').trim()}%`
       let fuzzyQuery = supabase
@@ -45,7 +91,33 @@ export async function GET(request: NextRequest) {
 
       if (stateAbbr) fuzzyQuery = fuzzyQuery.eq('state', stateAbbr)
       const { data: fuzzyRows } = await fuzzyQuery.ilike('county_name', fuzzyPattern)
-      rows = fuzzyRows ?? []
+      rows = (fuzzyRows ?? []) as CountyLookupRow[]
+    }
+
+    // Some environments have `zip_metro_lookup.county_name` populated incorrectly (e.g. "TX").
+    // Fall back to `zip_geocode_cache` county FIPS so Texas county search still resolves.
+    if (rows.length === 0 && stateAbbr) {
+      const countyFips = await resolveCountyFips(countyName, stateAbbr)
+      if (countyFips) {
+        const { data: cachedCountyZips } = await supabase
+          .from('zip_geocode_cache')
+          .select('zip')
+          .eq('state', stateAbbr)
+          .eq('county_fips', countyFips)
+          .limit(MAX_COUNTY_ZIPS)
+
+        const zipList = Array.from(new Set((cachedCountyZips ?? []).map((row) => row.zip).filter(Boolean)))
+        if (zipList.length > 0) {
+          const { data: lookupRows } = await supabase
+            .from('zip_metro_lookup')
+            .select('zip, city, state, metro_name, lat, lng')
+            .in('zip', zipList)
+            .not('lat', 'is', null)
+            .limit(MAX_COUNTY_ZIPS)
+
+          rows = (lookupRows ?? []) as CountyLookupRow[]
+        }
+      }
     }
 
     if (rows.length === 0) {

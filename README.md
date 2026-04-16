@@ -85,13 +85,13 @@ TRANSITLAND_API_KEY=             # free at transit.land/sign-up (Developer API, 
 ### First-time data setup
 1. Download Zillow CSVs (see section below) into `zillow-csv's/` at repo root
 2. `cd projectr-analytics && npm install`
-3. In Supabase SQL Editor, run migrations under `projectr-analytics/supabase/migrations/`: `20260411120000_zip_geocode_cache.sql` (ZIP geocode cache), `20260411180000_zillow_zori_monthly.sql` (monthly ZORI for PDF charts), `20260411190000_saved_sites.sql` (analyst shortlist; requires Auth), and `20260411200000_saved_sites_aggregate.sql` (city/borough shortlist replay)
+3. In Supabase SQL Editor, run migrations under `projectr-analytics/supabase/migrations/`: `20260411120000_zip_geocode_cache.sql` (ZIP geocode cache), `20260411180000_zillow_zori_monthly.sql` (monthly ZORI for PDF charts), `20260411190000_saved_sites.sql` (analyst shortlist; requires Auth), and `20260411200000_saved_sites_aggregate.sql` (multi-area shortlist replay)
 4. `npm run ingest:zillow` - loads Zillow data into Supabase
 5. `npm run populate:centroids` - run 6-7 times until "All centroids already populated" (geocodes ~7,661 ZIPs)
 6. `npm run ingest:permits` - ingests NYC DOB building permits into `nyc_permits` table (all 5 boroughs, NB/A1/A2/DM, 2022+); takes ~10-20 min
 7. Optional Texas source loads after downloading official exports locally: `npm run ingest:texas:housing -- --file <path-to-trec-housing-export>`, `npm run ingest:texas:permits -- --file <path-to-trec-building-permits-export>`, and `npm run ingest:texas:demographics -- --file <path-to-tdc-export> [--dataset estimates|projections]`; each script normalizes county / metro rows into `projectr_master_data`.
 8. `npm run dev`
-9. Optional before demos/recordings: with `npm run dev` running, `npm run warm:demo` - warms cache for ZIPs 11201, 10001, and 60614 via market/transit/trends/cycle APIs (`WARM_BASE_URL` overrides default `http://127.0.0.1:3000`).
+9. Optional before demos/recordings: with `npm run dev` running, `npm run warm:demo` - warms cache for ZIPs 77002, 75201, and 78701 via market/transit/trends/cycle APIs (`WARM_BASE_URL` overrides default `http://127.0.0.1:3000`).
 
 ### Known setup issues
 - **Shortlist / `saved_sites`** - enable **Anonymous sign-ins** under Supabase Authentication → Providers (or use email/OAuth); the app calls `signInAnonymously()` when there is no session so `saved_sites` inserts satisfy RLS.
@@ -142,6 +142,7 @@ _4.12.2026_
 _04.16.2026_
 - Added shared geography gating and Texas MVP source / architecture / performance notes so Texas becomes the default product framing without deleting NYC-specific workflows.
 - Added `/api/county`, `/api/metro`, and `/api/area-metrics`, and wired aggregate search to fall through from city lookups to county / metro lookups for Texas-friendly county / ZIP / metro workflows.
+- Texas-first demo warmups, slash help, and export/search messaging now use ZIP / county / metro wording instead of assuming city-or-borough-only flows.
 
 **Bug Fixes**
 
@@ -155,6 +156,9 @@ _04.16.2026_
 - Non-NYC markets no longer keep NYC parcel / permit layers active or fetch PLUTO / DOB payloads, and single-ZIP tract loads now reuse the shared cached request path.
 - `CommandMap` now uses keyed ZIP / city boundary snapshots and versioned layer resync state so market-mode switches stop rendering stale overlays without synchronous effect resets.
 - Repo-blocking React 19 lint errors were removed from the PDF export routes, `AgentTerminal`, and `ShortlistPanel`; full lint now passes with warnings only.
+- `/api/aggregate` now accepts shared county / metro `area_key` lookups, prefers direct precomputed area rows from `projectr_master_data`, and skips ZIP cold-fills on that fast path.
+- `/api/aggregate` now fetches ZIP snapshots, metro lookup, and only the metric rows it actually needs in parallel, which trims county / metro payload size and avoids extra ZIP-weight lookups for large Texas areas.
+- `/api/county` now falls back to Census county FIPS plus `zip_geocode_cache` when `zip_metro_lookup.county_name` is unusable for Texas rows, restoring live `Harris County, TX` and `Travis County, TX` searches in the running app.
 
 **Map & Visualization**
 
@@ -188,6 +192,8 @@ _4.15.2026_
 
 _04.16.2026_
 - Search, guide, and agent copy now lead with Texas market examples while keeping NYC borough entry points available only when relevant.
+- Aggregate county / metro views now label themselves by geography and surface supplemental precomputed area metrics without a second fetch.
+- Sidebar search, terminal suggestions, slash-command help, and market export prompts now present Texas ZIP / county / metro workflows as the default visible examples.
 
 ## Known Bugs
 
@@ -222,7 +228,8 @@ _04.16.2026_
 
 - **Agent stream rerenders** - Streaming `thinking_delta` updates still bubble through the top-level page state, so the map shell can rerender more than necessary until the agent panel is isolated from high-frequency stream updates.
 - **Reusable analyst workflow packaging** - Scout currently reads as a Projectr-specific consulting workspace; broadening it into a reusable product for other analyst teams would require templated workflows, sharable deliverables, and less client-specific framing in the UX.
-- **Texas direct area metrics are route-level only** - County / metro searches now resolve and the ingestors normalize direct Texas rows into `projectr_master_data`, but the default stat cards still summarize ZIP aggregates; use `/api/area-metrics` when you need the direct county / metro source rows.
+- **County search coverage still depends on Zillow-tracked ZIPs and ZIP centroids** - The county route now recovers major Texas counties via `zip_geocode_cache`, but counties whose tracked ZIP centroids fall into adjacent counties or have thin Zillow coverage can still return 404 or only a single ZIP; fixing that would require polygon-based ZIP membership or a broader county-to-ZIP source.
+- **Texas direct area fast path needs loaded source exports** - In the current dev database, `/api/area-metrics` returns zero rows for tested Texas county / metro area keys, so the shared aggregate route falls back to ZIP-derived metrics instead of the new precomputed county / metro path until TREC / Texas Demographic Center exports are actually ingested.
 - **Texas export fixtures** - The new TREC / Texas Demographic Center ingestors are header-alias based and compile cleanly, but there are no sample source exports checked into the repo; run them against real files before relying on every column mapping in production.
 
 ## Client CSV & AI session

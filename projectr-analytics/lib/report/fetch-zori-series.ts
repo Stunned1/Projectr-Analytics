@@ -30,7 +30,7 @@ export async function fetchZoriMonthlyForZip(zip: string, maxMonths = 24): Promi
 }
 
 /**
- * Average ZORI by month across many ZIPs (city / borough PDF mode).
+ * Average ZORI by month across many ZIPs (multi-ZIP area PDF mode).
  * Only includes months where at least half the ZIPs have a value.
  */
 export async function fetchZoriMonthlyAveraged(zips: string[], maxMonths = 24): Promise<ZoriMonthlyPoint[]> {

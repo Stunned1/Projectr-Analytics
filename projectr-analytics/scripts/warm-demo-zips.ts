@@ -5,14 +5,14 @@
  *   cd projectr-analytics && npm run dev
  *   npm run warm:demo
  *
- * Default ZIPs: 11201 Brooklyn, 10001 Manhattan, 60614 Chicago.
+ * Default ZIPs: 77002 Houston, 75201 Dallas, 78701 Austin.
  */
 import * as dotenv from 'dotenv'
 
 dotenv.config({ path: '.env.local' })
 
 const BASE = process.env.WARM_BASE_URL ?? 'http://127.0.0.1:3000'
-const DEMO_ZIPS = ['11201', '10001', '60614']
+const DEMO_ZIPS = ['77002', '75201', '78701']
 
 async function warmZip(zip: string): Promise<void> {
   const label = `Demo ${zip}`

@@ -10,14 +10,14 @@ import { cn } from '@/lib/utils'
 const STREAM_MS = 72
 const SUGGESTIONS = [
   '/help',
-  '/go 11201',
+  '/go 77002',
   '/save',
   '/layers:transit,rent',
   '/clear:terminal',
   '/clear:workspace',
-  'Show flood risk',
+  'Show flood risk in Houston',
   'Transit + amenities on',
-  'Run Manhattan site analysis',
+  'Compare Dallas and Austin momentum',
 ]
 
 /** Scout orange / narrative / system / chrome */
@@ -145,7 +145,7 @@ export type AgentTerminalSize = 'collapsed' | 'compact' | 'expanded'
 interface AgentTerminalProps {
   mapContext: MapContext
   onAction: (action: AgentAction) => void
-  /** Shown in header, e.g. "Manhattan · 43 ZIPs" */
+  /** Shown in header, e.g. "Harris County, TX · County view · 37 ZIP codes" */
   contextSubtitle: string
   onUnreadChange?: (unread: boolean) => void
   /** For layout (e.g. floating stats bubble clearance). */
