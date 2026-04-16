@@ -13,6 +13,7 @@ import { dedupedFetchJson } from '@/lib/request-cache'
 import type { Site } from '@/lib/sites-store'
 import type { AnalysisSite } from '@/lib/agent-types'
 import { detectNycBoroughFromZips, isNycZip } from '@/lib/geography'
+import { fetchMomentumScores, normalizeMomentumZipList } from '@/lib/momentum-client'
 import { cn } from '@/lib/utils'
 
 function shortlistPinColor(stage: string | undefined): [number, number, number, number] {
@@ -620,8 +621,6 @@ function CommandMap({
   const [permitTypeFilter, setPermitTypeFilter] = useState<Set<string>>(new Set())
   const [mapZoom, setMapZoom] = useState(11)
   const handleZoomChange = useCallback((zoom: number) => { setMapZoom(zoom) }, [])
-  const momentumCacheRef = useRef(new globalThis.Map<string, Record<string, number>>())
-  const momentumInflightRef = useRef(new globalThis.Map<string, Promise<Record<string, number>>>())
   const fitClientMarkersOnly =
     !zip &&
     !(cityZips && cityZips.length > 0) &&
@@ -657,17 +656,29 @@ function CommandMap({
     layerStateResync && layerStateResync.id.toString() !== layerStateSnapshot.key
       ? layerStateResync.state
       : layerStateSnapshot.value
-  const momentumEnabled = Boolean(localLayers.momentum || agentLayerOverrides?.momentum)
-  const momentumZipKey = useMemo(() => {
-    const allZips = Array.from(
-      new Set([
-        ...(cityZips?.map((z) => z.zip) ?? []),
+  const effectiveLayers = useMemo((): LayerState => {
+    const merged = { ...localLayers, ...agentLayerOverrides } as LayerState & { permits?: boolean }
+    if (agentLayerOverrides && Object.prototype.hasOwnProperty.call(agentLayerOverrides, 'permits')) {
+      merged.nycPermits = Boolean(agentLayerOverrides.permits)
+    }
+    if (!nycFeatureAvailable) {
+      merged.parcels = false
+      merged.nycPermits = false
+    }
+    delete merged.permits
+    return merged as LayerState
+  }, [localLayers, agentLayerOverrides, nycFeatureAvailable])
+  const momentumEnabled = Boolean(effectiveLayers.momentum)
+  const momentumZips = useMemo(
+    () =>
+      normalizeMomentumZipList([
+        ...(visibleCityBoundaries.map((boundary) => boundary.zip) ?? []),
         ...(zip ? [zip] : []),
-        ...visibleNeighborBoundaries.map((n) => n.zip),
-      ].filter(Boolean))
-    )
-    return allZips.length > 0 ? allZips.sort().join(',') : null
-  }, [cityZips, zip, visibleNeighborBoundaries])
+        ...visibleNeighborBoundaries.map((boundary) => boundary.zip),
+      ]),
+    [visibleCityBoundaries, zip, visibleNeighborBoundaries]
+  )
+  const momentumZipKey = momentumZips.length > 0 ? momentumZips.join(',') : null
 
   const setTooltipStable = useCallback((next: { x: number; y: number; text: string } | null) => {
     setTooltip((prev) => {
@@ -684,41 +695,18 @@ function CommandMap({
   useEffect(() => {
     if (!momentumEnabled || !momentumZipKey) return
 
-    const cached = momentumCacheRef.current.get(momentumZipKey)
-    if (cached) {
-      setMomentumScores(cached)
-      return
-    }
-
     let cancelled = false
-    const zips = momentumZipKey.split(',')
-    const request =
-      momentumInflightRef.current.get(momentumZipKey) ??
-      fetch('/api/momentum', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ zips }),
+    const activeMomentumZips = momentumZipKey.split(',')
+    fetchMomentumScores(activeMomentumZips, { limit: activeMomentumZips.length })
+      .then((response) => {
+        const scoreMap: Record<string, number> = {}
+        for (const row of response.scores) {
+          scoreMap[row.zip] = row.score
+        }
+        return scoreMap
       })
-        .then((r) => r.json())
-        .then((d) => {
-          const scoreMap: Record<string, number> = {}
-          if (Array.isArray(d.scores)) {
-            for (const s of d.scores) {
-              if (typeof s?.zip === 'string' && typeof s?.score === 'number') {
-                scoreMap[s.zip] = s.score
-              }
-            }
-          }
-          momentumCacheRef.current.set(momentumZipKey, scoreMap)
-          return scoreMap
-        })
-        .catch(() => ({}))
-        .finally(() => {
-          momentumInflightRef.current.delete(momentumZipKey)
-        })
-
-    momentumInflightRef.current.set(momentumZipKey, request)
-    request.then((scoreMap: Record<string, number>) => {
+      .catch(() => ({}))
+      .then((scoreMap: Record<string, number>) => {
       if (!cancelled) setMomentumScores(scoreMap)
     })
 
@@ -733,27 +721,31 @@ function CommandMap({
     let cancelled = false
 
     if (detectedNycBorough) {
-      dedupedFetchJson<ParcelResponse>(`/api/parcels?borough=${encodeURIComponent(detectedNycBorough)}`)
-        .then((d) => {
-          if (!cancelled && Array.isArray(d.parcels) && d.stats) {
-            setParcelData({ parcels: d.parcels, stats: d.stats })
-          }
-        })
-        .catch(() => {})
+      if (effectiveLayers.parcels) {
+        dedupedFetchJson<ParcelResponse>(`/api/parcels?borough=${encodeURIComponent(detectedNycBorough)}`)
+          .then((d) => {
+            if (!cancelled && Array.isArray(d.parcels) && d.stats) {
+              setParcelData({ parcels: d.parcels, stats: d.stats })
+            }
+          })
+          .catch(() => {})
+      }
 
-      // Fetch permits for this borough - load full scatter data upfront, derive heatmap client-side
-      dedupedFetchJson<PermitResponse>(`/api/permits?borough=${encodeURIComponent(detectedNycBorough.toUpperCase())}&zoom=14`)
-        .then((d) => {
-          if (!cancelled && d.permits) {
-            setNycPermitData(d.permits)
-            // Build heatmap points client-side from the same data
-            setPermitHeatPoints(d.permits.map((p) => ({
-              position: [p.lng, p.lat] as [number, number],
-              weight: p.job_type === 'NB' ? 3 : p.job_type === 'A1' ? 2 : 1,
-            })))
-          }
-        })
-        .catch(() => {})
+      if (effectiveLayers.nycPermits) {
+        // Fetch permits for this borough - load full scatter data upfront, derive heatmap client-side
+        dedupedFetchJson<PermitResponse>(`/api/permits?borough=${encodeURIComponent(detectedNycBorough.toUpperCase())}&zoom=14`)
+          .then((d) => {
+            if (!cancelled && d.permits) {
+              setNycPermitData(d.permits)
+              // Build heatmap points client-side from the same data
+              setPermitHeatPoints(d.permits.map((p) => ({
+                position: [p.lng, p.lat] as [number, number],
+                weight: p.job_type === 'NB' ? 3 : p.job_type === 'A1' ? 2 : 1,
+              })))
+            }
+          })
+          .catch(() => {})
+      }
     }
 
     // Fetch tracts for NYC boroughs using known county FIPS
@@ -764,7 +756,7 @@ function CommandMap({
       queens: { state: '36', county: '081' },
       'staten island': { state: '36', county: '085' },
     }
-    if (detectedNycBorough && boroughFips[detectedNycBorough]) {
+    if (effectiveLayers.tracts && detectedNycBorough && boroughFips[detectedNycBorough]) {
       const { state, county } = boroughFips[detectedNycBorough]
       dedupedFetchJson<TractCollection>(`/api/tracts?state=${state}&county=${county}`)
         .then((d) => {
@@ -777,21 +769,27 @@ function CommandMap({
     const first = cityZips.find((z) => z.lat && z.lng)
     if (first?.lat && first?.lng) {
       const { lat: cLat, lng: cLng } = first
-      dedupedFetchJson<{ points?: AmenityPoint[] }>(`/api/amenities?lat=${cLat}&lng=${cLng}&radius=0.12`)
-        .then((d) => {
-          if (!cancelled && d.points) setAmenityPoints(d.points)
-        })
-        .catch(() => {})
-      dedupedFetchJson<{ points?: POIPoint[] }>(`/api/pois?lat=${cLat}&lng=${cLng}&radius=3000`)
-        .then((d) => {
-          if (!cancelled && d.points) setPoiPoints(d.points)
-        })
-        .catch(() => {})
-      dedupedFetchJson<FloodCollection>(`/api/floodrisk?lat=${cLat}&lng=${cLng}&radius=0.12`)
-        .then((d) => {
-          if (!cancelled && d.features) setFloodData(d)
-        })
-        .catch(() => {})
+      if (effectiveLayers.amenityHeatmap) {
+        dedupedFetchJson<{ points?: AmenityPoint[] }>(`/api/amenities?lat=${cLat}&lng=${cLng}&radius=0.12`)
+          .then((d) => {
+            if (!cancelled && d.points) setAmenityPoints(d.points)
+          })
+          .catch(() => {})
+      }
+      if (effectiveLayers.pois) {
+        dedupedFetchJson<{ points?: POIPoint[] }>(`/api/pois?lat=${cLat}&lng=${cLng}&radius=3000`)
+          .then((d) => {
+            if (!cancelled && d.points) setPoiPoints(d.points)
+          })
+          .catch(() => {})
+      }
+      if (effectiveLayers.floodRisk) {
+        dedupedFetchJson<FloodCollection>(`/api/floodrisk?lat=${cLat}&lng=${cLng}&radius=0.12`)
+          .then((d) => {
+            if (!cancelled && d.features) setFloodData(d)
+          })
+          .catch(() => {})
+      }
     }
 
     // Fetch boundaries for all city ZIPs in parallel (limit 30)
@@ -811,7 +809,17 @@ function CommandMap({
     return () => {
       cancelled = true
     }
-  }, [cityZips, cityBoundaryKey, detectedNycBorough])
+  }, [
+    cityZips,
+    cityBoundaryKey,
+    detectedNycBorough,
+    effectiveLayers.amenityHeatmap,
+    effectiveLayers.floodRisk,
+    effectiveLayers.nycPermits,
+    effectiveLayers.parcels,
+    effectiveLayers.pois,
+    effectiveLayers.tracts,
+  ])
 
   // Fetch primary boundary + transit + neighbors when zip changes
   useEffect(() => {
@@ -864,50 +872,60 @@ function CommandMap({
 
     // NYC-only map layers stay off outside NYC to avoid wasted fetches and broken controls.
     if (activeZip && isNycZip(activeZip)) {
-      dedupedFetchJson<ParcelResponse>(`/api/parcels?zip=${marketData.zip}`)
-        .then((d) => {
-          if (Array.isArray(d.parcels) && d.stats) {
-            setParcelData({ parcels: d.parcels, stats: d.stats })
-          }
-        })
-        .catch(() => {})
+      if (effectiveLayers.parcels) {
+        dedupedFetchJson<ParcelResponse>(`/api/parcels?zip=${marketData.zip}`)
+          .then((d) => {
+            if (Array.isArray(d.parcels) && d.stats) {
+              setParcelData({ parcels: d.parcels, stats: d.stats })
+            }
+          })
+          .catch(() => {})
+      }
 
-      // Fetch permits for this ZIP - load upfront, derive heatmap client-side
-      dedupedFetchJson<PermitResponse>(`/api/permits?zip=${marketData.zip}&zoom=14`)
-        .then((d) => {
-          if (d.permits) {
-            setNycPermitData(d.permits)
-            setPermitHeatPoints(d.permits.map((p) => ({
-              position: [p.lng, p.lat] as [number, number],
-              weight: p.job_type === 'NB' ? 3 : p.job_type === 'A1' ? 2 : 1,
-            })))
-          }
-        })
-        .catch(() => {})
+      if (effectiveLayers.nycPermits) {
+        // Fetch permits for this ZIP - load upfront, derive heatmap client-side
+        dedupedFetchJson<PermitResponse>(`/api/permits?zip=${marketData.zip}&zoom=14`)
+          .then((d) => {
+            if (d.permits) {
+              setNycPermitData(d.permits)
+              setPermitHeatPoints(d.permits.map((p) => ({
+                position: [p.lng, p.lat] as [number, number],
+                weight: p.job_type === 'NB' ? 3 : p.job_type === 'A1' ? 2 : 1,
+              })))
+            }
+          })
+          .catch(() => {})
+      }
     }
 
     // Census Tracts with rent/income data
-    if (stateFips && countyFips && countyFips !== '000') {
+    if (effectiveLayers.tracts && stateFips && countyFips && countyFips !== '000') {
       dedupedFetchJson<TractCollection>(`/api/tracts?state=${stateFips}&county=${countyFips}`)
         .then((d: TractCollection) => { if (d.features) setTractData(d) })
         .catch(() => {})
     }
 
     // OSM Amenity heatmap points
-    dedupedFetchJson<{ points?: AmenityPoint[] }>(`/api/amenities?lat=${lat}&lng=${lng}&radius=0.06`)
-      .then((d) => { if (d.points) setAmenityPoints(d.points) })
-      .catch(() => {})
+    if (effectiveLayers.amenityHeatmap) {
+      dedupedFetchJson<{ points?: AmenityPoint[] }>(`/api/amenities?lat=${lat}&lng=${lng}&radius=0.06`)
+        .then((d) => { if (d.points) setAmenityPoints(d.points) })
+        .catch(() => {})
+    }
 
     // Overture Maps POIs - neighborhood signals + anchor tenants
-    dedupedFetchJson<{ points?: POIPoint[] }>(`/api/pois?lat=${lat}&lng=${lng}&radius=1500`)
-      .then((d) => { if (d.points) setPoiPoints(d.points) })
-      .catch(() => {})
+    if (effectiveLayers.pois) {
+      dedupedFetchJson<{ points?: POIPoint[] }>(`/api/pois?lat=${lat}&lng=${lng}&radius=1500`)
+        .then((d) => { if (d.points) setPoiPoints(d.points) })
+        .catch(() => {})
+    }
 
     // FEMA Flood Risk zones
-    dedupedFetchJson<FloodCollection>(`/api/floodrisk?lat=${lat}&lng=${lng}&radius=0.05`)
-      .then((d) => { if (d.features) setFloodData(d) })
-      .catch(() => {})
-  }, [marketData])
+    if (effectiveLayers.floodRisk) {
+      dedupedFetchJson<FloodCollection>(`/api/floodrisk?lat=${lat}&lng=${lng}&radius=0.05`)
+        .then((d) => { if (d.features) setFloodData(d) })
+        .catch(() => {})
+    }
+  }, [marketData, effectiveLayers.amenityHeatmap, effectiveLayers.floodRisk, effectiveLayers.nycPermits, effectiveLayers.parcels, effectiveLayers.pois, effectiveLayers.tracts])
 
   const transitStops = useMemo(() => {
     if (!transitData?.geojson?.features) return []
@@ -935,20 +953,6 @@ function CommandMap({
       return { ...r, paths }
     })
   }, [transitData])
-
-  // Merge agent layer overrides into local layer state (`permits` is agent JSON alias for nycPermits)
-  const effectiveLayers = useMemo((): LayerState => {
-    const merged = { ...localLayers, ...agentLayerOverrides } as LayerState & { permits?: boolean }
-    if (agentLayerOverrides && Object.prototype.hasOwnProperty.call(agentLayerOverrides, 'permits')) {
-      merged.nycPermits = Boolean(agentLayerOverrides.permits)
-    }
-    if (!nycFeatureAvailable) {
-      merged.parcels = false
-      merged.nycPermits = false
-    }
-    delete merged.permits
-    return merged as LayerState
-  }, [localLayers, agentLayerOverrides, nycFeatureAvailable])
 
   // Agent can override the active metric
   const effectiveMetric = agentMetric ?? activeMetric

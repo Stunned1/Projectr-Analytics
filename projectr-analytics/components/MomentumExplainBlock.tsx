@@ -2,16 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { MetricKey } from '@/lib/metric-definitions'
+import { fetchMomentumScores, normalizeMomentumZipList, type MomentumApiResponse } from '@/lib/momentum-client'
 import { MetricTooltip } from '@/components/MetricTooltip'
-
-interface MomentumApiResponse {
-  weights: { jobGrowth: number; rentGrowth: number; permitDensity: number }
-  scores: Array<{
-    zip: string
-    score: number
-    components: { jobGrowth: number | null; rentGrowth: number | null; permitDensity: number | null }
-  }>
-}
 
 function fmtComp(n: number | null) {
   if (n == null || !Number.isFinite(n)) return '-'
@@ -32,50 +24,39 @@ export function MomentumExplainBlock({
   const [data, setData] = useState<MomentumApiResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const aggregateZipsKey = JSON.stringify(
-    [...new Set((aggregateZips ?? []).filter((z) => /^\d{5}$/.test(z)))].sort()
-  )
+  const aggregateZipsKey = normalizeMomentumZipList(aggregateZips).join(',')
+  const aggregateZipCount = aggregateZipsKey ? aggregateZipsKey.split(',').length : 0
   const zipContextKey = useMemo(() => {
-    const agg = JSON.parse(aggregateZipsKey) as string[]
-    if (agg.length > 0) return `a:${agg.join(',')}`
+    if (aggregateZipCount > 0) return `a:${aggregateZipsKey}`
     if (anchorZip && /^\d{5}$/.test(anchorZip)) return `z:${anchorZip}`
     return ''
-  }, [anchorZip, aggregateZipsKey])
+  }, [anchorZip, aggregateZipCount, aggregateZipsKey])
 
   const fetchMomentum = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
       let zips: string[] = []
-      if (aggregateZips && aggregateZips.length > 0) {
-        zips = [...new Set(aggregateZips.filter((z) => /^\d{5}$/.test(z)))].slice(0, 40)
+      if (aggregateZipCount > 0) {
+        zips = aggregateZipsKey.split(',')
       } else if (anchorZip && /^\d{5}$/.test(anchorZip)) {
         const nRes = await fetch(`/api/neighbors?zip=${encodeURIComponent(anchorZip)}`)
         const nJson = (await nRes.json()) as { zips?: Array<{ zip: string }> }
         const peers = Array.isArray(nJson.zips) ? nJson.zips.map((x) => x.zip).filter((z) => /^\d{5}$/.test(z)) : []
-        zips = [...new Set([anchorZip, ...peers.slice(0, 19)])]
+        zips = normalizeMomentumZipList([anchorZip, ...peers.slice(0, 19)])
       } else {
         setError('No ZIP context for momentum.')
         return
       }
 
-      const res = await fetch('/api/momentum', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ zips }),
-      })
-      if (!res.ok) {
-        const j = (await res.json().catch(() => ({}))) as { error?: string }
-        throw new Error(j.error || 'Momentum request failed')
-      }
-      const j = (await res.json()) as MomentumApiResponse
+      const j = await fetchMomentumScores(zips, { limit: zips.length })
       setData(j)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load momentum')
     } finally {
       setLoading(false)
     }
-  }, [aggregateZips, anchorZip])
+  }, [anchorZip, aggregateZipCount, aggregateZipsKey])
 
   useEffect(() => {
     setData(null)
@@ -95,8 +76,8 @@ export function MomentumExplainBlock({
 
   if (!anchorZip && !(aggregateZips && aggregateZips.length)) return null
 
-  const isAggregate = Boolean(aggregateZips && aggregateZips.length > 0)
-  const zipSet = new Set(aggregateZips ?? [])
+  const isAggregate = aggregateZipCount > 0
+  const zipSet = new Set(aggregateZipsKey ? aggregateZipsKey.split(',') : [])
   const relevantScores =
     data?.scores.filter((s) => (isAggregate ? zipSet.has(s.zip) : s.zip === anchorZip)) ?? []
   const meanScore =
@@ -105,7 +86,6 @@ export function MomentumExplainBlock({
       : null
   const anchorRow = anchorZip ? data?.scores.find((s) => s.zip === anchorZip) : null
   const displayScore = isAggregate ? meanScore : anchorRow?.score ?? null
-  const w = data?.weights
 
   return (
     <div className="mb-4 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-3">
@@ -131,17 +111,11 @@ export function MomentumExplainBlock({
       {error && <p className="mt-2 text-[10px] text-red-400">{error}</p>}
       {open && (
         <div className="mt-3 border-t border-white/10 pt-3 text-[10px] leading-relaxed text-zinc-400">
-          {w && (
-            <p className="mb-2 text-zinc-500">
-              Weights: labor {Math.round(w.jobGrowth)}% · rent level {Math.round(w.rentGrowth)}% · permits{' '}
-              {Math.round(w.permitDensity)}%
-            </p>
-          )}
           {!isAggregate && anchorRow && (
             <ul className="space-y-1">
               <li>
                 <span className="text-zinc-500">Labor (unemployment-based):</span>{' '}
-                <span className="text-zinc-200">{fmtComp(anchorRow.components.jobGrowth)}</span>
+                <span className="text-zinc-200">{fmtComp(anchorRow.components.jobMarket)}</span>
               </li>
               <li>
                 <span className="text-zinc-500">Rent level (vs peers):</span>{' '}

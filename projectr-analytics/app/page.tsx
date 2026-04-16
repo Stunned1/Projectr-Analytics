@@ -38,6 +38,7 @@ import { looksLikeCountyQuery } from '@/lib/area-keys'
 import { normalizeUsStateToAbbr } from '@/lib/us-state-abbr'
 import { MAP_VIEW_SAVE_ZIP } from '@/lib/saved-viewport'
 import { isNycBoroughName } from '@/lib/geography'
+import { fetchMomentumScores, getMomentumScore, normalizeMomentumZipList } from '@/lib/momentum-client'
 
 const CommandMap = dynamic(() => import('@/components/CommandMap'), { ssr: false })
 
@@ -197,6 +198,21 @@ async function resolveAggregateAnchorGeo(cityZips: CityZip[]): Promise<{ zip: st
   return null
 }
 
+async function loadMomentumScore(
+  zips: Iterable<string> | null | undefined,
+  targetZip: string | null | undefined
+): Promise<number | null> {
+  const normalizedZips = normalizeMomentumZipList(zips)
+  if (!targetZip || normalizedZips.length === 0) return null
+
+  try {
+    const response = await fetchMomentumScores(normalizedZips, { limit: normalizedZips.length })
+    return getMomentumScore(response, targetZip)
+  } catch {
+    return null
+  }
+}
+
 // ── Formatters ────────────────────────────────────────────────────────────────
 
 function fmtMoney(n: number | null | undefined) {
@@ -296,20 +312,7 @@ function ShortlistToggleButton({
       return
     }
     setPending(true)
-    let momentum: number | null = null
-    try {
-      const res = await fetch('/api/momentum', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ zips: [zipCode] }),
-      })
-      if (res.ok) {
-        const j = (await res.json()) as { scores?: { zip: string; score: number }[] }
-        momentum = j.scores?.find((x) => x.zip === zipCode)?.score ?? null
-      }
-    } catch {
-      /* non-fatal */
-    }
+    const momentum = await loadMomentumScore([zipCode], zipCode)
     const human = defaultHumanSiteLabel(market)
     await addSite({
       label: human,
@@ -370,23 +373,7 @@ function AggregateShortlistToggle({
       setPending(false)
       return
     }
-    let momentum: number | null = null
-    try {
-      const zipsList = cityZips.map((z) => z.zip).filter((z) => /^\d{5}$/.test(z))
-      if (zipsList.length) {
-        const res = await fetch('/api/momentum', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ zips: zipsList.slice(0, 40) }),
-        })
-        if (res.ok) {
-          const j = (await res.json()) as { scores?: { zip: string; score: number }[] }
-          momentum = j.scores?.find((x) => x.zip === pin.zip)?.score ?? null
-        }
-      }
-    } catch {
-      /* optional */
-    }
+    const momentum = await loadMomentumScore(cityZips.map((z) => z.zip), pin.zip)
     const human = aggregateData.label.trim() || q
     await addSite({
       label: human,
@@ -711,20 +698,7 @@ export default function Home() {
         }
         const zipCode = result.zip
         const geo = result.geo
-        let momentum: number | null = null
-        try {
-          const res = await fetch('/api/momentum', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ zips: [zipCode] }),
-          })
-          if (res.ok) {
-            const j = (await res.json()) as { scores?: { zip: string; score: number }[] }
-            momentum = j.scores?.find((x) => x.zip === zipCode)?.score ?? null
-          }
-        } catch {
-          /* non-fatal */
-        }
+        const momentum = await loadMomentumScore([zipCode], zipCode)
         const human = labelArg ?? defaultHumanSiteLabel(result)
         const ok = await addSite({
           label: human,
@@ -756,23 +730,7 @@ export default function Home() {
         if (!pin) {
           return { ok: false, message: 'Could not place a pin for this area (no coordinates).' }
         }
-        let momentum: number | null = null
-        try {
-          const zipsList = cityZips.map((z) => z.zip).filter((z) => /^\d{5}$/.test(z))
-          if (zipsList.length) {
-            const res = await fetch('/api/momentum', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ zips: zipsList.slice(0, 40) }),
-            })
-            if (res.ok) {
-              const j = (await res.json()) as { scores?: { zip: string; score: number }[] }
-              momentum = j.scores?.find((x) => x.zip === pin.zip)?.score ?? null
-            }
-          }
-        } catch {
-          /* optional */
-        }
+        const momentum = await loadMomentumScore(cityZips.map((z) => z.zip), pin.zip)
         const human = labelArg ?? (aggregateData.label.trim() || q)
         const ok = await addSite({
           label: human,
