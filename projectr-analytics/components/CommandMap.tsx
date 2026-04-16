@@ -30,6 +30,11 @@ interface MarketData {
   zillow: { zori_latest: number | null; zhvi_latest: number | null } | null
 }
 
+interface AggregateMapData {
+  label: string
+  area_kind?: 'county' | 'metro' | null
+}
+
 interface TransitStop {
   position: [number, number]
   name: string
@@ -216,6 +221,71 @@ interface PermitResponse {
   count?: number
 }
 
+interface TexasPermitActivityPayload {
+  id: string
+  place_name: string
+  county_name: string | null
+  metro_name: string | null
+  state_name: string
+  lat: number
+  lng: number
+  latest_month: string | null
+  total_units: number
+  total_buildings: number
+  total_value: number
+  single_family_units: number
+  multi_family_units: number
+  activity_score: number
+  months_covered: number
+  centroid_source: 'zip_lookup' | 'google_geocode'
+}
+
+interface TexasPermitActivityResponse {
+  places?: TexasPermitActivityPayload[]
+  latest_month?: string | null
+  raw_row_count?: number
+  truncated?: boolean
+  unresolved_places?: number
+}
+
+type TexasRawPermitCategory = 'new_construction' | 'major_renovation' | 'demolition'
+
+interface TexasRawPermitPayload {
+  id: string
+  source_city: string
+  source_name: string
+  category: TexasRawPermitCategory
+  category_label: string
+  permit_number: string | null
+  permit_type_desc: string | null
+  permit_class_mapped: string | null
+  work_class: string | null
+  description: string | null
+  address: string | null
+  zip_code: string | null
+  issue_date: string | null
+  lat: number
+  lng: number
+  valuation: number | null
+  square_feet: number | null
+  housing_units: number | null
+  source_url: string | null
+}
+
+interface TexasRawPermitResponse {
+  city: string
+  state: string
+  source: string
+  categories: Record<TexasRawPermitCategory, number>
+  permits: TexasRawPermitPayload[]
+}
+
+const TEXAS_RAW_PERMIT_FILTER_META = [
+  { key: 'new_construction' as const, label: 'New', color: '#D76B3D' },
+  { key: 'major_renovation' as const, label: 'Major Reno', color: '#60a5fa' },
+  { key: 'demolition' as const, label: 'Demo', color: '#f87171' },
+]
+
 interface ParcelResponse {
   parcels?: ParcelPayload[]
   stats?: { p25_per_sqft: number; p75_per_sqft: number; p75_air_rights: number; max_air_rights: number; underbuilt_count: number; top_underbuilt: unknown[] }
@@ -239,6 +309,53 @@ function buildPermitHeatPoints(permits: PermitPayload[]): PermitHeatPoint[] {
     position: [permit.lng, permit.lat] as [number, number],
     weight: permit.job_type === 'NB' ? 3 : permit.job_type === 'A1' ? 2 : 1,
   }))
+}
+
+function buildTexasPermitHeatPoints(places: TexasPermitActivityPayload[]): PermitHeatPoint[] {
+  return places.map((place) => ({
+    position: [place.lng, place.lat] as [number, number],
+    weight: Math.max(place.activity_score, 1),
+  }))
+}
+
+function buildTexasRawPermitHeatPoints(permits: TexasRawPermitPayload[]): PermitHeatPoint[] {
+  return permits.map((permit) => ({
+    position: [permit.lng, permit.lat] as [number, number],
+    weight: getTexasRawPermitWeight(permit.category),
+  }))
+}
+
+function getTexasRawPermitWeight(category: TexasRawPermitCategory): number {
+  switch (category) {
+    case 'new_construction':
+      return 3
+    case 'major_renovation':
+      return 2
+    case 'demolition':
+      return 1
+  }
+}
+
+function getTexasRawPermitFillColor(
+  category: TexasRawPermitCategory
+): [number, number, number, number] {
+  switch (category) {
+    case 'new_construction':
+      return [215, 107, 61, 240]
+    case 'major_renovation':
+      return [100, 180, 255, 225]
+    case 'demolition':
+      return [220, 80, 80, 230]
+  }
+}
+
+function formatPermitDate(value: string | null | undefined): string | null {
+  if (!value) return null
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return value.slice(0, 10)
+  }
+  return parsed.toLocaleDateString()
 }
 
 // ── Color scale: blue (low rent) → red (high rent) ───────────────────────────
@@ -567,6 +684,7 @@ function TiltController({ tilt, heading }: { tilt: number; heading: number }) {
 interface CommandMapProps {
   zip: string | null
   marketData: MarketData | null
+  aggregateData?: AggregateMapData | null
   transitData: TransitData | null
   cityZips?: Array<{ zip: string; lat: number | null; lng: number | null; zori_latest: number | null; zhvi_latest: number | null; city: string; state: string | null }> | null
   boroughBoundary?: object | null
@@ -600,6 +718,7 @@ interface CommandMapProps {
 function CommandMap({
   zip,
   marketData,
+  aggregateData,
   transitData,
   cityZips,
   boroughBoundary,
@@ -631,9 +750,14 @@ function CommandMap({
   const [momentumScores, setMomentumScores] = useState<Record<string, number>>({})
   const [floodData, setFloodData] = useState<FloodCollection | null>(null)
   const [nycPermitData, setNycPermitData] = useState<PermitPayload[]>([])
+  const [texasRawPermitData, setTexasRawPermitData] = useState<TexasRawPermitPayload[]>([])
+  const [texasPermitActivity, setTexasPermitActivity] = useState<TexasPermitActivityPayload[]>([])
   const [permitHeatPoints, setPermitHeatPoints] = useState<PermitHeatPoint[]>([])
   // Multi-select type filter - Set of active types, empty = all
   const [permitTypeFilter, setPermitTypeFilter] = useState<Set<string>>(new Set())
+  const [texasRawPermitCategoryFilter, setTexasRawPermitCategoryFilter] = useState<
+    Set<TexasRawPermitCategory>
+  >(new Set())
   const [mapZoom, setMapZoom] = useState(11)
   const handleZoomChange = useCallback((zoom: number) => { setMapZoom(zoom) }, [])
   const fitClientMarkersOnly =
@@ -641,6 +765,8 @@ function CommandMap({
     !(cityZips && cityZips.length > 0) &&
     (uploadedMarkers?.length ?? 0) > 0
   const [selectedPermit, setSelectedPermit] = useState<PermitPayload | null>(null)
+  const [selectedTexasRawPermit, setSelectedTexasRawPermit] = useState<TexasRawPermitPayload | null>(null)
+  const [selectedTexasPermit, setSelectedTexasPermit] = useState<TexasPermitActivityPayload | null>(null)
   const [layerStateSnapshot, setLayerStateSnapshot] = useState<KeyedValue<LayerState>>({ key: '0', value: DEFAULT_LAYER_STATE })
   const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null)
   const [activeMetric, setActiveMetric] = useState<'zori' | 'zhvi'>('zori')
@@ -650,6 +776,48 @@ function CommandMap({
   const mapId = process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID ?? process.env.NEXT_PUBLIC_GOOGLE_MAPS_ID ?? undefined
   const detectedNycBorough = useMemo(() => detectNycBoroughFromZips(cityZips), [cityZips])
   const nycFeatureAvailable = detectedNycBorough !== null || isNycZip(marketData?.zip ?? zip ?? null)
+  const activeStateAbbr = useMemo(
+    () => marketData?.geo?.state?.toUpperCase() ?? cityZips?.[0]?.state?.toUpperCase() ?? null,
+    [cityZips, marketData]
+  )
+  const texasPermitAvailable = activeStateAbbr === 'TX'
+  const permitFeatureAvailable = nycFeatureAvailable || texasPermitAvailable
+  const texasPermitScope = useMemo(() => {
+    if (!texasPermitAvailable) return null
+    if (aggregateData?.area_kind && aggregateData.label?.trim()) {
+      return {
+        kind: aggregateData.area_kind,
+        value: aggregateData.label.trim(),
+      }
+    }
+    if (cityZips?.length && cityZips[0]?.city?.trim()) {
+      return {
+        kind: 'city' as const,
+        value: cityZips[0].city.trim(),
+      }
+    }
+    if (marketData?.geo?.city?.trim()) {
+      return {
+        kind: 'city' as const,
+        value: marketData.geo.city.trim(),
+      }
+    }
+    return null
+  }, [aggregateData, cityZips, marketData, texasPermitAvailable])
+  const texasPermitQuery = useMemo(() => {
+    if (!texasPermitScope || !activeStateAbbr) return null
+    const params = new URLSearchParams({ state: activeStateAbbr })
+    params.set(texasPermitScope.kind, texasPermitScope.value)
+    return params.toString()
+  }, [activeStateAbbr, texasPermitScope])
+  const texasRawPermitQuery = useMemo(() => {
+    if (!texasPermitScope || texasPermitScope.kind !== 'city' || !activeStateAbbr) return null
+    return new URLSearchParams({
+      city: texasPermitScope.value,
+      state: activeStateAbbr,
+    }).toString()
+  }, [activeStateAbbr, texasPermitScope])
+  const usingTexasRawPermits = !nycFeatureAvailable && texasRawPermitData.length > 0
   const cityBoundaryKey = useMemo(
     () => (cityZips?.length ? cityZips.map((z) => z.zip).join(',') : null),
     [cityZips]
@@ -678,11 +846,13 @@ function CommandMap({
     }
     if (!nycFeatureAvailable) {
       merged.parcels = false
+    }
+    if (!permitFeatureAvailable) {
       merged.nycPermits = false
     }
     delete merged.permits
     return merged as LayerState
-  }, [localLayers, agentLayerOverrides, nycFeatureAvailable])
+  }, [localLayers, agentLayerOverrides, nycFeatureAvailable, permitFeatureAvailable])
   const momentumEnabled = Boolean(effectiveLayers.momentum)
   const momentumZips = useMemo(
     () =>
@@ -774,6 +944,10 @@ function CommandMap({
           if (!cancelled && d.permits) {
             setNycPermitData(d.permits)
             setPermitHeatPoints(buildPermitHeatPoints(d.permits))
+            setTexasRawPermitData([])
+            setTexasRawPermitCategoryFilter(new Set())
+            setSelectedTexasRawPermit(null)
+            setSelectedTexasPermit(null)
           }
         })
         .catch(() => {})
@@ -893,12 +1067,74 @@ function CommandMap({
             if (d.permits) {
               setNycPermitData(d.permits)
               setPermitHeatPoints(buildPermitHeatPoints(d.permits))
+              setTexasRawPermitData([])
+              setTexasRawPermitCategoryFilter(new Set())
+              setSelectedTexasRawPermit(null)
+              setSelectedTexasPermit(null)
             }
           })
           .catch(() => {})
       }
     }
   }, [marketData, effectiveLayers.nycPermits, effectiveLayers.parcels])
+
+  useEffect(() => {
+    if (!effectiveLayers.nycPermits || nycFeatureAvailable || !texasPermitAvailable || !texasPermitQuery) return
+
+    let cancelled = false
+    const load = async () => {
+      if (texasRawPermitQuery) {
+        try {
+          const rawData = await dedupedFetchJson<TexasRawPermitResponse>(`/api/permits/texas/raw?${texasRawPermitQuery}`, {
+            ttlMs: 15 * 60 * 1000,
+          })
+          if (cancelled) return
+          const permits = rawData.permits ?? []
+          if (permits.length > 0) {
+            setTexasRawPermitData(permits)
+            setTexasPermitActivity([])
+            setPermitHeatPoints(buildTexasRawPermitHeatPoints(permits))
+            setTexasRawPermitCategoryFilter(new Set())
+            setSelectedPermit(null)
+            setSelectedTexasRawPermit(null)
+            setSelectedTexasPermit(null)
+            return
+          }
+        } catch {
+          // Raw city feed not available; fall through to the shared Texas aggregate layer.
+        }
+      }
+
+      try {
+        const aggregateData = await dedupedFetchJson<TexasPermitActivityResponse>(`/api/permits/texas?${texasPermitQuery}`, {
+          ttlMs: 15 * 60 * 1000,
+        })
+        if (cancelled) return
+        const places = aggregateData.places ?? []
+        setTexasRawPermitData([])
+        setTexasPermitActivity(places)
+        setPermitHeatPoints(buildTexasPermitHeatPoints(places))
+        setTexasRawPermitCategoryFilter(new Set())
+        setSelectedPermit(null)
+        setSelectedTexasRawPermit(null)
+        setSelectedTexasPermit(null)
+      } catch {
+        if (cancelled) return
+        setTexasRawPermitData([])
+        setTexasPermitActivity([])
+        setPermitHeatPoints([])
+        setTexasRawPermitCategoryFilter(new Set())
+        setSelectedTexasRawPermit(null)
+        setSelectedTexasPermit(null)
+      }
+    }
+
+    void load()
+
+    return () => {
+      cancelled = true
+    }
+  }, [effectiveLayers.nycPermits, nycFeatureAvailable, texasPermitAvailable, texasPermitQuery, texasRawPermitQuery])
 
   // Fetch shared tract / amenity / flood / POI context for single-ZIP flows.
   useEffect(() => {
@@ -1362,85 +1598,233 @@ function CommandMap({
       )
     }
 
-    // NYC Permits - zoom-adaptive: heatmap below zoom 15, 3D ColumnLayer at zoom ≥ 15
-    // All filtering is client-side - no API calls on zoom/pan
+    // Permits - NYC uses raw permit points, Texas uses scoped place-level permit activity.
+    // Both paths fetch once per scope and switch between heatmap / 3D client-side.
     if (effectiveLayers.nycPermits) {
-      // Merge agent permit filter with user toggle filter
-      const agentFilterSet = agentPermitFilter ? new Set(agentPermitFilter) : null
-      const activeTypes = agentFilterSet ?? (permitTypeFilter.size === 0 ? null : permitTypeFilter)
+      if (nycFeatureAvailable) {
+        const agentFilterSet = agentPermitFilter ? new Set(agentPermitFilter) : null
+        const activeTypes = agentFilterSet ?? (permitTypeFilter.size === 0 ? null : permitTypeFilter)
 
-      if (mapZoom < 15) {
-        // Heatmap - filter by type client-side
-        const heatData = activeTypes
-          ? permitHeatPoints.filter((_, i) => {
-              const p = nycPermitData[i]
-              return p ? activeTypes.has(p.job_type ?? '') : true
-            })
-          : permitHeatPoints
+        if (mapZoom < 15) {
+          const heatData = activeTypes
+            ? permitHeatPoints.filter((_, i) => {
+                const permit = nycPermitData[i]
+                return permit ? activeTypes.has(permit.job_type ?? '') : true
+              })
+            : permitHeatPoints
 
-        if (heatData.length > 0) {
-          result.push(
-            new HeatmapLayer({
-              id: 'permit-heatmap',
-              data: heatData,
-              getPosition: (d: PermitHeatPoint) => d.position,
-              getWeight: (d: PermitHeatPoint) => d.weight,
-              radiusPixels: 40,
-              intensity: 2.5,
-              threshold: 0.04,
-              colorRange: [
-                [20, 8, 2, 0],
-                [90, 35, 10, 100],
-                [160, 65, 20, 170],
-                [215, 107, 61, 210],
-                [240, 155, 70, 230],
-                [255, 215, 130, 250],
-              ],
-            })
-          )
+          if (heatData.length > 0) {
+            result.push(
+              new HeatmapLayer({
+                id: 'permit-heatmap',
+                data: heatData,
+                getPosition: (d: PermitHeatPoint) => d.position,
+                getWeight: (d: PermitHeatPoint) => d.weight,
+                radiusPixels: 40,
+                intensity: 2.5,
+                threshold: 0.04,
+                colorRange: [
+                  [20, 8, 2, 0],
+                  [90, 35, 10, 100],
+                  [160, 65, 20, 170],
+                  [215, 107, 61, 210],
+                  [240, 155, 70, 230],
+                  [255, 215, 130, 250],
+                ],
+              })
+            )
+          }
+        } else {
+          const filtered = activeTypes
+            ? nycPermitData.filter((permit) => activeTypes.has(permit.job_type ?? ''))
+            : nycPermitData
+
+          if (filtered.length > 0) {
+            result.push(
+              new ColumnLayer({
+                id: 'nyc-permits-3d',
+                data: filtered,
+                diskResolution: 6,
+                radius: 6,
+                extruded: true,
+                getPosition: (d: PermitPayload) => [d.lng, d.lat],
+                getElevation: (d: PermitPayload) => {
+                  const cost = Math.max(d.initial_cost ?? 0, 1)
+                  const logVal = Math.log10(cost)
+                  const t = Math.min(Math.max((logVal - 5) / 3.5, 0), 1)
+                  return 15 + t * 280
+                },
+                getFillColor: (d: PermitPayload) => {
+                  switch (d.job_type) {
+                    case 'NB': return [215, 107, 61, 240]
+                    case 'A1': return [100, 180, 255, 220]
+                    case 'DM': return [220, 80, 80, 230]
+                    default: return [160, 160, 160, 180]
+                  }
+                },
+                pickable: true,
+                onClick: (info: PickingInfo) => {
+                  const permit = info.object as PermitPayload | undefined
+                  setSelectedPermit(permit ?? null)
+                },
+                onHover: (info: PickingInfo) => {
+                  const permit = info.object as PermitPayload | undefined
+                  if (permit) {
+                    setTooltipStable({ x: info.x, y: info.y, text: `${permit.job_type_label} · ${permit.address}` })
+                  } else {
+                    setTooltipStable(null)
+                  }
+                },
+              })
+            )
+          }
         }
-      } else {
-        // 3D ColumnLayer - filter by active types
-        const filtered = activeTypes
-          ? nycPermitData.filter((p) => activeTypes.has(p.job_type ?? ''))
-          : nycPermitData
+      } else if (texasPermitAvailable) {
+        if (usingTexasRawPermits) {
+          const activeTexasRawCategories =
+            texasRawPermitCategoryFilter.size === 0 ? null : texasRawPermitCategoryFilter
+          const rawPermits = activeTexasRawCategories
+            ? texasRawPermitData.filter((permit) => activeTexasRawCategories.has(permit.category))
+            : texasRawPermitData
+          const rawHeatData =
+            activeTexasRawCategories == null ? permitHeatPoints : buildTexasRawPermitHeatPoints(rawPermits)
+          const texasRawPermit3DZoomThreshold = 13
 
-        if (filtered.length > 0) {
-          result.push(
-            new ColumnLayer({
-              id: 'nyc-permits-3d',
-              data: filtered,
-              diskResolution: 6,
-              radius: 6,
-              extruded: true,
-              getPosition: (d: PermitPayload) => [d.lng, d.lat],
-              getElevation: (d: PermitPayload) => {
-                const cost = Math.max(d.initial_cost ?? 0, 1)
-                const logVal = Math.log10(cost)
-                // log scale: $100k → ~20m, $1M → ~80m, $50M → ~250m
-                const t = Math.min(Math.max((logVal - 5) / 3.5, 0), 1)
-                return 15 + t * 280
-              },
-              getFillColor: (d: PermitPayload) => {
-                switch (d.job_type) {
-                  case 'NB': return [215, 107, 61, 240]   // orange - new building
-                  case 'A1': return [100, 180, 255, 220]  // blue - major alteration
-                  case 'DM': return [220, 80, 80, 230]    // red - demolition
-                  default:   return [160, 160, 160, 180]
-                }
-              },
-              pickable: true,
-              onClick: (info: PickingInfo) => {
-                const d = info.object as PermitPayload | undefined
-                setSelectedPermit(d ?? null)
-              },
-              onHover: (info: PickingInfo) => {
-                const d = info.object as PermitPayload | undefined
-                if (d) setTooltipStable({ x: info.x, y: info.y, text: `${d.job_type_label} · ${d.address}` })
-                else setTooltipStable(null)
-              },
-            })
-          )
+          if (mapZoom < texasRawPermit3DZoomThreshold) {
+            if (rawHeatData.length > 0) {
+              result.push(
+                new HeatmapLayer({
+                  id: 'texas-raw-permit-heatmap',
+                  data: rawHeatData,
+                  getPosition: (d: PermitHeatPoint) => d.position,
+                  getWeight: (d: PermitHeatPoint) => d.weight,
+                  radiusPixels: 42,
+                  intensity: 2.2,
+                  threshold: 0.035,
+                  colorRange: [
+                    [20, 8, 2, 0],
+                    [90, 35, 10, 100],
+                    [160, 65, 20, 170],
+                    [215, 107, 61, 210],
+                    [240, 155, 70, 230],
+                    [255, 215, 130, 250],
+                  ],
+                })
+              )
+            }
+          } else if (rawPermits.length > 0) {
+            result.push(
+              new ColumnLayer({
+                id: 'texas-raw-permits-3d',
+                data: rawPermits,
+                diskResolution: 6,
+                radius: 10,
+                extruded: true,
+                getPosition: (d: TexasRawPermitPayload) => [d.lng, d.lat],
+                getElevation: (d: TexasRawPermitPayload) => {
+                  const valuation = Math.max(d.valuation ?? 0, 0)
+                  const squareFeet = Math.max(d.square_feet ?? 0, 0)
+                  const units = Math.max(d.housing_units ?? 0, 0)
+                  return (
+                    16 +
+                    Math.log10(valuation + 1) * 22 +
+                    Math.log10(squareFeet + 1) * 14 +
+                    units * 10
+                  )
+                },
+                getFillColor: (d: TexasRawPermitPayload) => getTexasRawPermitFillColor(d.category),
+                getLineColor: [255, 230, 180, 220],
+                lineWidthMinPixels: 1,
+                stroked: true,
+                pickable: true,
+                onClick: (info: PickingInfo) => {
+                  const permit = info.object as TexasRawPermitPayload | undefined
+                  setSelectedTexasRawPermit(permit ?? null)
+                  if (permit) setSelectedTexasPermit(null)
+                },
+                onHover: (info: PickingInfo) => {
+                  const permit = info.object as TexasRawPermitPayload | undefined
+                  if (permit) {
+                    setTooltipStable({
+                      x: info.x,
+                      y: info.y,
+                      text: `${permit.category_label} · ${permit.address ?? permit.source_city}`,
+                    })
+                  } else {
+                    setTooltipStable(null)
+                  }
+                },
+              })
+            )
+          }
+        } else {
+          const texasPermit3DZoomThreshold = 10.75
+
+          if (mapZoom < texasPermit3DZoomThreshold) {
+            if (permitHeatPoints.length > 0) {
+              result.push(
+                new HeatmapLayer({
+                  id: 'texas-permit-activity-heatmap',
+                  data: permitHeatPoints,
+                  getPosition: (d: PermitHeatPoint) => d.position,
+                  getWeight: (d: PermitHeatPoint) => d.weight,
+                  radiusPixels: 48,
+                  intensity: 1.8,
+                  threshold: 0.03,
+                  colorRange: [
+                    [20, 8, 2, 0],
+                    [90, 35, 10, 100],
+                    [160, 65, 20, 170],
+                    [215, 107, 61, 210],
+                    [240, 155, 70, 230],
+                    [255, 215, 130, 250],
+                  ],
+                })
+              )
+            }
+          } else if (texasPermitActivity.length > 0) {
+            result.push(
+              new ColumnLayer({
+                id: 'texas-permit-activity-3d',
+                data: texasPermitActivity,
+                diskResolution: 8,
+                radius: mapZoom >= 12 ? 420 : 560,
+                extruded: true,
+                getPosition: (d: TexasPermitActivityPayload) => [d.lng, d.lat],
+                getElevation: (d: TexasPermitActivityPayload) => {
+                  const units = Math.max(d.total_units, 1)
+                  const valueMillions = Math.max((d.total_value ?? 0) / 1_000_000, 0)
+                  return 24 + Math.log2(units + 1) * 55 + Math.log10(valueMillions + 1) * 30
+                },
+                getFillColor: (d: TexasPermitActivityPayload) => {
+                  const multiFamilyShare = d.total_units > 0 ? d.multi_family_units / d.total_units : 0
+                  return multiFamilyShare >= 0.5
+                    ? [240, 155, 70, 235]
+                    : [215, 107, 61, 225]
+                },
+                getLineColor: [255, 230, 180, 220],
+                lineWidthMinPixels: 1,
+                stroked: true,
+                pickable: true,
+                onClick: (info: PickingInfo) => {
+                  const place = info.object as TexasPermitActivityPayload | undefined
+                  setSelectedTexasPermit(place ?? null)
+                },
+                onHover: (info: PickingInfo) => {
+                  const place = info.object as TexasPermitActivityPayload | undefined
+                  if (place) {
+                    setTooltipStable({
+                      x: info.x,
+                      y: info.y,
+                      text: `${place.place_name} · ${place.total_units.toLocaleString()} units`,
+                    })
+                  } else {
+                    setTooltipStable(null)
+                  }
+                },
+              })
+            )
+          }
         }
       }
     }
@@ -1567,7 +1951,7 @@ function CommandMap({
     }
 
     return result
-  }, [visiblePrimaryBoundary, visibleNeighborBoundaries, visibleCityBoundaries, boroughBoundary, transitStops, transitRoutes, parcelData, parcelColorMode, tractData, amenityPoints, poiPoints, floodData, nycPermitData, permitHeatPoints, permitTypeFilter, agentPermitFilter, mapZoom, momentumScores, effectiveLayers, colorScale, primaryMetricValue, effectiveMetric, zip, setTooltipStable, uploadedMarkers, shortlistSites, analysisSites])
+  }, [visiblePrimaryBoundary, visibleNeighborBoundaries, visibleCityBoundaries, boroughBoundary, transitStops, transitRoutes, parcelData, parcelColorMode, tractData, amenityPoints, poiPoints, floodData, nycPermitData, texasRawPermitData, texasPermitActivity, permitHeatPoints, permitTypeFilter, texasRawPermitCategoryFilter, agentPermitFilter, mapZoom, momentumScores, effectiveLayers, colorScale, primaryMetricValue, effectiveMetric, zip, setTooltipStable, uploadedMarkers, shortlistSites, analysisSites, nycFeatureAvailable, texasPermitAvailable, usingTexasRawPermits])
 
   const handleToggle = useCallback((key: keyof LayerState) => {
     const nextKey =
@@ -1682,6 +2066,172 @@ function CommandMap({
         </div>
       )}
 
+      {!nycFeatureAvailable &&
+        texasPermitAvailable &&
+        usingTexasRawPermits &&
+        effectiveLayers.nycPermits &&
+        selectedTexasRawPermit && (
+        <div
+          className="absolute bottom-4 left-4 z-40 w-72 rounded-xl overflow-hidden shadow-2xl"
+          style={{ background: 'rgba(6,6,6,0.88)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.08)' }}
+        >
+          <div className="flex items-start justify-between px-4 pt-3 pb-2" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+            <div>
+              <p className="text-white text-sm font-semibold leading-tight">
+                {selectedTexasRawPermit.address ?? `${selectedTexasRawPermit.source_city}, TX`}
+              </p>
+              <p className="text-zinc-500 text-[10px] mt-0.5">
+                {selectedTexasRawPermit.zip_code ?? 'Austin, TX'} · {selectedTexasRawPermit.source_name}
+              </p>
+            </div>
+            <button onClick={() => setSelectedTexasRawPermit(null)} className="text-zinc-600 hover:text-white ml-2 flex-shrink-0">×</button>
+          </div>
+          <div className="px-4 py-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <span
+                className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                style={{
+                  background:
+                    selectedTexasRawPermit.category === 'new_construction'
+                      ? 'rgba(215,107,61,0.2)'
+                      : selectedTexasRawPermit.category === 'demolition'
+                        ? 'rgba(220,80,80,0.2)'
+                        : 'rgba(100,180,255,0.2)',
+                  color:
+                    selectedTexasRawPermit.category === 'new_construction'
+                      ? '#D76B3D'
+                      : selectedTexasRawPermit.category === 'demolition'
+                        ? '#f87171'
+                        : '#60a5fa',
+                  border: `1px solid ${
+                    selectedTexasRawPermit.category === 'new_construction'
+                      ? 'rgba(215,107,61,0.3)'
+                      : selectedTexasRawPermit.category === 'demolition'
+                        ? 'rgba(220,80,80,0.3)'
+                        : 'rgba(100,180,255,0.3)'
+                  }`,
+                }}
+              >
+                {selectedTexasRawPermit.category_label}
+              </span>
+              <span className="text-zinc-500 text-[10px]">
+                {formatPermitDate(selectedTexasRawPermit.issue_date) ?? 'Recent'}
+              </span>
+            </div>
+            {selectedTexasRawPermit.description && (
+              <p className="text-zinc-300 text-[11px] leading-relaxed">
+                {selectedTexasRawPermit.description.slice(0, 220)}
+                {selectedTexasRawPermit.description.length > 220 ? '...' : ''}
+              </p>
+            )}
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              {selectedTexasRawPermit.valuation != null && selectedTexasRawPermit.valuation > 0 && (
+                <div>
+                  <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Valuation</p>
+                  <p className="text-white text-xs font-medium">${selectedTexasRawPermit.valuation.toLocaleString()}</p>
+                </div>
+              )}
+              {selectedTexasRawPermit.square_feet != null && selectedTexasRawPermit.square_feet > 0 && (
+                <div>
+                  <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Sq Ft</p>
+                  <p className="text-white text-xs font-medium">{selectedTexasRawPermit.square_feet.toLocaleString()}</p>
+                </div>
+              )}
+              {selectedTexasRawPermit.housing_units != null && selectedTexasRawPermit.housing_units > 0 && (
+                <div>
+                  <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Units</p>
+                  <p className="text-white text-xs font-medium">{selectedTexasRawPermit.housing_units.toLocaleString()}</p>
+                </div>
+              )}
+              {selectedTexasRawPermit.work_class && (
+                <div>
+                  <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Work Class</p>
+                  <p className="text-white text-xs font-medium">{selectedTexasRawPermit.work_class}</p>
+                </div>
+              )}
+            </div>
+            <div className="flex items-center justify-between pt-1">
+              {selectedTexasRawPermit.permit_number ? (
+                <p className="text-zinc-500 text-[10px]">{selectedTexasRawPermit.permit_number}</p>
+              ) : (
+                <span />
+              )}
+              {selectedTexasRawPermit.source_url && (
+                <a
+                  href={selectedTexasRawPermit.source_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[10px] font-medium text-[#D76B3D] hover:text-[#f3b18d]"
+                >
+                  View source
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!nycFeatureAvailable &&
+        texasPermitAvailable &&
+        !usingTexasRawPermits &&
+        effectiveLayers.nycPermits &&
+        selectedTexasPermit && (
+        <div
+          className="absolute bottom-4 left-4 z-40 w-72 rounded-xl overflow-hidden shadow-2xl"
+          style={{ background: 'rgba(6,6,6,0.88)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.08)' }}
+        >
+          <div className="flex items-start justify-between px-4 pt-3 pb-2" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+            <div>
+              <p className="text-white text-sm font-semibold leading-tight">{selectedTexasPermit.place_name}</p>
+              <p className="text-zinc-500 text-[10px] mt-0.5">
+                {selectedTexasPermit.county_name ?? 'Texas'}{selectedTexasPermit.metro_name ? ` · ${selectedTexasPermit.metro_name}` : ''}
+              </p>
+            </div>
+            <button onClick={() => setSelectedTexasPermit(null)} className="text-zinc-600 hover:text-white ml-2 flex-shrink-0">×</button>
+          </div>
+          <div className="px-4 py-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <span
+                className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                style={{
+                  background: 'rgba(215,107,61,0.2)',
+                  color: '#D76B3D',
+                  border: '1px solid rgba(215,107,61,0.3)',
+                }}
+              >
+                Residential Permit Activity
+              </span>
+              <span className="text-zinc-500 text-[10px]">{selectedTexasPermit.latest_month ?? 'Recent'}</span>
+            </div>
+            <p className="text-zinc-400 text-[10px] leading-relaxed">
+              Aggregated from the last 12 months of official Texas place-level permit activity; columns sit on place centroids, not parcel-level filings.
+            </p>
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <div>
+                <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Units</p>
+                <p className="text-white text-xs font-medium">{selectedTexasPermit.total_units.toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Buildings</p>
+                <p className="text-white text-xs font-medium">{selectedTexasPermit.total_buildings.toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Single-Family</p>
+                <p className="text-white text-xs font-medium">{selectedTexasPermit.single_family_units.toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Multi-Family</p>
+                <p className="text-white text-xs font-medium">{selectedTexasPermit.multi_family_units.toLocaleString()}</p>
+              </div>
+              <div className="col-span-2">
+                <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Construction Value</p>
+                <p className="text-white text-xs font-medium">${selectedTexasPermit.total_value.toLocaleString()}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Map controls: top-left of map (adjacent to sidebar). [dots + Layers][sheet] opens toward map center. */}
       <div
         dir="ltr"
@@ -1775,7 +2325,12 @@ function CommandMap({
               { key: 'tracts' as const, label: 'Tracts', color: '#2dd4bf' },
               { key: 'amenityHeatmap' as const, label: 'Amenity', color: '#facc15' },
               { key: 'floodRisk' as const, label: 'Flood', color: '#f87171' },
-              { key: 'nycPermits' as const, label: 'Permits (NYC)', color: '#D76B3D', nycOnly: true },
+              {
+                key: 'nycPermits' as const,
+                label: nycFeatureAvailable || usingTexasRawPermits ? 'Permits' : 'Permit activity',
+                color: '#D76B3D',
+                showWhen: permitFeatureAvailable,
+              },
               { key: 'pois' as const, label: 'POIs', color: '#f59e0b' },
               { key: 'momentum' as const, label: 'Momentum', color: '#a78bfa' },
               { key: 'clientData' as const, label: 'Client', color: '#D76B3D', showWhen: !!uploadedMarkers?.length },
@@ -1887,6 +2442,77 @@ function CommandMap({
               <p className="text-[9px] text-zinc-600 mt-1.5">
                 {mapZoom < 15 ? `Heatmap · zoom ${Math.round(mapZoom)}` : `3D · zoom ${Math.round(mapZoom)}`}
                 {mapZoom < 15 && <span className="text-zinc-700"> (zoom in for 3D)</span>}
+              </p>
+            </div>
+            <div className="mx-3 h-px bg-border/70" />
+          </>
+        )}
+
+        {effectiveLayers.nycPermits && !nycFeatureAvailable && texasPermitAvailable && usingTexasRawPermits && (
+          <>
+            <div className="px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-500 mb-1.5">Permit Type</p>
+              <div className="flex flex-wrap gap-1">
+                {TEXAS_RAW_PERMIT_FILTER_META.map(({ key, label, color }) => {
+                  const active =
+                    texasRawPermitCategoryFilter.size === 0 || texasRawPermitCategoryFilter.has(key)
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => {
+                        setTexasRawPermitCategoryFilter((prev) => {
+                          const next = new Set(prev)
+                          if (next.size === 0) {
+                            next.add('new_construction')
+                            next.add('major_renovation')
+                            next.add('demolition')
+                            next.delete(key)
+                          } else if (next.has(key)) {
+                            next.delete(key)
+                            if (next.size === 0) return new Set()
+                          } else {
+                            next.add(key)
+                            if (next.size === TEXAS_RAW_PERMIT_FILTER_META.length) return new Set()
+                          }
+                          return next
+                        })
+                      }}
+                      className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all"
+                      style={{
+                        background: active ? `${color}20` : 'rgba(255,255,255,0.03)',
+                        border: `1px solid ${active ? color : 'rgba(255,255,255,0.07)'}`,
+                        color: active ? '#fff' : '#52525b',
+                      }}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: active ? color : '#3f3f46' }} />
+                      {label}
+                    </button>
+                  )
+                })}
+              </div>
+              <p className="text-[10px] leading-relaxed text-zinc-400 mt-1.5">
+                Austin raw building permits are filtered to new construction, demolition, and major renovation only.
+              </p>
+              <p className="text-[9px] text-zinc-600 mt-1.5">
+                {texasRawPermitData.length.toLocaleString()} permits loaded · {mapZoom < 13 ? `Heatmap · zoom ${Math.round(mapZoom)}` : `3D · zoom ${Math.round(mapZoom)}`}
+                {mapZoom < 13 && <span className="text-zinc-700"> (zoom in for 3D)</span>}
+              </p>
+            </div>
+            <div className="mx-3 h-px bg-border/70" />
+          </>
+        )}
+
+        {effectiveLayers.nycPermits && !nycFeatureAvailable && texasPermitAvailable && !usingTexasRawPermits && (
+          <>
+            <div className="px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-500 mb-1.5">Permit Activity</p>
+              <p className="text-[10px] leading-relaxed text-zinc-400">
+                Texas uses official place-level residential permit activity for the last 12 months. Heatmap below zoom 11, 3D columns above.
+              </p>
+              <p className="text-[9px] text-zinc-600 mt-1.5">
+                {texasPermitActivity.length > 0
+                  ? `${texasPermitActivity.length.toLocaleString()} places loaded`
+                  : 'No place activity loaded for this scope'}
               </p>
             </div>
             <div className="mx-3 h-px bg-border/70" />

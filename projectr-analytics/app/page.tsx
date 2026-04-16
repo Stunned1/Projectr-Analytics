@@ -1406,6 +1406,7 @@ export default function Home() {
         <CommandMap
           zip={result?.zip ?? null}
           marketData={result}
+          aggregateData={aggregateData}
           transitData={transit}
           cityZips={cityZips}
           boroughBoundary={boroughBoundary}

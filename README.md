@@ -123,6 +123,7 @@ _4.11.2026_
 _04.16.2026_
 - Added shared Texas source adapters plus `ingest:texas:housing`, `ingest:texas:permits`, and `ingest:texas:demographics` so TREC and Texas Demographic Center exports normalize county / metro rows into `projectr_master_data`.
 - `ingest:texas:housing`, `ingest:texas:permits`, and `ingest:texas:demographics` can now pull official TREC and Texas Demographic Center APIs directly, with `--scope`, `--match`, `--limit`, and projection-scenario flags for targeted Texas county / metro backfills and QA seeding.
+- Added `lib/texas-raw-permits.ts` plus `/api/permits/texas/raw`, which maps Austin Open Data building permits into shared Texas raw permit records for new construction, major renovation, and demolition without changing the broader multi-state permit contract.
 
 **Infrastructure**
 
@@ -148,6 +149,7 @@ _04.16.2026_
 - Texas-first demo warmups, slash help, and export/search messaging now use ZIP / county / metro wording instead of assuming city-or-borough-only flows.
 - `/api/agent` now includes a shared county / metro Texas-style case-study example alongside the NYC-only parcel-model example so non-NYC briefs stay on the shared workflow instead of drifting toward borough logic.
 - Aggregate area loads now run aggregate, cycle, transit, and trends fetches in parallel, and obvious metro-style searches try `/api/metro` before `/api/city` to avoid an unnecessary extra round trip on Texas-style metro queries.
+- Added `/api/permits/texas`, which scopes official TREC place-level residential permit activity to Texas city / county / metro searches, caches hot responses, and resolves place centroids from `zip_metro_lookup` before falling back to Google geocoding.
 
 **Bug Fixes**
 
@@ -210,6 +212,8 @@ _04.16.2026_
 - Sidebar search, terminal suggestions, slash-command help, and market export prompts now present Texas ZIP / county / metro workflows as the default visible examples.
 - Agent starter prompts, aggregate-search fallback errors, and internal agent search instructions now use ZIP / county / metro market language first so shared workflows stop reading like borough-first NYC flows.
 - Intelligence terminal greetings, starter chips, and input placeholders now switch between Texas-first shared-market prompts and NYC borough-specific prompts based on the active geography, while export and save copy keep borough workflows secondary unless NYC is actually in play.
+- The shared permit layer now renders Texas residential permit activity as a heatmap when zoomed out and 3D place columns when zoomed in, while NYC keeps the existing raw DOB permit points and type filters.
+- Austin city searches now upgrade that shared permit layer to raw official permit records with category filters, detail cards, and source links, while unsupported Texas geographies still fall back to the cached aggregate permit activity layer.
 
 ## Known Bugs
 
@@ -248,6 +252,7 @@ _04.16.2026_
 - **Reusable analyst workflow packaging** - Scout currently reads as a Projectr-specific consulting workspace; broadening it into a reusable product for other analyst teams would require templated workflows, sharable deliverables, and less client-specific framing in the UX.
 - **County search still depends on available ZIP coverage for map overlays** - The county route now uses TIGER county/ZCTA fallback plus ZIP geocode validation, but counties with very thin Zillow or boundary coverage can still load the aggregate panel with only a small ZIP set on the map; fixing that cleanly would require a broader county-to-ZIP source or county polygon rendering as a first-class shared path.
 - **Full Texas TREC backfills are network-heavy** - The new direct TREC fetch mode removes manual export prep, but statewide county + metro backfills still make hundreds of remote requests; use `--scope`, `--match`, and `--limit` for fast QA seeds until we add scheduled/background ingest orchestration.
+- **Texas raw permits are still city-by-city** - Austin now uses official raw permit records, but Dallas, Houston, San Antonio, Fort Worth, and the rest of Texas still fall back to TREC place-level permit activity until more official city or county raw permit feeds are wired into the shared adapter path.
 
 ## Client CSV & AI session
 
@@ -289,7 +294,7 @@ npm run ingest:zillow
 
 - **Texas parcel polygons outside NYC-style workflows** — TxGIO parcel coverage is optional, county-scoped, and not normalized into the default MVP path. Wiring parcel polygons across Texas cleanly would require county-on-demand ingest, spatial tiling, and a separate shared parcel contract so statewide loads do not wreck latency.
 
-- **Multi-market permit map visualization** — Texas permit metrics are already available in county / metro aggregates via TREC, but map visualization is still NYC-only because the Texas MVP sources are pre-aggregated rather than parcel/point permit feeds. Revisit if we scope a county-on-demand Texas permit layer or add another paid/raw permit source.
+- **Statewide raw Texas permit records** — Texas now has a live place-level permit activity layer, but parcel / filing-level New Building, Demolition, and Major Renovation records are still deferred because the current official source is aggregated by place-month. Revisit if we add a raw statewide permit feed or county-on-demand record ingest.
 
 - **Shortlist attachments (CSV + agent chat)** — Would require `saved_sites` JSONB column(s) or a sibling table, size limits, and UI to “attach workspace” on save plus restore flow (rehydrate markers store + optional transcript). Blocked on schema/auth product decisions.
 
