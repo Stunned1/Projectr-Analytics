@@ -221,6 +221,7 @@ _04.16.2026_
 - The shared permit layer now renders Texas residential permit activity as a heatmap when zoomed out and 3D place columns when zoomed in, while NYC keeps the existing raw DOB permit points and type filters.
 - Austin city searches now upgrade that shared permit layer to raw official permit records with category filters, detail cards, and source links, while unsupported Texas geographies still fall back to the cached aggregate permit activity layer.
 - The CSV normalizer card now surfaces mapability status, fallback mode, confidence, and user-facing explanations so phase-2 import classification is visible without opening devtools.
+- The left sidebar now includes an explicit `Upload` navigation item so the Client CSV workflow is reachable from the visible app shell instead of only by direct route or embedded panel access.
 
 ## Known Bugs
 

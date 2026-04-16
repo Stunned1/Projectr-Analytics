@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation'
 import { useState, type ReactNode } from 'react'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
-import { BookOpen, Bookmark } from 'lucide-react'
+import { BookOpen, Bookmark, Upload } from 'lucide-react'
 
 const SIDEBAR_EXPANDED_PX = 200
 const SIDEBAR_COLLAPSED_PX = 48
@@ -205,6 +205,7 @@ export default function CommandCenterSidebar({
         {!collapsed && (
           <div className="space-y-0.5 border-b border-sidebar-border px-2 py-2">
             <NavLink href="/" icon={<MapIcon />} label="Map" />
+            <NavLink href="/upload" icon={<Upload className="h-4 w-4" strokeWidth={1.5} />} label="Upload" />
             <NavLink href="/saved" icon={<Bookmark className="h-4 w-4" strokeWidth={1.5} />} label="Saved" />
             <NavLink href="/guide" icon={<BookOpen className="h-4 w-4" strokeWidth={1.5} />} label="Guide" />
           </div>
@@ -214,6 +215,11 @@ export default function CommandCenterSidebar({
           {collapsed ? (
             <div className="flex flex-col gap-1">
               <NavLinkCollapsed href="/" icon={<MapIcon />} title="Map" />
+              <NavLinkCollapsed
+                href="/upload"
+                icon={<Upload className="h-4 w-4" strokeWidth={1.5} />}
+                title="Upload"
+              />
               <NavLinkCollapsed
                 href="/saved"
                 icon={<Bookmark className="h-4 w-4" strokeWidth={1.5} />}
