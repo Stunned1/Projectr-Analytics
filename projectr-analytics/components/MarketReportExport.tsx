@@ -73,7 +73,10 @@ export default function MarketReportExport({
         }),
       }
     }
-    return { ok: false, reason: 'Run a ZIP, county, metro, city, or NYC borough search first.' }
+    return {
+      ok: false,
+      reason: 'Run a ZIP, county, metro, or city search first. NYC boroughs also work when you need borough-specific analysis.',
+    }
   }, [aggregateData, cityZips, comparisonPins, cycleAnalysis, mapLayersSnapshot, result, trends, uploadedMarkers])
 
   const downloadPdf = useCallback(async () => {

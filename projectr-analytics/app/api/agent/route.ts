@@ -116,6 +116,25 @@ NYC-ONLY EXAMPLE shape (use only when the brief explicitly names an NYC borough)
   "insight": "One sentence tying the brief to what appears after result pins land."
 }
 
+SHARED TEXAS / NON-NYC EXAMPLE shape (use when the brief is county / ZIP / metro and does NOT qualify for NYC-only run_analysis):
+{
+  "message": "Initiating market read from your brief.",
+  "trace": {
+    "summary": "4-step Harris County screening · market context → tracts/transit → momentum/flood",
+    "detail": "Brief is not an NYC borough parcel screen, so stay in shared market layers and make the limits explicit instead of inventing a model run.",
+    "plan": ["Navigate to the county or metro", "Load baseline fabric", "Add shared risk / momentum layers", "Open analysis or data panel if needed"],
+    "eval": "No run_analysis because geography is outside NYC borough scope."
+  },
+  "steps": [
+    { "delay": 0, "message": "Framing the market named in your brief...", "action": {"type":"search","query":"Harris County, TX"} },
+    { "delay": 1800, "message": "Tilting slightly for built-form and corridor context.", "action": {"type":"set_tilt","tilt":35} },
+    { "delay": 3200, "message": "Loading shared market layers for pricing, tracts, and transit access.", "action": {"type":"toggle_layers","layers":{"rentChoropleth":true,"tracts":true,"transitStops":true}} },
+    { "delay": 5200, "message": "Adding momentum and flood layers to stress-test the thesis.", "action": {"type":"toggle_layers","layers":{"momentum":true,"floodRisk":true}} },
+    { "delay": 7000, "message": "Opening the analysis panel for cycle and market brief context.", "action": {"type":"generate_memo"} }
+  ],
+  "insight": "One sentence tying the county / metro thesis to the shared layers now on the map."
+}
+
 TRACE (required on every response — planning / reasoning log for the UI sidebar):
 Include a top-level "trace" object so analysts can open **Show thinking** in the right panel:
 {
@@ -354,6 +373,37 @@ function blockedAgentStreamResponse(payload: ReturnType<typeof blockedAgentPaylo
   })
 }
 
+function classifyAgentError(err: unknown): { message: string; status: number; retryable: boolean } {
+  const message = err instanceof Error ? err.message : 'Unexpected error'
+  const normalized = message.toLowerCase()
+
+  if (normalized.includes('503 service unavailable')) {
+    return {
+      message: 'Gemini is temporarily unavailable due to upstream load. Retry the request in a moment.',
+      status: 503,
+      retryable: true,
+    }
+  }
+
+  if (
+    normalized.includes('429') ||
+    normalized.includes('too many requests') ||
+    normalized.includes('resource exhausted')
+  ) {
+    return {
+      message: 'Gemini rate limit reached for this request. Retry in a moment.',
+      status: 429,
+      retryable: true,
+    }
+  }
+
+  return {
+    message,
+    status: 500,
+    retryable: false,
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as {
@@ -407,10 +457,13 @@ export async function POST(request: NextRequest) {
               trace: out.trace,
             })
           } catch (err) {
+            const failure = classifyAgentError(err)
             stopPing()
             push({
               type: 'error',
-              error: err instanceof Error ? err.message : 'Unexpected error',
+              error: failure.message,
+              status: failure.status,
+              retryable: failure.retryable,
             })
           } finally {
             stopPing()
@@ -437,7 +490,10 @@ export async function POST(request: NextRequest) {
       trace: out.trace,
     })
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unexpected error'
-    return NextResponse.json({ error: message }, { status: 500 })
+    const failure = classifyAgentError(err)
+    return NextResponse.json(
+      { error: failure.message, retryable: failure.retryable },
+      { status: failure.status }
+    )
   }
 }

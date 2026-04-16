@@ -884,7 +884,7 @@ export default function Home() {
 
       return {
         ok: false,
-        message: 'Nothing to save — load a ZIP or city search, or wait for the map to finish loading.',
+        message: 'Nothing to save — load a ZIP, county, metro, or city search, or wait for the map to finish loading.',
       }
     },
     [result, aggregateData, cityZips, searchInput, cycleData]

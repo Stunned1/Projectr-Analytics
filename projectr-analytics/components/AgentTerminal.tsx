@@ -3,23 +3,12 @@
 import { Fragment, useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react'
 import type { AgentAction, AgentTrace, AnalysisSite } from '@/lib/agent-types'
 import type { MapContext } from '@/lib/agent-types'
+import { buildAgentInputPlaceholder, buildAgentStarterSuggestions } from '@/lib/agent-surface-copy'
 import { useAgentIntelligence, formatActionLogLine } from '@/lib/use-agent-intelligence'
 import { getSlashPaletteState } from '@/lib/slash-commands'
 import { cn } from '@/lib/utils'
 
 const STREAM_MS = 72
-const SUGGESTIONS = [
-  '/help',
-  '/go 77002',
-  '/go Harris County, TX',
-  '/save',
-  '/layers:transit,rent',
-  '/clear:terminal',
-  '/clear:workspace',
-  'Show flood risk in Harris County, TX',
-  'Transit + amenities on in Houston',
-  'Compare Dallas-Fort Worth and Austin momentum',
-]
 
 /** Scout orange / narrative / system / chrome */
 const C_USER_GT = '#D76B3D'
@@ -219,6 +208,7 @@ export default function AgentTerminal({
   })
 
   const slashPalette = useMemo(() => getSlashPaletteState(input), [input])
+  const starterSuggestions = useMemo(() => buildAgentStarterSuggestions(mapContext), [mapContext])
   const activeSlashHighlight = useMemo(() => {
     if (!slashPalette.open || slashPalette.matches.length === 0) return 0
     return Math.min(slashHighlight, slashPalette.matches.length - 1)
@@ -378,6 +368,10 @@ export default function AgentTerminal({
 
   const terminalMsgOffset = messages.length - visibleTerminalMessages.length
   const hasUserMessage = useMemo(() => messages.some((m) => m.role === 'user'), [messages])
+  const inputPlaceholder = useMemo(
+    () => buildAgentInputPlaceholder(mapContext, hasUserMessage, isRunningSequence),
+    [mapContext, hasUserMessage, isRunningSequence]
+  )
 
   const lastStatusLine = useMemo(() => {
     for (let i = visibleTerminalMessages.length - 1; i >= 0; i--) {
@@ -617,7 +611,7 @@ export default function AgentTerminal({
 
           {messages.length <= 2 && (
             <div className="flex shrink-0 flex-wrap gap-1 border-t border-zinc-800/60 px-2 py-1">
-              {SUGGESTIONS.map((s) => (
+              {starterSuggestions.map((s) => (
                 <button
                   key={s}
                   type="button"
@@ -720,13 +714,7 @@ export default function AgentTerminal({
                   }
                 }}
                 disabled={loading || isRunningSequence}
-                placeholder={
-                  isRunningSequence
-                    ? 'Sequence running…'
-                    : hasUserMessage
-                      ? '_'
-                      : '/help · /go ZIP · /layers:rent · /restart · /clear:terminal · or ask…'
-                }
+                placeholder={inputPlaceholder}
                 className="w-full min-w-0 bg-transparent font-mono text-[11px] text-zinc-200 caret-primary outline-none placeholder:text-zinc-700 disabled:opacity-50"
                 style={{ color: C_USER_TEXT }}
                 spellCheck={false}

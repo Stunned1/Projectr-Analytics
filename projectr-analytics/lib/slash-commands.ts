@@ -368,7 +368,7 @@ export function saveSlashUsageLines(): string {
   return [
     'Usage: `/save` or `/save <name>` — adds a row to **Saved** (same Supabase flow as the data panel).',
     '• **ZIP loaded** — saves that market (optional name replaces the default place label).',
-    '• **County / metro / city / NYC borough loaded** — saves the area (optional name; reopen uses your sidebar search text when set).',
+    '• **County / metro / city loaded** — saves the area (optional name; reopen uses your sidebar search text when set). NYC boroughs also work when relevant.',
     '• **Otherwise** — saves the **current map center** as a bookmark (optional name; default label uses rounded coordinates).',
     '• Requires Auth (enable **Anonymous** sign-ins in Supabase if you see a sign-in error).',
   ].join('\n')

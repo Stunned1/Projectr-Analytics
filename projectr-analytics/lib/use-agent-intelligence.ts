@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import type { AgentAction, AgentMessage, AgentStep, AgentTrace, AnalysisSite, MapContext } from '@/lib/agent-types'
 import { consumeAgentNdjsonStream } from '@/lib/consume-agent-ndjson-stream'
+import { buildAgentGreeting } from '@/lib/agent-surface-copy'
 import { evaluateAgentRequestPolicy } from '@/lib/agent-request-policy'
 import { AGENT_CHAT_STORAGE_KEY } from '@/lib/agent-chat-storage-key'
 import { clearLocalWorkspaceForTesting, clearProjectrBrowserCachesAndReload } from '@/lib/local-workspace-reset'
@@ -59,11 +60,6 @@ type PersistedAgentSession = {
   v: 1
   messages: AgentMessage[]
   caseStudyBundle: CaseStudyBundle | null
-}
-
-const DEFAULT_GREETING: AgentMessage = {
-  role: 'agent',
-  text: 'Engine ready. Load a ZIP, county, metro, or Texas city, or paste an analyst brief. NYC parcel workflows appear only in New York City.',
 }
 
 function readPersistedSession(): PersistedAgentSession | null {
@@ -128,7 +124,9 @@ export function useAgentIntelligence(
     onAgentThinkingStreamFinished?: () => void
   }
 ) {
-  const [messages, setMessages] = useState<AgentMessage[]>([DEFAULT_GREETING])
+  const defaultGreeting = useMemo(() => buildAgentGreeting(mapContext), [mapContext])
+  const defaultGreetingRef = useRef(defaultGreeting)
+  const [messages, setMessages] = useState<AgentMessage[]>(() => [{ role: 'agent', text: defaultGreeting }])
   const [caseStudyBundle, setCaseStudyBundle] = useState<CaseStudyBundle | null>(null)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -162,6 +160,26 @@ export function useAgentIntelligence(
     setTerminalFirstVisibleIndex(0)
     setStorageHydrated(true)
   }, [])
+
+  useEffect(() => {
+    if (!storageHydrated) {
+      defaultGreetingRef.current = defaultGreeting
+      return
+    }
+
+    setMessages((prev) => {
+      if (
+        prev.length === 1 &&
+        prev[0]?.role === 'agent' &&
+        prev[0]?.text === defaultGreetingRef.current
+      ) {
+        defaultGreetingRef.current = defaultGreeting
+        return [{ role: 'agent', text: defaultGreeting }]
+      }
+      defaultGreetingRef.current = defaultGreeting
+      return prev
+    })
+  }, [defaultGreeting, storageHydrated])
 
   useEffect(() => {
     if (!storageHydrated) return
@@ -415,7 +433,7 @@ export function useAgentIntelligence(
         if (restartCmd.kind === 'cancel') {
           restartConfirmPendingRef.current = false
           setTerminalFirstVisibleIndex(0)
-          setMessages([DEFAULT_GREETING])
+          setMessages([{ role: 'agent', text: defaultGreetingRef.current }])
           return
         }
         restartConfirmPendingRef.current = false
@@ -434,7 +452,7 @@ export function useAgentIntelligence(
         if (low === 'n' || low === 'no') {
           restartConfirmPendingRef.current = false
           setTerminalFirstVisibleIndex(0)
-          setMessages([DEFAULT_GREETING])
+          setMessages([{ role: 'agent', text: defaultGreetingRef.current }])
           return
         }
         setMessages((prev) => [
@@ -500,14 +518,14 @@ export function useAgentIntelligence(
         if (clearCmd.mode === 'terminal') {
           restartConfirmPendingRef.current = false
           setTerminalFirstVisibleIndex(0)
-          setMessages([DEFAULT_GREETING])
+          setMessages([{ role: 'agent', text: defaultGreetingRef.current }])
           return
         }
         if (clearCmd.mode === 'memory') {
           restartConfirmPendingRef.current = false
           setTerminalFirstVisibleIndex(0)
           setCaseStudyBundle(null)
-          setMessages([DEFAULT_GREETING])
+          setMessages([{ role: 'agent', text: defaultGreetingRef.current }])
           return
         }
       }

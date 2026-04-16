@@ -145,6 +145,7 @@ _04.16.2026_
 - Added shared geography gating and Texas MVP source / architecture / performance notes so Texas becomes the default product framing without deleting NYC-specific workflows.
 - Added `/api/county`, `/api/metro`, and `/api/area-metrics`, and wired aggregate search to fall through from city lookups to county / metro lookups for Texas-friendly county / ZIP / metro workflows.
 - Texas-first demo warmups, slash help, and export/search messaging now use ZIP / county / metro wording instead of assuming city-or-borough-only flows.
+- `/api/agent` now includes a shared county / metro Texas-style case-study example alongside the NYC-only parcel-model example so non-NYC briefs stay on the shared workflow instead of drifting toward borough logic.
 
 **Bug Fixes**
 
@@ -167,6 +168,7 @@ _04.16.2026_
 - The shared market page now reuses cached `/api/market`, `/api/aggregate`, `/api/transit`, `/api/cycle`, `/api/trends`, and area-lookup responses for repeated ZIP / county / metro loads so common Texas searches stop re-fetching the same payloads on replay.
 - `/api/county` now falls back from broken Zillow county labels to TIGER county/ZCTA membership plus ZIP geocode validation, so thinner Texas counties like Brazos resolve without pulling adjacent-county ZIPs into the result.
 - `/api/metro`, `/api/area-metrics`, and `/api/aggregate` now expand shared Houston metro aliases, so Zillow metro labels and TREC/TDC metro rows hit the same direct Texas fast path instead of dropping back to ZIP-derived aggregates.
+- `/api/agent` now turns upstream Gemini overload and rate-limit failures into explicit retryable `503` / `429` responses instead of a generic `500`, so Texas-first agent flows fail more cleanly during provider spikes.
 
 **Map & Visualization**
 
@@ -203,6 +205,7 @@ _04.16.2026_
 - Aggregate county / metro views now label themselves by geography and surface supplemental precomputed area metrics without a second fetch.
 - Sidebar search, terminal suggestions, slash-command help, and market export prompts now present Texas ZIP / county / metro workflows as the default visible examples.
 - Agent starter prompts, aggregate-search fallback errors, and internal agent search instructions now use ZIP / county / metro market language first so shared workflows stop reading like borough-first NYC flows.
+- Intelligence terminal greetings, starter chips, and input placeholders now switch between Texas-first shared-market prompts and NYC borough-specific prompts based on the active geography, while export and save copy keep borough workflows secondary unless NYC is actually in play.
 
 ## Known Bugs
 
