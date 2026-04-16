@@ -58,9 +58,7 @@ export async function GET(request: NextRequest) {
       .limit(100)
 
     if (cached && cached.length > 0) {
-      const { zillow, metro_velocity } = await getZillowData(zip)
-      // Still geocode so the client gets geo + FIPS for map layers
-      const geo = await geocodeZip(zip)
+      const [{ zillow, metro_velocity }, geo] = await Promise.all([getZillowData(zip), geocodeZip(zip)])
       return NextResponse.json({
         zip, cached: true, data: cached, zillow, metro_velocity,
         geo: geo ? { lat: geo.lat, lng: geo.lng, city: geo.city, state: geo.state, stateFips: geo.stateFips, countyFips: geo.countyFips } : undefined,
@@ -74,11 +72,13 @@ export async function GET(request: NextRequest) {
     }
 
     // Step 3: Concurrent fetch from live APIs
-    const [fredRows, hudRows, censusRows, permitRows] = await Promise.all([
+    const zillowPromise = getZillowData(zip)
+    const [fredRows, hudRows, censusRows, permitRows, { zillow, metro_velocity }] = await Promise.all([
       fetchFred(geo, zip),
       fetchHud(geo, zip),
       fetchCensus(zip, geo),
       fetchPermits(geo, zip),
+      zillowPromise,
     ])
 
     const allRows = [...fredRows, ...hudRows, ...censusRows, ...permitRows]
@@ -87,8 +87,6 @@ export async function GET(request: NextRequest) {
     if (allRows.length > 0) {
       await supabase.from('projectr_master_data').insert(allRows)
     }
-
-    const { zillow, metro_velocity } = await getZillowData(zip)
 
     return NextResponse.json({
       zip,

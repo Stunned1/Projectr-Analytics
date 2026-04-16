@@ -226,6 +226,21 @@ function hasFeatures(value: unknown): value is { features: unknown[] } {
   return Array.isArray((value as { features?: unknown[] }).features)
 }
 
+const BOROUGH_TRACT_FIPS: Record<string, { state: string; county: string }> = {
+  manhattan: { state: '36', county: '061' },
+  bronx: { state: '36', county: '005' },
+  brooklyn: { state: '36', county: '047' },
+  queens: { state: '36', county: '081' },
+  'staten island': { state: '36', county: '085' },
+}
+
+function buildPermitHeatPoints(permits: PermitPayload[]): PermitHeatPoint[] {
+  return permits.map((permit) => ({
+    position: [permit.lng, permit.lat] as [number, number],
+    weight: permit.job_type === 'NB' ? 3 : permit.job_type === 'A1' ? 2 : 1,
+  }))
+}
+
 // ── Color scale: blue (low rent) → red (high rent) ───────────────────────────
 // Normalized across the set of loaded ZIPs for relative contrast
 
@@ -720,44 +735,61 @@ function CommandMap({
     if (!cityZips?.length || !cityBoundaryKey) return
     let cancelled = false
 
-    if (detectedNycBorough) {
-      if (effectiveLayers.parcels) {
-        dedupedFetchJson<ParcelResponse>(`/api/parcels?borough=${encodeURIComponent(detectedNycBorough)}`)
-          .then((d) => {
-            if (!cancelled && Array.isArray(d.parcels) && d.stats) {
-              setParcelData({ parcels: d.parcels, stats: d.stats })
-            }
-          })
-          .catch(() => {})
-      }
+    // Fetch boundaries for all city ZIPs in parallel (limit 30)
+    const sample = cityZips.filter((z) => z.lat && z.lng).slice(0, 30)
+    Promise.allSettled(
+      sample.map((z) =>
+        dedupedFetchJson<GeoJSON>('/api/boundaries?zip=' + z.zip)
+          .then((geojson) => ({ zip: z.zip, geojson, zori: z.zori_latest, zhvi: z.zhvi_latest }))
+      )
+    ).then((results) => {
+      if (cancelled) return
+      const loaded: ZipBoundary[] = results
+        .filter((r): r is PromiseFulfilledResult<ZipBoundary> => r.status === 'fulfilled' && hasFeatures(r.value.geojson) && r.value.geojson.features.length > 0)
+        .map((r) => r.value)
+      setCityBoundariesState({ key: cityBoundaryKey, value: loaded })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [cityZips, cityBoundaryKey])
 
-      if (effectiveLayers.nycPermits) {
-        // Fetch permits for this borough - load full scatter data upfront, derive heatmap client-side
-        dedupedFetchJson<PermitResponse>(`/api/permits?borough=${encodeURIComponent(detectedNycBorough.toUpperCase())}&zoom=14`)
-          .then((d) => {
-            if (!cancelled && d.permits) {
-              setNycPermitData(d.permits)
-              // Build heatmap points client-side from the same data
-              setPermitHeatPoints(d.permits.map((p) => ({
-                position: [p.lng, p.lat] as [number, number],
-                weight: p.job_type === 'NB' ? 3 : p.job_type === 'A1' ? 2 : 1,
-              })))
-            }
-          })
-          .catch(() => {})
-      }
+  useEffect(() => {
+    if (!cityZips?.length || !detectedNycBorough) return
+    let cancelled = false
+
+    if (effectiveLayers.parcels) {
+      dedupedFetchJson<ParcelResponse>(`/api/parcels?borough=${encodeURIComponent(detectedNycBorough)}`)
+        .then((d) => {
+          if (!cancelled && Array.isArray(d.parcels) && d.stats) {
+            setParcelData({ parcels: d.parcels, stats: d.stats })
+          }
+        })
+        .catch(() => {})
     }
 
-    // Fetch tracts for NYC boroughs using known county FIPS
-    const boroughFips: Record<string, { state: string; county: string }> = {
-      manhattan: { state: '36', county: '061' },
-      bronx: { state: '36', county: '005' },
-      brooklyn: { state: '36', county: '047' },
-      queens: { state: '36', county: '081' },
-      'staten island': { state: '36', county: '085' },
+    if (effectiveLayers.nycPermits) {
+      dedupedFetchJson<PermitResponse>(`/api/permits?borough=${encodeURIComponent(detectedNycBorough.toUpperCase())}&zoom=14`)
+        .then((d) => {
+          if (!cancelled && d.permits) {
+            setNycPermitData(d.permits)
+            setPermitHeatPoints(buildPermitHeatPoints(d.permits))
+          }
+        })
+        .catch(() => {})
     }
-    if (effectiveLayers.tracts && detectedNycBorough && boroughFips[detectedNycBorough]) {
-      const { state, county } = boroughFips[detectedNycBorough]
+
+    return () => {
+      cancelled = true
+    }
+  }, [cityZips, detectedNycBorough, effectiveLayers.nycPermits, effectiveLayers.parcels])
+
+  useEffect(() => {
+    if (!cityZips?.length) return
+    let cancelled = false
+
+    if (effectiveLayers.tracts && detectedNycBorough && BOROUGH_TRACT_FIPS[detectedNycBorough]) {
+      const { state, county } = BOROUGH_TRACT_FIPS[detectedNycBorough]
       dedupedFetchJson<TractCollection>(`/api/tracts?state=${state}&county=${county}`)
         .then((d) => {
           if (!cancelled && d.features) setTractData(d)
@@ -765,7 +797,6 @@ function CommandMap({
         .catch(() => {})
     }
 
-    // Fetch amenity/POI/flood data using centroid of first ZIP with coordinates
     const first = cityZips.find((z) => z.lat && z.lng)
     if (first?.lat && first?.lng) {
       const { lat: cLat, lng: cLng } = first
@@ -792,34 +823,10 @@ function CommandMap({
       }
     }
 
-    // Fetch boundaries for all city ZIPs in parallel (limit 30)
-    const sample = cityZips.filter((z) => z.lat && z.lng).slice(0, 30)
-    Promise.allSettled(
-      sample.map((z) =>
-        dedupedFetchJson<GeoJSON>('/api/boundaries?zip=' + z.zip)
-          .then((geojson) => ({ zip: z.zip, geojson, zori: z.zori_latest, zhvi: z.zhvi_latest }))
-      )
-    ).then((results) => {
-      if (cancelled) return
-      const loaded: ZipBoundary[] = results
-        .filter((r): r is PromiseFulfilledResult<ZipBoundary> => r.status === 'fulfilled' && hasFeatures(r.value.geojson) && r.value.geojson.features.length > 0)
-        .map((r) => r.value)
-      setCityBoundariesState({ key: cityBoundaryKey, value: loaded })
-    })
     return () => {
       cancelled = true
     }
-  }, [
-    cityZips,
-    cityBoundaryKey,
-    detectedNycBorough,
-    effectiveLayers.amenityHeatmap,
-    effectiveLayers.floodRisk,
-    effectiveLayers.nycPermits,
-    effectiveLayers.parcels,
-    effectiveLayers.pois,
-    effectiveLayers.tracts,
-  ])
+  }, [cityZips, detectedNycBorough, effectiveLayers.amenityHeatmap, effectiveLayers.floodRisk, effectiveLayers.pois, effectiveLayers.tracts])
 
   // Fetch primary boundary + transit + neighbors when zip changes
   useEffect(() => {
@@ -863,14 +870,12 @@ function CommandMap({
     }
   }, [zip, zipBoundaryKey])
 
-  // Fetch parcels + tract / amenity context when we have geo data
+  // Fetch NYC-only parcel + permit layers for single-ZIP NYC workflows.
   useEffect(() => {
     if (!marketData?.geo) return
-    const { lat, lng, stateFips, countyFips } = marketData.geo
 
     const activeZip = marketData?.zip ?? null
 
-    // NYC-only map layers stay off outside NYC to avoid wasted fetches and broken controls.
     if (activeZip && isNycZip(activeZip)) {
       if (effectiveLayers.parcels) {
         dedupedFetchJson<ParcelResponse>(`/api/parcels?zip=${marketData.zip}`)
@@ -883,49 +888,47 @@ function CommandMap({
       }
 
       if (effectiveLayers.nycPermits) {
-        // Fetch permits for this ZIP - load upfront, derive heatmap client-side
         dedupedFetchJson<PermitResponse>(`/api/permits?zip=${marketData.zip}&zoom=14`)
           .then((d) => {
             if (d.permits) {
               setNycPermitData(d.permits)
-              setPermitHeatPoints(d.permits.map((p) => ({
-                position: [p.lng, p.lat] as [number, number],
-                weight: p.job_type === 'NB' ? 3 : p.job_type === 'A1' ? 2 : 1,
-              })))
+              setPermitHeatPoints(buildPermitHeatPoints(d.permits))
             }
           })
           .catch(() => {})
       }
     }
+  }, [marketData, effectiveLayers.nycPermits, effectiveLayers.parcels])
 
-    // Census Tracts with rent/income data
+  // Fetch shared tract / amenity / flood / POI context for single-ZIP flows.
+  useEffect(() => {
+    if (!marketData?.geo) return
+    const { lat, lng, stateFips, countyFips } = marketData.geo
+
     if (effectiveLayers.tracts && stateFips && countyFips && countyFips !== '000') {
       dedupedFetchJson<TractCollection>(`/api/tracts?state=${stateFips}&county=${countyFips}`)
         .then((d: TractCollection) => { if (d.features) setTractData(d) })
         .catch(() => {})
     }
 
-    // OSM Amenity heatmap points
     if (effectiveLayers.amenityHeatmap) {
       dedupedFetchJson<{ points?: AmenityPoint[] }>(`/api/amenities?lat=${lat}&lng=${lng}&radius=0.06`)
         .then((d) => { if (d.points) setAmenityPoints(d.points) })
         .catch(() => {})
     }
 
-    // Overture Maps POIs - neighborhood signals + anchor tenants
     if (effectiveLayers.pois) {
       dedupedFetchJson<{ points?: POIPoint[] }>(`/api/pois?lat=${lat}&lng=${lng}&radius=1500`)
         .then((d) => { if (d.points) setPoiPoints(d.points) })
         .catch(() => {})
     }
 
-    // FEMA Flood Risk zones
     if (effectiveLayers.floodRisk) {
       dedupedFetchJson<FloodCollection>(`/api/floodrisk?lat=${lat}&lng=${lng}&radius=0.05`)
         .then((d) => { if (d.features) setFloodData(d) })
         .catch(() => {})
     }
-  }, [marketData, effectiveLayers.amenityHeatmap, effectiveLayers.floodRisk, effectiveLayers.nycPermits, effectiveLayers.parcels, effectiveLayers.pois, effectiveLayers.tracts])
+  }, [marketData, effectiveLayers.amenityHeatmap, effectiveLayers.floodRisk, effectiveLayers.pois, effectiveLayers.tracts])
 
   const transitStops = useMemo(() => {
     if (!transitData?.geojson?.features) return []

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { MetricKey } from '@/lib/metric-definitions'
 import { fetchMomentumScores, normalizeMomentumZipList, type MomentumApiResponse } from '@/lib/momentum-client'
 import { MetricTooltip } from '@/components/MetricTooltip'
+import { dedupedFetchJson } from '@/lib/request-cache'
 
 function fmtComp(n: number | null) {
   if (n == null || !Number.isFinite(n)) return '-'
@@ -40,8 +41,10 @@ export function MomentumExplainBlock({
       if (aggregateZipCount > 0) {
         zips = aggregateZipsKey.split(',')
       } else if (anchorZip && /^\d{5}$/.test(anchorZip)) {
-        const nRes = await fetch(`/api/neighbors?zip=${encodeURIComponent(anchorZip)}`)
-        const nJson = (await nRes.json()) as { zips?: Array<{ zip: string }> }
+        const nJson = await dedupedFetchJson<{ zips?: Array<{ zip: string }> }>(
+          `/api/neighbors?zip=${encodeURIComponent(anchorZip)}`,
+          { ttlMs: 5 * 60 * 1000 }
+        )
         const peers = Array.isArray(nJson.zips) ? nJson.zips.map((x) => x.zip).filter((z) => /^\d{5}$/.test(z)) : []
         zips = normalizeMomentumZipList([anchorZip, ...peers.slice(0, 19)])
       } else {

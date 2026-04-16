@@ -53,6 +53,7 @@ Texas is the default MVP experience. NYC-specific parcel, permit, and borough-an
 - Prefer precomputed county / metro aggregates from official Texas APIs / exports over runtime joins across raw MLS, permit-office, or demographic files.
 - Reuse cached tract / block-group / metro lookup responses for common Texas geographies; keep Texas default loads to ZIP / city / metro payloads.
 - Optional Texas parcel and address datasets should stay lazy and county-scoped so statewide MVP load time remains fast.
+- Keep aggregate county / metro searches on a single shared resolver path, prefer obvious metro detection before city fallthrough, and load aggregate panel dependencies in parallel so Texas area searches stay responsive.
 - Remaining hotspot: aggregate cold starts still backfill `projectr_master_data` per ZIP before returning; Texas adapters should pre-populate cached county / metro rows to remove that latency from common Texas workflows.
 
 ## Setup
@@ -146,6 +147,7 @@ _04.16.2026_
 - Added `/api/county`, `/api/metro`, and `/api/area-metrics`, and wired aggregate search to fall through from city lookups to county / metro lookups for Texas-friendly county / ZIP / metro workflows.
 - Texas-first demo warmups, slash help, and export/search messaging now use ZIP / county / metro wording instead of assuming city-or-borough-only flows.
 - `/api/agent` now includes a shared county / metro Texas-style case-study example alongside the NYC-only parcel-model example so non-NYC briefs stay on the shared workflow instead of drifting toward borough logic.
+- Aggregate area loads now run aggregate, cycle, transit, and trends fetches in parallel, and obvious metro-style searches try `/api/metro` before `/api/city` to avoid an unnecessary extra round trip on Texas-style metro queries.
 
 **Bug Fixes**
 
@@ -169,6 +171,8 @@ _04.16.2026_
 - `/api/county` now falls back from broken Zillow county labels to TIGER county/ZCTA membership plus ZIP geocode validation, so thinner Texas counties like Brazos resolve without pulling adjacent-county ZIPs into the result.
 - `/api/metro`, `/api/area-metrics`, and `/api/aggregate` now expand shared Houston metro aliases, so Zillow metro labels and TREC/TDC metro rows hit the same direct Texas fast path instead of dropping back to ZIP-derived aggregates.
 - `/api/agent` now turns upstream Gemini overload and rate-limit failures into explicit retryable `503` / `429` responses instead of a generic `500`, so Texas-first agent flows fail more cleanly during provider spikes.
+- `CommandMap` no longer re-runs multi-ZIP boundary fanouts on unrelated layer toggles, and stable map callbacks keep the memoized map surface from churning during high-frequency agent-thinking updates.
+- `/api/market` now overlaps Zillow lookup with geocoding and live fetch work so single-ZIP Texas loads spend less time waiting on sequential server calls.
 
 **Map & Visualization**
 
@@ -283,7 +287,9 @@ npm run ingest:zillow
 
 - **Client CSV in the command-center sidebar** — The **Client CSV** nav item was removed; `/upload` and the normalize / Client layer pipeline remain for now while the upload workflow is redesigned for another surface (IA TBD). README **Client CSV & AI session** still describes session keys and behavior.
 
-- **Multi-market permit comparison** — Permit visualization is currently NYC-only (Socrata DOB feed). Expanding to other cities would require per-jurisdiction ArcGIS FeatureServer URLs or a paid aggregator (Regrid, BuildZoom). Revisit if scoping to additional demo markets.
+- **Texas parcel polygons outside NYC-style workflows** — TxGIO parcel coverage is optional, county-scoped, and not normalized into the default MVP path. Wiring parcel polygons across Texas cleanly would require county-on-demand ingest, spatial tiling, and a separate shared parcel contract so statewide loads do not wreck latency.
+
+- **Multi-market permit map visualization** — Texas permit metrics are already available in county / metro aggregates via TREC, but map visualization is still NYC-only because the Texas MVP sources are pre-aggregated rather than parcel/point permit feeds. Revisit if we scope a county-on-demand Texas permit layer or add another paid/raw permit source.
 
 - **Shortlist attachments (CSV + agent chat)** — Would require `saved_sites` JSONB column(s) or a sibling table, size limits, and UI to “attach workspace” on save plus restore flow (rehydrate markers store + optional transcript). Blocked on schema/auth product decisions.
 

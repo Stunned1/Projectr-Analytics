@@ -34,7 +34,7 @@ import {
 } from '@/lib/agent-map-layers'
 import { ALL_LAYERS_OFF } from '@/lib/slash-layer-keys'
 import { normalizeHeadingDegrees } from '@/lib/slash-commands'
-import { looksLikeCountyQuery } from '@/lib/area-keys'
+import { looksLikeCountyQuery, looksLikeMetroQuery } from '@/lib/area-keys'
 import { normalizeUsStateToAbbr } from '@/lib/us-state-abbr'
 import { MAP_VIEW_SAVE_ZIP } from '@/lib/saved-viewport'
 import { isNycBoroughName } from '@/lib/geography'
@@ -297,6 +297,23 @@ async function loadTrendsData(url: string): Promise<Record<string, unknown>> {
     allowErrorBody: true,
     ttlMs: 60 * 1000,
   })
+}
+
+async function loadAreaTrendsData(
+  cityZips: CityZip[],
+  args: { cityForKeyword: string; state: string }
+): Promise<Record<string, unknown> | null> {
+  const first = cityZips[0]
+  if (!first?.zip) return null
+
+  const st = args.state.trim().toUpperCase()
+  if (st.length === 2) {
+    return loadTrendsData(
+      `/api/trends?city=${encodeURIComponent(args.cityForKeyword.trim())}&state=${encodeURIComponent(st)}&anchor_zip=${encodeURIComponent(first.zip)}`
+    )
+  }
+
+  return loadTrendsData(`/api/trends?zip=${encodeURIComponent(first.zip)}`)
 }
 
 async function loadBoroughSearchData(name: string): Promise<BoroughSearchResponse> {
@@ -733,7 +750,7 @@ export default function Home() {
     }))
   }, [sitesForMap, selectedComparisonIds])
 
-  function handleAgentAction(action: AgentAction) {
+  const handleAgentAction = useCallback((action: AgentAction) => {
     switch (action.type) {
       case 'toggle_layer': {
         if (!action.layer) break
@@ -801,7 +818,7 @@ export default function Home() {
         }
         break
     }
-  }
+  }, [])
 
   const handleSlashSave = useCallback(
     async (customLabel: string | null) => {
@@ -890,60 +907,52 @@ export default function Home() {
     [result, aggregateData, cityZips, searchInput, cycleData]
   )
 
-  const mapContext = {
-    label: result ? (result.zillow?.city ?? result.zip) : aggregateData?.label,
-    zip: result?.zip ?? null,
-    hasRankedSites: analysisSites.length > 0,
-    rankedSiteCount: analysisSites.length,
-    clientCsv: clientUploadAgg
-      ? {
-          fileName: clientUploadAgg.fileNameLabel,
-          fileCount: clientUploadAgg.sourceCount,
-          fileNames: clientUploadAgg.fileNames,
-          bucket: clientUploadAgg.triage.bucket,
-          visual_bucket: clientUploadAgg.triage.visual_bucket,
-          metric_name: clientUploadAgg.triage.metric_name,
-          reasoning: clientUploadAgg.reasoning,
-          rowsIngested: clientUploadAgg.rowsIngested,
-          mapPinCount: clientUploadAgg.markerCount,
-          mapEligible: clientUploadAgg.mapEligible,
-          ingestedAt: clientUploadAgg.ingestedAt,
-        }
-      : null,
-    layers: denormalizeAgentLayersForContext(agentLayerOverrides),
-    activeMetric: agentMetric ?? 'zori',
-    zori: result?.zillow?.zori_latest ?? aggregateData?.zillow.avg_zori,
-    zhvi: result?.zillow?.zhvi_latest ?? aggregateData?.zillow.avg_zhvi,
-    zoriGrowth: result?.zillow?.zori_growth_12m ?? aggregateData?.zillow.zori_growth_12m,
-    zhviGrowth: result?.zillow?.zhvi_growth_12m ?? aggregateData?.zillow.zhvi_growth_12m,
-    vacancyRate: result?.data.find((r) => r.metric_name === 'Vacancy_Rate')?.metric_value ?? aggregateData?.housing.vacancy_rate,
-    dozPending: result?.metro_velocity?.doz_pending_latest ?? aggregateData?.metro_velocity?.doz_pending_latest,
-    priceCuts: result?.metro_velocity?.price_cut_pct_latest ?? aggregateData?.metro_velocity?.price_cut_pct_latest,
-    inventory: result?.metro_velocity?.inventory_latest ?? aggregateData?.metro_velocity?.inventory_latest,
-    transitStops: transit?.stop_count,
-    population: result?.data.find((r) => r.metric_name === 'Total_Population')?.metric_value ?? aggregateData?.total_population,
-  }
-
-  async function fetchAggregate(zips: string[], label: string, areaKey?: string | null) {
-    try {
-      const data = await loadAggregateData(zips, label, areaKey)
-      if (!data.error) {
-        setAggregateData(data)
-        const anchor = zips.find((z) => /^\d{5}$/.test(z))
-        if (anchor) {
-          void loadCycleData(anchor, label)
-            .then((j: unknown) => {
-              const rec = j as { error?: string }
-              if (rec.error) setCycleData(null)
-              else setCycleData(parseCycleAnalysisField(j))
-            })
-            .catch(() => setCycleData(null))
-        } else {
-          setCycleData(null)
-        }
-      }
-    } catch { /* non-critical */ }
-  }
+  const mapContext = useMemo(
+    () => ({
+      label: result ? (result.zillow?.city ?? result.zip) : aggregateData?.label,
+      zip: result?.zip ?? null,
+      hasRankedSites: analysisSites.length > 0,
+      rankedSiteCount: analysisSites.length,
+      clientCsv: clientUploadAgg
+        ? {
+            fileName: clientUploadAgg.fileNameLabel,
+            fileCount: clientUploadAgg.sourceCount,
+            fileNames: clientUploadAgg.fileNames,
+            bucket: clientUploadAgg.triage.bucket,
+            visual_bucket: clientUploadAgg.triage.visual_bucket,
+            metric_name: clientUploadAgg.triage.metric_name,
+            reasoning: clientUploadAgg.reasoning,
+            rowsIngested: clientUploadAgg.rowsIngested,
+            mapPinCount: clientUploadAgg.markerCount,
+            mapEligible: clientUploadAgg.mapEligible,
+            ingestedAt: clientUploadAgg.ingestedAt,
+          }
+        : null,
+      layers: denormalizeAgentLayersForContext(agentLayerOverrides),
+      activeMetric: agentMetric ?? 'zori',
+      zori: result?.zillow?.zori_latest ?? aggregateData?.zillow.avg_zori,
+      zhvi: result?.zillow?.zhvi_latest ?? aggregateData?.zillow.avg_zhvi,
+      zoriGrowth: result?.zillow?.zori_growth_12m ?? aggregateData?.zillow.zori_growth_12m,
+      zhviGrowth: result?.zillow?.zhvi_growth_12m ?? aggregateData?.zillow.zhvi_growth_12m,
+      vacancyRate:
+        result?.data.find((r) => r.metric_name === 'Vacancy_Rate')?.metric_value ??
+        aggregateData?.housing.vacancy_rate,
+      dozPending:
+        result?.metro_velocity?.doz_pending_latest ??
+        aggregateData?.metro_velocity?.doz_pending_latest,
+      priceCuts:
+        result?.metro_velocity?.price_cut_pct_latest ??
+        aggregateData?.metro_velocity?.price_cut_pct_latest,
+      inventory:
+        result?.metro_velocity?.inventory_latest ??
+        aggregateData?.metro_velocity?.inventory_latest,
+      transitStops: transit?.stop_count,
+      population:
+        result?.data.find((r) => r.metric_name === 'Total_Population')?.metric_value ??
+        aggregateData?.total_population,
+    }),
+    [result, aggregateData, analysisSites.length, clientUploadAgg, agentLayerOverrides, agentMetric, transit]
+  )
 
   /** Normalize `/api/trends` JSON into panel + PDF state (always sets `trends` so analysts see errors). */
   const applyTrendsApiBody = useCallback((body: Record<string, unknown> | null, httpOk: boolean) => {
@@ -985,6 +994,61 @@ export default function Home() {
     })
   }, [])
 
+  const loadAggregateSurface = useCallback(
+    async ({
+      zips,
+      label,
+      areaKey,
+      trendsArgs,
+      transitZip,
+    }: {
+      zips: CityZip[]
+      label: string
+      areaKey?: string | null
+      trendsArgs: { cityForKeyword: string; state: string }
+      transitZip?: string | null
+    }) => {
+      const zipList = zips.map((z) => z.zip)
+      const anchorZip = zipList.find((candidate) => /^\d{5}$/.test(candidate)) ?? null
+
+      try {
+        const [aggregate, cycleJson, transitData, trendsData] = await Promise.all([
+          loadAggregateData(zipList, label, areaKey ?? null).catch(() => null),
+          anchorZip ? loadCycleData(anchorZip, label).catch(() => null) : Promise.resolve(null),
+          transitZip ? loadTransitData(transitZip).catch(() => null) : Promise.resolve(null),
+          loadAreaTrendsData(zips, trendsArgs).catch(() => null),
+        ])
+
+        if (aggregate && !aggregate.error) {
+          setAggregateData(aggregate)
+        }
+
+        const parsedCycle =
+          cycleJson && !(hasErrorField(cycleJson) && cycleJson.error)
+            ? parseCycleAnalysisField(cycleJson)
+            : null
+        setCycleData(parsedCycle)
+
+        if (transitZip) {
+          if (transitData && !(hasErrorField(transitData) && transitData.error)) {
+            setTransit({ ...transitData, zip: transitZip })
+          } else {
+            setTransit(null)
+          }
+        } else {
+          setTransit(null)
+        }
+
+        applyTrendsApiBody(trendsData, Boolean(trendsData))
+      } catch {
+        setCycleData(null)
+        setTransit(null)
+        applyTrendsApiBody(null, false)
+      }
+    },
+    [applyTrendsApiBody]
+  )
+
   const loadZipMarket = useCallback(
     async (zipInput: string) => {
       setSelectedSite(null)
@@ -1022,29 +1086,6 @@ export default function Home() {
     [applyTrendsApiBody]
   )
 
-  async function fetchTrendsForMultiZipArea(
-    cityZips: CityZip[],
-    args: { cityForKeyword: string; state: string }
-  ) {
-    const first = cityZips[0]
-    if (!first?.zip) {
-      setTrends(null)
-      return
-    }
-    const st = args.state.trim().toUpperCase()
-    try {
-      const trendsData =
-        st.length === 2
-          ? await loadTrendsData(
-              `/api/trends?city=${encodeURIComponent(args.cityForKeyword.trim())}&state=${encodeURIComponent(st)}&anchor_zip=${encodeURIComponent(first.zip)}`
-            )
-          : await loadTrendsData(`/api/trends?zip=${encodeURIComponent(first.zip)}`)
-      applyTrendsApiBody(trendsData, true)
-    } catch {
-      applyTrendsApiBody(null, false)
-    }
-  }
-
   async function runAggregateSearch(input: string) {
     const trimmed = input.trim()
     if (!trimmed) return
@@ -1073,20 +1114,16 @@ export default function Home() {
           setTrends(null)
           setPanelOpen(true)
           const boroughLabel = typeof data.borough === 'string' && data.borough ? data.borough : trimmed
-          fetchAggregate(data.zips.map((z: CityZip) => z.zip), boroughLabel)
-          void fetchTrendsForMultiZipArea(data.zips, {
-            cityForKeyword: boroughLabel,
-            state: typeof data.state === 'string' ? data.state : 'NY',
+          const centroidZip = data.zips.find((z: CityZip) => z.lat && z.lng)?.zip ?? null
+          void loadAggregateSurface({
+            zips: data.zips,
+            label: boroughLabel,
+            trendsArgs: {
+              cityForKeyword: boroughLabel,
+              state: typeof data.state === 'string' ? data.state : 'NY',
+            },
+            transitZip: centroidZip,
           })
-          // Fetch transit for the centroid ZIP
-          const centroidZip = data.zips.find((z: CityZip) => z.lat && z.lng)?.zip
-          if (centroidZip) {
-            loadTransitData(centroidZip)
-              .then((d) => { if (!(hasErrorField(d) && d.error)) setTransit({ ...d, zip: centroidZip }) })
-              .catch(() => {})
-          } else {
-            setTransit(null)
-          }
         } catch {
           setError('Failed to fetch borough data')
         }
@@ -1111,23 +1148,21 @@ export default function Home() {
             setResult(null)
             setTrends(null)
             setPanelOpen(true)
-            fetchAggregate(
-              data.zips.map((z: CityZip) => z.zip),
-              typeof data.label === 'string' && data.label ? data.label : trimmed,
-              typeof data.area_key === 'string' ? data.area_key : null
-            )
-            void fetchTrendsForMultiZipArea(data.zips, {
-              cityForKeyword: typeof data.county === 'string' ? data.county : cityName,
-              state: (stateForApi || data.state || data.zips[0]?.state || '').toString().trim().toUpperCase().slice(0, 2),
+            const centroidZipCounty = data.zips.find((z: CityZip) => z.lat && z.lng)?.zip ?? null
+            void loadAggregateSurface({
+              zips: data.zips,
+              label: typeof data.label === 'string' && data.label ? data.label : trimmed,
+              areaKey: typeof data.area_key === 'string' ? data.area_key : null,
+              trendsArgs: {
+                cityForKeyword: typeof data.county === 'string' ? data.county : cityName,
+                state: (stateForApi || data.state || data.zips[0]?.state || '')
+                  .toString()
+                  .trim()
+                  .toUpperCase()
+                  .slice(0, 2),
+              },
+              transitZip: centroidZipCounty,
             })
-            const centroidZipCounty = data.zips.find((z: CityZip) => z.lat && z.lng)?.zip
-            if (centroidZipCounty) {
-              loadTransitData(centroidZipCounty)
-                .then((d) => { if (!(hasErrorField(d) && d.error)) setTransit({ ...d, zip: centroidZipCounty }) })
-                .catch(() => {})
-            } else {
-              setTransit(null)
-            }
             return
           } catch {
             setError('Failed to fetch county data')
@@ -1135,7 +1170,36 @@ export default function Home() {
           }
         }
         try {
-          const data = await loadCitySearchData(cityName, stateForApi)
+          const tryMetroFirst = looksLikeMetroQuery(cityName)
+          const cityPromise = tryMetroFirst ? null : loadCitySearchData(cityName, stateForApi)
+          const metroPromise = tryMetroFirst ? loadMetroSearchData(cityName, stateForApi) : null
+
+          const metroData = metroPromise ? await metroPromise : null
+          if (metroData && !metroData.error && metroData.zips?.length) {
+            setCityZips(metroData.zips)
+            setBoroughBoundary(null)
+            setResult(null)
+            setTrends(null)
+            setPanelOpen(true)
+            const centroidZipMetro = metroData.zips.find((z: CityZip) => z.lat && z.lng)?.zip ?? null
+            void loadAggregateSurface({
+              zips: metroData.zips,
+              label: typeof metroData.label === 'string' && metroData.label ? metroData.label : cityName,
+              areaKey: typeof metroData.area_key === 'string' ? metroData.area_key : null,
+              trendsArgs: {
+                cityForKeyword: typeof metroData.metro_name === 'string' ? metroData.metro_name : cityName,
+                state: (stateForApi || metroData.state || metroData.zips[0]?.state || '')
+                  .toString()
+                  .trim()
+                  .toUpperCase()
+                  .slice(0, 2),
+              },
+              transitZip: centroidZipMetro,
+            })
+            return
+          }
+
+          const data = cityPromise ? await cityPromise : await loadCitySearchData(cityName, stateForApi)
           if (data.error || !data.zips?.length) {
             const metroData = await loadMetroSearchData(cityName, stateForApi)
             if (metroData.error || !metroData.zips?.length) {
@@ -1153,23 +1217,21 @@ export default function Home() {
             setResult(null)
             setTrends(null)
             setPanelOpen(true)
-            fetchAggregate(
-              metroData.zips.map((z: CityZip) => z.zip),
-              typeof metroData.label === 'string' && metroData.label ? metroData.label : cityName,
-              typeof metroData.area_key === 'string' ? metroData.area_key : null
-            )
-            void fetchTrendsForMultiZipArea(metroData.zips, {
-              cityForKeyword: typeof metroData.metro_name === 'string' ? metroData.metro_name : cityName,
-              state: (stateForApi || metroData.state || metroData.zips[0]?.state || '').toString().trim().toUpperCase().slice(0, 2),
+            const centroidZipMetro = metroData.zips.find((z: CityZip) => z.lat && z.lng)?.zip ?? null
+            void loadAggregateSurface({
+              zips: metroData.zips,
+              label: typeof metroData.label === 'string' && metroData.label ? metroData.label : cityName,
+              areaKey: typeof metroData.area_key === 'string' ? metroData.area_key : null,
+              trendsArgs: {
+                cityForKeyword: typeof metroData.metro_name === 'string' ? metroData.metro_name : cityName,
+                state: (stateForApi || metroData.state || metroData.zips[0]?.state || '')
+                  .toString()
+                  .trim()
+                  .toUpperCase()
+                  .slice(0, 2),
+              },
+              transitZip: centroidZipMetro,
             })
-            const centroidZipMetro = metroData.zips.find((z: CityZip) => z.lat && z.lng)?.zip
-            if (centroidZipMetro) {
-              loadTransitData(centroidZipMetro)
-                .then((d) => { if (!(hasErrorField(d) && d.error)) setTransit({ ...d, zip: centroidZipMetro }) })
-                .catch(() => {})
-            } else {
-              setTransit(null)
-            }
             return
           }
           setCityZips(data.zips)
@@ -1185,21 +1247,14 @@ export default function Home() {
               .slice(0, 2) || ''
           const aggregateLabel =
             stateRaw ? `${cityName}, ${stateRaw}` : stateForApi ? `${cityName}, ${stateForApi}` : cityName
-          fetchAggregate(
-            data.zips.map((z: CityZip) => z.zip),
-            aggregateLabel,
-            typeof data.area_key === 'string' ? data.area_key : null
-          )
-          void fetchTrendsForMultiZipArea(data.zips, { cityForKeyword: cityName, state: st })
-          // Fetch transit for the centroid ZIP
-          const centroidZipCity = data.zips.find((z: CityZip) => z.lat && z.lng)?.zip
-          if (centroidZipCity) {
-            loadTransitData(centroidZipCity)
-              .then((d) => { if (!(hasErrorField(d) && d.error)) setTransit({ ...d, zip: centroidZipCity }) })
-              .catch(() => {})
-          } else {
-            setTransit(null)
-          }
+          const centroidZipCity = data.zips.find((z: CityZip) => z.lat && z.lng)?.zip ?? null
+          void loadAggregateSurface({
+            zips: data.zips,
+            label: aggregateLabel,
+            areaKey: typeof data.area_key === 'string' ? data.area_key : null,
+            trendsArgs: { cityForKeyword: cityName, state: st },
+            transitZip: centroidZipCity,
+          })
         } catch {
           setError('Failed to fetch market data')
         }
@@ -1286,7 +1341,7 @@ export default function Home() {
   const effectiveMapTilt = agentTilt != null ? agentTilt : map3DEnabled ? 45 : 0
   const map3DActive = effectiveMapTilt > 0
 
-  function handleMap3DToggle() {
+  const handleMap3DToggle = useCallback(() => {
     if (map3DActive) {
       setMap3DEnabled(false)
       setAgentTilt(null)
@@ -1294,7 +1349,15 @@ export default function Home() {
       setMap3DEnabled(true)
       setAgentTilt(null)
     }
-  }
+  }, [map3DActive])
+
+  const handleClearAgentOverride = useCallback((key: string) => {
+    setAgentLayerOverrides((prev) => {
+      const next = { ...prev }
+      delete next[key]
+      return next
+    })
+  }, [])
 
   const rightPanelVisible =
     panelOpen &&
@@ -1356,11 +1419,7 @@ export default function Home() {
           mapHeading={mapHeading}
           agentFlyTo={agentFlyTo}
           onLayersChange={handleMapLayersChange}
-          onClearAgentOverride={(key) => setAgentLayerOverrides((prev) => {
-            const next = { ...prev }
-            delete next[key]
-            return next
-          })}
+          onClearAgentOverride={handleClearAgentOverride}
           layerStateResync={layerStateResync}
           map3DActive={map3DActive}
           onToggleMap3D={handleMap3DToggle}

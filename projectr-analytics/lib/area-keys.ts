@@ -52,3 +52,18 @@ export function expandAreaKeyCandidates(areaKey: string): string[] {
 export function looksLikeCountyQuery(value: string): boolean {
   return /\bcounty\b/i.test(value)
 }
+
+/**
+ * Narrow heuristic to avoid an extra `/api/city` round trip for obvious metro queries.
+ * We intentionally keep this conservative: if we guess wrong, the client still falls back to city.
+ */
+export function looksLikeMetroQuery(value: string): boolean {
+  const normalized = normalizeMetroDisplayName(value)
+  if (!normalized) return false
+  if (/\bmetro(?:\s+area)?\b/i.test(value)) return true
+  const segments = normalized
+    .split(/[-/]|(?:\s+and\s+)/i)
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+  return segments.length >= 2
+}
