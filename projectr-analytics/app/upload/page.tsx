@@ -133,6 +133,18 @@ export default function ClientUploadPage() {
                     <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Map pins</p>
                     <p className="text-sm font-semibold text-foreground">{clientUploadAgg.markerCount.toLocaleString()}</p>
                   </div>
+                  <div className="rounded-xl border border-border/70 bg-background/40 px-3 py-2">
+                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Mapped</p>
+                    <p className="text-sm font-semibold text-foreground">{clientUploadAgg.statusCounts.mapped}</p>
+                  </div>
+                  <div className="rounded-xl border border-border/70 bg-background/40 px-3 py-2">
+                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Sidebar only</p>
+                    <p className="text-sm font-semibold text-foreground">{clientUploadAgg.statusCounts.sidebar_only}</p>
+                  </div>
+                  <div className="rounded-xl border border-border/70 bg-background/40 px-3 py-2">
+                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Errored</p>
+                    <p className="text-sm font-semibold text-foreground">{clientUploadAgg.statusCounts.errored}</p>
+                  </div>
                 </div>
 
                 <ImportedDataPanel session={clientUploadSession} />

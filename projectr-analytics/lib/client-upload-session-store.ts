@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import type {
   ClientCsvTriage,
+  ClientNormalizeMarkerPoint,
   ClientNormalizeRawTable,
   ClientNormalizePreviewRow,
 } from '@/lib/normalize-client-types'
@@ -11,6 +12,19 @@ export type ClientUploadTriageSnapshot = ClientCsvTriage
 
 export type ClientUploadPreviewRow = ClientNormalizePreviewRow
 
+export type ClientUploadWorkflowStatus = 'mapped' | 'sidebar_only' | 'errored'
+
+export type ClientUploadVisualizationMode = 'map' | 'chart' | 'table'
+
+export interface ClientUploadNormalizationState {
+  status: 'idle' | 'resolving' | 'resolved' | 'failed'
+  attemptedCount: number
+  resolvedCount: number
+  failedCount: number
+  lastRunAt: string | null
+  message?: string | null
+}
+
 /** One normalized CSV in a batch (single- or multi-file ingest). */
 export type ClientUploadSourcePart = {
   fileName: string | null
@@ -19,9 +33,14 @@ export type ClientUploadSourcePart = {
   previewRows: ClientUploadPreviewRow[]
   parseSummary?: UploadParseSummary
   rawTable?: ClientNormalizeRawTable
+  markerPoints?: ClientNormalizeMarkerPoint[]
   markerCount: number
   mapPinsActive: boolean
   mapEligible?: boolean
+  workflowStatus?: ClientUploadWorkflowStatus
+  visualizationMode?: ClientUploadVisualizationMode
+  persistenceWarning?: string | null
+  normalization?: ClientUploadNormalizationState
 }
 
 /** Multi-file ingest: one `sources` entry per CSV. */
@@ -39,9 +58,14 @@ export type ClientUploadSessionLegacy = {
   previewRows: ClientUploadPreviewRow[]
   parseSummary?: UploadParseSummary
   rawTable?: ClientNormalizeRawTable
+  markerPoints?: ClientNormalizeMarkerPoint[]
   markerCount: number
   mapPinsActive: boolean
   mapEligible?: boolean
+  workflowStatus?: ClientUploadWorkflowStatus
+  visualizationMode?: ClientUploadVisualizationMode
+  persistenceWarning?: string | null
+  normalization?: ClientUploadNormalizationState
 }
 
 export type ClientUploadSession = ClientUploadSessionNew | ClientUploadSessionLegacy
@@ -49,6 +73,7 @@ export type ClientUploadSession = ClientUploadSessionNew | ClientUploadSessionLe
 interface ClientUploadSessionState {
   session: ClientUploadSession | null
   setSession: (s: ClientUploadSession | null) => void
+  updateSession: (updater: (session: ClientUploadSession | null) => ClientUploadSession | null) => void
   clearSession: () => void
 }
 
@@ -57,6 +82,7 @@ export const useClientUploadSessionStore = create<ClientUploadSessionState>()(
     (set) => ({
       session: null,
       setSession: (session) => set({ session }),
+      updateSession: (updater) => set((state) => ({ session: updater(state.session) })),
       clearSession: () => set({ session: null }),
     }),
     {

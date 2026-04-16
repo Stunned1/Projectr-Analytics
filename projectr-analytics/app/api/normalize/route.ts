@@ -9,7 +9,7 @@ import {
   parseImportGeminiTriage,
   type ImportGeminiTriage,
 } from '@/lib/upload/import-decision-model'
-import { parseUploadFile, type UploadRawRow } from '@/lib/upload'
+import { buildUploadMarkerCandidateRows, parseUploadFile, UPLOAD_ZIP_RE, type UploadRawRow } from '@/lib/upload'
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
 
@@ -26,112 +26,9 @@ function hashPreview(preview: string): string {
   return h.toString(36)
 }
 
-const ZIP_RE = /^\d{5}$/
 const MAX_UNIQUE_ADDRESS_GEOCODE = 50
 const MAX_RAW_TABLE_ROWS = 40
 const MAX_MARKER_POINTS = 500
-
-function resolveHeader(headers: string[], name: string | null): string | null {
-  if (!name?.trim()) return null
-  const want = name.trim().toLowerCase()
-  const exact = headers.find((h) => h.trim().toLowerCase() === want)
-  return exact ?? headers.find((h) => h.trim().toLowerCase().includes(want)) ?? null
-}
-
-function latLngIndices(
-  headers: string[],
-  triage?: ImportGeminiTriage
-): { lat: string | null; lng: string | null } {
-  const mappedLat = resolveHeader(headers, triage?.recommended_field_mappings.latitude ?? null)
-  const mappedLng = resolveHeader(headers, triage?.recommended_field_mappings.longitude ?? null)
-  if (mappedLat || mappedLng) {
-    return { lat: mappedLat, lng: mappedLng }
-  }
-
-  const lat =
-    headers.find((h) => {
-      const x = h.toLowerCase()
-      return x === 'lat' || x === 'latitude' || x.endsWith('_lat') || x.includes('latitude')
-    }) ?? null
-  const lng =
-    headers.find((h) => {
-      const x = h.toLowerCase()
-      return x === 'lng' || x === 'lon' || x === 'long' || x === 'longitude' || x.endsWith('_lng') || x.includes('longitude')
-    }) ?? null
-  return { lat, lng }
-}
-
-function parseNum(raw: string): number | null {
-  const n = parseFloat(String(raw).replace(/[$,]/g, '').trim())
-  return Number.isFinite(n) ? n : null
-}
-
-function readRowString(row: UploadRawRow, header: string | null): string | null {
-  if (!header) return null
-  const value = row[header]
-  if (value === null || value === undefined) return null
-  const normalized = String(value).trim()
-  return normalized.length > 0 ? normalized : null
-}
-
-function joinLocationParts(parts: Array<string | null>): string | null {
-  const clean = parts.filter((part): part is string => Boolean(part?.trim()))
-  if (clean.length === 0) return null
-  return clean.join(', ')
-}
-
-function buildRowGeographyCandidate(
-  row: UploadRawRow,
-  triage: ImportGeminiTriage,
-  currentZip: string | null
-): string | null {
-  const mappings = triage.recommended_field_mappings
-  const geoRaw = readRowString(row, triage.geo_column)
-  const address = readRowString(row, mappings.address)
-  const city = readRowString(row, mappings.city)
-  const state = readRowString(row, mappings.state)
-  const zip = readRowString(row, mappings.zip)
-
-  if (address) {
-    return joinLocationParts([
-      address,
-      city,
-      state,
-      zip ?? (!city && !state ? currentZip : null),
-    ])
-  }
-
-  if (zip && ZIP_RE.test(zip)) return zip
-  if (city && state) return `${city}, ${state}`
-  if (city && zip) return `${city}, ${zip}`
-  if (geoRaw && geoRaw !== address && geoRaw !== city && geoRaw !== zip) return geoRaw
-  return geoRaw ?? zip ?? null
-}
-
-function normalizeTimePeriod(raw: string | null): string | null {
-  if (!raw) return null
-  const date = new Date(raw)
-  return Number.isNaN(date.getTime()) ? raw : date.toISOString().split('T')[0]
-}
-
-function compactRowPreview(row: UploadRawRow, limit = 8): UploadRawRow {
-  const preview: UploadRawRow = {}
-  let count = 0
-  for (const [key, value] of Object.entries(row)) {
-    if (count >= limit) break
-    if (value === null || value === undefined) continue
-    if (typeof value === 'string') {
-      const trimmed = value.trim()
-      if (!trimmed) continue
-      preview[key] = trimmed.length > 120 ? `${trimmed.slice(0, 117)}...` : trimmed
-      count += 1
-      continue
-    }
-    preview[key] = value
-    count += 1
-  }
-  return preview
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -213,10 +110,6 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const geoKey = resolveHeader(headers, triage.geo_column)
-    const valKey = resolveHeader(headers, triage.value_column)
-    const dateKey = resolveHeader(headers, triage.date_column)
-    const { lat: latKey, lng: lngKey } = latLngIndices(headers, triage)
     const shouldAttemptMapResolution =
       triage.mapability_classification === 'map_ready' ||
       triage.mapability_classification === 'map_normalizable'
@@ -235,39 +128,27 @@ export async function POST(request: NextRequest) {
       _rowPreview: UploadRawRow
     }
 
-    const insertRows: RowAcc[] = dataRows.map((row: UploadRawRow) => {
-      const geoRaw = geoKey ? String(row[geoKey] ?? '').trim() : ''
-      const submarket = shouldAttemptMapResolution
-        ? buildRowGeographyCandidate(row, triage, zip)
-        : null
-      const value = valKey ? parseNum(String(row[valKey] ?? '')) : null
-      const time_period = normalizeTimePeriod(dateKey ? String(row[dateKey] ?? '').trim() : '')
-
-      const latStr = latKey ? String(row[latKey] ?? '').trim() : ''
-      const lngStr = lngKey ? String(row[lngKey] ?? '').trim() : ''
-      const lat = latStr ? parseFloat(latStr) : null
-      const lng = lngStr ? parseFloat(lngStr) : null
-      const latOk = lat != null && !Number.isNaN(lat) && Math.abs(lat) <= 90
-      const lngOk = lng != null && !Number.isNaN(lng) && Math.abs(lng) <= 180
-
-      const siteName = readRowString(row, triage.recommended_field_mappings.site_name)
-      const labelParts = [siteName, geoRaw || submarket, triage.metric_name].filter(Boolean)
-      const _label = labelParts.length ? labelParts.join(' · ') : triage.metric_name
-
-      return {
-        submarket_id: submarket || null,
-        geometry: latOk && lngOk ? `POINT(${lng!} ${lat!})` : null,
-        metric_name: triage.metric_name,
-        metric_value: value,
-        time_period,
-        data_source: 'Client Upload',
-        visual_bucket: triage.visual_bucket,
-        _lat: latOk ? lat : null,
-        _lng: lngOk ? lng : null,
-        _label,
-        _rowPreview: compactRowPreview(row),
-      }
-    })
+    const insertRows: RowAcc[] = buildUploadMarkerCandidateRows({
+      rows: dataRows,
+      headers,
+      triage,
+      currentZip: zip,
+    }).map((candidate) => ({
+      submarket_id: shouldAttemptMapResolution ? candidate.submarket_id : null,
+      geometry:
+        shouldAttemptMapResolution && candidate.lat != null && candidate.lng != null
+          ? `POINT(${candidate.lng} ${candidate.lat})`
+          : null,
+      metric_name: triage.metric_name,
+      metric_value: candidate.metric_value,
+      time_period: candidate.time_period,
+      data_source: 'Client Upload',
+      visual_bucket: triage.visual_bucket,
+      _lat: shouldAttemptMapResolution ? candidate.lat : null,
+      _lng: shouldAttemptMapResolution ? candidate.lng : null,
+      _label: candidate.label,
+      _rowPreview: candidate.row_preview,
+    }))
 
     const kept = insertRows.filter(
       (r) =>
@@ -281,7 +162,7 @@ export async function POST(request: NextRequest) {
       if (!shouldAttemptMapResolution) break
       if (r._lat != null && r._lng != null) continue
       const z = r.submarket_id?.trim() ?? ''
-      if (ZIP_RE.test(z)) zipSet.add(z)
+      if (UPLOAD_ZIP_RE.test(z)) zipSet.add(z)
     }
 
     const maxZipGeocode = 60
@@ -300,7 +181,7 @@ export async function POST(request: NextRequest) {
       if (!shouldAttemptMapResolution) break
       if (r._lat != null && r._lng != null) continue
       const z = r.submarket_id?.trim() ?? ''
-      if (ZIP_RE.test(z)) {
+      if (UPLOAD_ZIP_RE.test(z)) {
         const p = zipToLatLng.get(z)
         if (p) {
           r._lat = p.lat
@@ -315,7 +196,7 @@ export async function POST(request: NextRequest) {
       for (const r of kept) {
         if (r._lat != null && r._lng != null) continue
         const g = r.submarket_id?.trim() ?? ''
-        if (!g || ZIP_RE.test(g)) continue
+        if (!g || UPLOAD_ZIP_RE.test(g)) continue
         if (g.length < 3) continue
         addressCandidates.add(g)
       }

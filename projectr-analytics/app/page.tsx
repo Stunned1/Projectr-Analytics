@@ -721,20 +721,23 @@ export default function Home() {
     setAgentThinkingStreaming(false)
   }, [])
 
-  const handleNormalizerIngested = useCallback((payload: NormalizerIngestPayload) => {
+  const focusImportedMarkers = useCallback((markers: Array<{ lat: number; lng: number }>) => {
     setSelectedUploadedMarker(null)
     setMarketPanelTab('data')
     setPanelOpen(true)
-    const pts = payload.mergedMarkerPoints
-    if (pts.length > 0) {
+    if (markers.length > 0) {
       setAgentLayerOverrides((prev) => ({ ...prev, clientData: true }))
-      const lat = pts.reduce((s, p) => s + p.lat, 0) / pts.length
-      const lng = pts.reduce((s, p) => s + p.lng, 0) / pts.length
+      const lat = markers.reduce((sum, marker) => sum + marker.lat, 0) / markers.length
+      const lng = markers.reduce((sum, marker) => sum + marker.lng, 0) / markers.length
       setAgentFlyTo({ lat, lng })
     } else {
       setAgentLayerOverrides((prev) => ({ ...prev, clientData: false }))
     }
   }, [])
+
+  const handleNormalizerIngested = useCallback((payload: NormalizerIngestPayload) => {
+    focusImportedMarkers(payload.mergedMarkerPoints)
+  }, [focusImportedMarkers])
 
   const handleUploadedMarkerSelect = useCallback((marker: ClientUploadMarker | null) => {
     setSelectedSite(null)
@@ -1612,6 +1615,8 @@ export default function Home() {
                   session={clientUploadSession}
                   selectedMarker={selectedUploadedMarker}
                   onClearSelectedMarker={() => setSelectedUploadedMarker(null)}
+                  currentZip={cityZips?.find((candidate) => /^\d{5}$/.test(candidate.zip))?.zip ?? null}
+                  onMarkersResolved={focusImportedMarkers}
                 />
               </PanelSection>
               <PanelSection title="Agentic Normalizer">
@@ -2043,6 +2048,8 @@ export default function Home() {
                   session={clientUploadSession}
                   selectedMarker={selectedUploadedMarker}
                   onClearSelectedMarker={() => setSelectedUploadedMarker(null)}
+                  currentZip={result?.zip}
+                  onMarkersResolved={focusImportedMarkers}
                 />
               </PanelSection>
             )}

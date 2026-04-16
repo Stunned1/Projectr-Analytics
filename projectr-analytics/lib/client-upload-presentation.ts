@@ -82,9 +82,9 @@ export function buildImportedSummaryStats(source: ClientUploadSourcePart): Impor
     {
       label: 'Rendering',
       value:
-        source.mapPinsActive
+        source.visualizationMode === 'map' || source.mapPinsActive
           ? 'Map'
-          : source.triage.fallback_visualization === 'time_series_chart'
+          : source.visualizationMode === 'chart' || source.triage.fallback_visualization === 'time_series_chart'
             ? 'Chart'
             : source.triage.fallback_visualization === 'bar_chart'
               ? 'Bar chart'

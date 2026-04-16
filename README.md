@@ -297,6 +297,7 @@ npm run ingest:zillow
 
 - **Client CSV in the command-center sidebar** — The **Client CSV** nav item was removed; `/upload` and the normalize / Client layer pipeline remain for now while the upload workflow is redesigned for another surface (IA TBD). README **Client CSV & AI session** still describes session keys and behavior.
 - **CSV import review and non-map fallback UI** — Uploads now go through an explicit review step before commit, then land in an imported-data workspace that exposes the chosen rendering path. Map-ready datasets flow to the Client layer, while non-map datasets stay visible through summary cards, raw tables, and chart fallbacks on `/upload` and in the command-center sidebar.
+- **Normalize for map follow-up** — `map_normalizable` imports now expose an explicit **Resolve geography** step inside **Imported Data**. Projectr previews how many rows have usable location clues, attempts ZIP/address normalization through the existing upload geocode path, updates per-dataset workflow state (`mapped`, `sidebar_only`, `errored`), and promotes successfully resolved rows onto the Client layer without requiring a re-upload.
 
 - **Texas parcel polygons outside NYC-style workflows** — TxGIO parcel coverage is optional, county-scoped, and not normalized into the default MVP path. Wiring parcel polygons across Texas cleanly would require county-on-demand ingest, spatial tiling, and a separate shared parcel contract so statewide loads do not wreck latency.
 

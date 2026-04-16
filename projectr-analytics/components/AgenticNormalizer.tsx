@@ -119,6 +119,19 @@ export default function AgenticNormalizer({ currentZip, onIngested }: AgenticNor
         ingestedAt: new Date().toISOString(),
         sources: normalized.map((data, i) => {
           const pts = data.marker_points ?? []
+          const workflowStatus =
+            pts.length > 0
+              ? 'mapped'
+              : data.triage.mapability_classification === 'unusable'
+                ? 'errored'
+                : 'sidebar_only'
+          const visualizationMode =
+            pts.length > 0
+              ? 'map'
+              : data.triage.fallback_visualization === 'time_series_chart' ||
+                  data.triage.fallback_visualization === 'bar_chart'
+                ? 'chart'
+                : 'table'
           return {
             fileName: list[i]?.name ?? null,
             triage: data.triage,
@@ -132,9 +145,24 @@ export default function AgenticNormalizer({ currentZip, onIngested }: AgenticNor
                 }
               : undefined,
             rawTable: data.raw_table,
+            markerPoints: pts,
             markerCount: pts.length,
             mapPinsActive: pts.length > 0,
             mapEligible: data.map_eligible ?? pts.length > 0,
+            workflowStatus,
+            visualizationMode,
+            persistenceWarning: data.persistence_warning ?? null,
+            normalization: {
+              status: pts.length > 0 && data.triage.mapability_classification === 'map_normalizable' ? 'resolved' : 'idle',
+              attemptedCount: 0,
+              resolvedCount: pts.length,
+              failedCount: 0,
+              lastRunAt: pts.length > 0 ? new Date().toISOString() : null,
+              message:
+                pts.length > 0 && data.triage.mapability_classification === 'map_normalizable'
+                  ? `Resolved ${pts.length.toLocaleString()} row${pts.length === 1 ? '' : 's'} for map rendering during import.`
+                  : null,
+            },
           }
         }),
       })

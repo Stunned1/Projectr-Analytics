@@ -1,7 +1,8 @@
 'use client'
 
-import { useMemo, useState } from 'react'
-import type { ClientUploadMarker } from '@/lib/client-upload-markers-store'
+import { useCallback, useMemo, useState } from 'react'
+import { useClientUploadMarkersStore, type ClientUploadMarker } from '@/lib/client-upload-markers-store'
+import { resolveImportedSourceToMarkers, buildImportedResolvePreview } from '@/lib/client-upload-map-resolver'
 import {
   getImportedDatasetView,
   buildImportedChartModel,
@@ -11,8 +12,12 @@ import {
   getImportedTableHeaders,
   getImportedTableRows,
 } from '@/lib/client-upload-presentation'
-import type { ClientUploadSession } from '@/lib/client-upload-session-store'
-import { getSessionSources } from '@/lib/client-upload-session-aggregate'
+import { useClientUploadSessionStore, type ClientUploadSession } from '@/lib/client-upload-session-store'
+import {
+  getMergedSessionMarkerPoints,
+  getSessionSources,
+  updateSessionSourceAtIndex,
+} from '@/lib/client-upload-session-aggregate'
 
 type ImportedPanelView = 'recommended' | 'map' | 'chart' | 'table'
 
@@ -31,6 +36,18 @@ const FALLBACK_LABELS: Record<string, string> = {
   summary_cards: 'Summary cards',
   table_then_chart: 'Table first',
   none: 'No safe fallback',
+}
+
+const WORKFLOW_STATUS_LABELS: Record<string, string> = {
+  mapped: 'Mapped',
+  sidebar_only: 'Sidebar only',
+  errored: 'Errored',
+}
+
+const VISUALIZATION_MODE_LABELS: Record<string, string> = {
+  map: 'Map',
+  chart: 'Chart',
+  table: 'Table',
 }
 
 function SourceBadge({ label }: { label: string }) {
@@ -163,11 +180,17 @@ export function ImportedDataPanel({
   session,
   selectedMarker = null,
   onClearSelectedMarker,
+  currentZip = null,
+  onMarkersResolved,
 }: {
   session: ClientUploadSession | null
   selectedMarker?: ClientUploadMarker | null
   onClearSelectedMarker?: (() => void) | null
+  currentZip?: string | null
+  onMarkersResolved?: ((markers: ClientUploadMarker[]) => void) | null
 }) {
+  const updateSession = useClientUploadSessionStore((state) => state.updateSession)
+  const setMarkers = useClientUploadMarkersStore((state) => state.setMarkers)
   const sources = useMemo(
     () => (session ? getSessionSources(session) : []),
     [session]
@@ -177,6 +200,8 @@ export function ImportedDataPanel({
     sourceKey: null,
     view: 'recommended',
   })
+  const [resolvingSourceKey, setResolvingSourceKey] = useState<string | null>(null)
+  const [resolveError, setResolveError] = useState<string | null>(null)
   let selectedSourceKey: string | null = null
   if (sources.length > 0) {
     if (selectedMarker?.file_name) {
@@ -196,32 +221,163 @@ export function ImportedDataPanel({
 
   const selectedSource =
     sources.find((source, index) => getImportedSourceKey(source, index) === selectedSourceKey) ?? null
+  const selectedSourceIndex = sources.findIndex(
+    (source, index) => getImportedSourceKey(source, index) === selectedSourceKey
+  )
 
-  if (!selectedSource) return null
-
-  const recommendedView = getImportedDatasetView(selectedSource)
-  const chartModel = buildImportedChartModel(selectedSource)
-  const selectedView = viewState.sourceKey === selectedSourceKey ? viewState.view : 'recommended'
+  const recommendedView = selectedSource ? getImportedDatasetView(selectedSource) : 'table'
+  const chartModel = selectedSource ? buildImportedChartModel(selectedSource) : null
+  const selectedView =
+    viewState.sourceKey === selectedSourceKey
+      ? viewState.view
+      : selectedSource?.visualizationMode ?? recommendedView
   const activeView =
     selectedView === 'recommended'
       ? recommendedView
       : selectedView === 'chart' && !chartModel
         ? 'table'
-        : selectedView === 'map' && !selectedSource.mapPinsActive
+        : selectedView === 'map' && !selectedSource?.mapPinsActive
           ? recommendedView
           : selectedView
-  const summaryStats = buildImportedSummaryStats(selectedSource)
-  const tableHeaders = getImportedTableHeaders(selectedSource)
-  const tableRows = getImportedTableRows(selectedSource)
+  const summaryStats = selectedSource ? buildImportedSummaryStats(selectedSource) : []
+  const tableHeaders = selectedSource ? getImportedTableHeaders(selectedSource) : []
+  const tableRows = selectedSource ? getImportedTableRows(selectedSource) : []
+  const resolvePreview = useMemo(
+    () =>
+      selectedSource
+        ? buildImportedResolvePreview(selectedSource, currentZip)
+        : { totalRows: 0, candidateRows: 0, directCoordinateRows: 0, requestRows: 0, uniqueRequestRows: 0 },
+    [currentZip, selectedSource]
+  )
   const markerBelongsToSelected =
     selectedMarker != null &&
     selectedMarker.file_name != null &&
-    selectedMarker.file_name === selectedSource.fileName
+    selectedMarker.file_name === selectedSource?.fileName
+  const resolveInFlight = resolvingSourceKey === selectedSourceKey
+
+  const persistVisualizationMode = useCallback(
+    (mode: 'map' | 'chart' | 'table') => {
+      setViewState({ sourceKey: selectedSourceKey, view: mode })
+      setResolveError(null)
+      if (selectedSourceIndex < 0) return
+      updateSession((currentSession) =>
+        updateSessionSourceAtIndex(currentSession, selectedSourceIndex, (source) => ({
+          ...source,
+          visualizationMode: mode,
+        }))
+      )
+    },
+    [selectedSourceIndex, selectedSourceKey, updateSession]
+  )
+
+  const handleResolveGeography = useCallback(async () => {
+    if (selectedSourceIndex < 0 || !selectedSourceKey || !selectedSource) return
+
+    setResolvingSourceKey(selectedSourceKey)
+    setResolveError(null)
+    updateSession((currentSession) =>
+      updateSessionSourceAtIndex(currentSession, selectedSourceIndex, (source) => ({
+        ...source,
+        normalization: {
+          ...(source.normalization ?? {
+            status: 'idle',
+            attemptedCount: 0,
+            resolvedCount: 0,
+            failedCount: 0,
+            lastRunAt: null,
+            message: null,
+          }),
+          status: 'resolving',
+          message: 'Resolving geography for map rendering…',
+        },
+      }))
+    )
+
+    try {
+      const resolved = await resolveImportedSourceToMarkers({
+        source: selectedSource,
+        currentZip,
+      })
+
+      updateSession((currentSession) =>
+        updateSessionSourceAtIndex(currentSession, selectedSourceIndex, (source) => {
+          const markers = resolved.markers
+          const resolvedCount = resolved.normalization.resolvedCount
+          return {
+            ...source,
+            markerPoints: markers,
+            markerCount: markers.length,
+            mapPinsActive: markers.length > 0,
+            mapEligible: markers.length > 0,
+            workflowStatus:
+              markers.length > 0
+                ? 'mapped'
+                : resolved.normalization.status === 'failed'
+                  ? 'errored'
+                  : 'sidebar_only',
+            visualizationMode: markers.length > 0 ? 'map' : source.visualizationMode ?? 'table',
+            normalization: resolved.normalization,
+            persistenceWarning: source.persistenceWarning ?? null,
+            previewRows:
+              resolvedCount > 0
+                ? source.previewRows
+                : source.previewRows,
+          }
+        })
+      )
+
+      const nextSession = useClientUploadSessionStore.getState().session
+      const mergedMarkers = getMergedSessionMarkerPoints(nextSession)
+      setMarkers(mergedMarkers.length > 0 ? mergedMarkers : null)
+
+      if (resolved.markers.length > 0) {
+        setViewState({ sourceKey: selectedSourceKey, view: 'map' })
+        onMarkersResolved?.(mergedMarkers)
+      }
+
+      if (resolved.normalization.status === 'failed') {
+        setResolveError(resolved.normalization.message ?? 'Projectr could not normalize this dataset for the map.')
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Projectr could not normalize this dataset for the map.'
+      setResolveError(message)
+      updateSession((currentSession) =>
+        updateSessionSourceAtIndex(currentSession, selectedSourceIndex, (source) => ({
+          ...source,
+          workflowStatus: 'errored',
+          normalization: {
+            status: 'failed',
+            attemptedCount: source.normalization?.attemptedCount ?? 0,
+            resolvedCount: source.normalization?.resolvedCount ?? 0,
+            failedCount: source.normalization?.failedCount ?? 0,
+            lastRunAt: new Date().toISOString(),
+            message,
+          },
+        }))
+      )
+    } finally {
+      setResolvingSourceKey(null)
+    }
+  }, [currentZip, onMarkersResolved, selectedSource, selectedSourceIndex, selectedSourceKey, setMarkers, updateSession])
+
+  if (!selectedSource) return null
 
   return (
     <div className="space-y-4">
       <div>
         <div className="flex flex-wrap items-center gap-2">
+          <SourceBadge
+            label={
+              WORKFLOW_STATUS_LABELS[selectedSource.workflowStatus ?? 'sidebar_only'] ??
+              (selectedSource.workflowStatus ?? 'sidebar_only')
+            }
+          />
+          <SourceBadge
+            label={
+              VISUALIZATION_MODE_LABELS[selectedSource.visualizationMode ?? recommendedView] ??
+              (selectedSource.visualizationMode ?? recommendedView)
+            }
+          />
           <SourceBadge
             label={
               MAPABILITY_LABELS[selectedSource.triage.mapability_classification] ??
@@ -238,6 +394,9 @@ export function ImportedDataPanel({
         </div>
         <p className="mt-2 text-sm font-semibold text-white">
           {selectedSource.fileName ?? selectedSource.triage.metric_name}
+        </p>
+        <p className="mt-1 text-[10px] text-zinc-500">
+          Imported {new Date(session?.ingestedAt ?? Date.now()).toLocaleString()} · {selectedSource.triage.inferred_dataset_type}
         </p>
         <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
           {selectedSource.triage.explanation}
@@ -263,7 +422,7 @@ export function ImportedDataPanel({
                     : 'border-white/10 text-zinc-400 hover:border-white/20 hover:text-white'
                 }`}
               >
-                {source.fileName ?? `Import ${index + 1}`}
+                {(source.fileName ?? `Import ${index + 1}`) + ' · ' + (WORKFLOW_STATUS_LABELS[source.workflowStatus ?? 'sidebar_only'] ?? 'Sidebar only')}
               </button>
             )
           })}
@@ -280,9 +439,57 @@ export function ImportedDataPanel({
         ))}
       </div>
 
-      {selectedSource.triage.warnings.length > 0 && (
+      {(selectedSource.persistenceWarning || selectedSource.triage.warnings.length > 0) && (
         <div className="rounded-lg border border-amber-900/40 bg-amber-950/20 px-3 py-2 text-[10px] text-amber-200">
-          {selectedSource.triage.warnings[0]}
+          {selectedSource.persistenceWarning ?? selectedSource.triage.warnings[0]}
+        </div>
+      )}
+
+      {selectedSource.triage.mapability_classification === 'map_normalizable' && (
+        <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-primary/80">
+                Normalize For Map
+              </p>
+              <p className="mt-1 text-[11px] leading-relaxed text-zinc-300">
+                {resolvePreview.candidateRows.toLocaleString()} of {resolvePreview.totalRows.toLocaleString()} row
+                {resolvePreview.totalRows === 1 ? '' : 's'} expose coordinates, ZIPs, or address clues that Projectr can try
+                to normalize for map rendering.
+              </p>
+              <p className="mt-1 text-[10px] text-zinc-500">
+                {resolvePreview.directCoordinateRows.toLocaleString()} direct coordinate row
+                {resolvePreview.directCoordinateRows === 1 ? '' : 's'} · {resolvePreview.uniqueRequestRows.toLocaleString()} unique
+                geography lookup{resolvePreview.uniqueRequestRows === 1 ? '' : 's'}
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={resolveInFlight || resolvePreview.candidateRows === 0}
+              onClick={() => void handleResolveGeography()}
+              className="rounded-md border border-primary/35 bg-primary/10 px-3 py-1.5 text-[11px] font-semibold text-primary transition-colors hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {resolveInFlight
+                ? 'Resolving…'
+                : selectedSource.normalization?.status === 'resolved'
+                  ? 'Re-run geography normalization'
+                  : 'Resolve geography'}
+            </button>
+          </div>
+
+          {(selectedSource.normalization?.status === 'resolved' ||
+            selectedSource.normalization?.status === 'failed' ||
+            resolveError) && (
+            <div className="mt-3 rounded-md border border-white/10 bg-white/5 px-3 py-2 text-[10px] text-zinc-300">
+              <p className="font-medium text-white">
+                {selectedSource.normalization?.resolvedCount?.toLocaleString() ?? 0} resolved ·{' '}
+                {selectedSource.normalization?.failedCount?.toLocaleString() ?? 0} unresolved
+              </p>
+              <p className="mt-1 text-zinc-400">
+                {resolveError ?? selectedSource.normalization?.message ?? 'Projectr has not attempted geography normalization yet.'}
+              </p>
+            </div>
+          )}
         </div>
       )}
 
@@ -305,7 +512,7 @@ export function ImportedDataPanel({
         {selectedSource.mapPinsActive && (
           <button
             type="button"
-            onClick={() => setViewState({ sourceKey: selectedSourceKey, view: 'map' })}
+            onClick={() => persistVisualizationMode('map')}
             className={`rounded-md border px-2.5 py-1 text-[10px] ${
               selectedView === 'map'
                 ? 'border-primary/45 bg-primary/10 text-primary'
@@ -318,7 +525,7 @@ export function ImportedDataPanel({
         {chartModel && (
           <button
             type="button"
-            onClick={() => setViewState({ sourceKey: selectedSourceKey, view: 'chart' })}
+            onClick={() => persistVisualizationMode('chart')}
             className={`rounded-md border px-2.5 py-1 text-[10px] ${
               selectedView === 'chart'
                 ? 'border-primary/45 bg-primary/10 text-primary'
@@ -330,7 +537,7 @@ export function ImportedDataPanel({
         )}
         <button
           type="button"
-          onClick={() => setViewState({ sourceKey: selectedSourceKey, view: 'table' })}
+          onClick={() => persistVisualizationMode('table')}
           className={`rounded-md border px-2.5 py-1 text-[10px] ${
             selectedView === 'table'
               ? 'border-primary/45 bg-primary/10 text-primary'
