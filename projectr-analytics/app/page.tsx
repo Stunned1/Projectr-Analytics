@@ -100,6 +100,39 @@ interface TrendsData {
   zip?: string | null
 }
 
+interface AreaSearchResponse {
+  error?: string
+  zips?: CityZip[]
+}
+
+interface BoroughSearchResponse extends AreaSearchResponse {
+  borough?: string
+  state?: string | null
+  boundary?: object | null
+}
+
+interface CountySearchResponse extends AreaSearchResponse {
+  county?: string
+  state?: string | null
+  area_key?: string | null
+  label?: string
+}
+
+interface MetroSearchResponse extends AreaSearchResponse {
+  metro_name?: string | null
+  state?: string | null
+  area_key?: string | null
+  label?: string
+}
+
+interface CitySearchResponse extends AreaSearchResponse {
+  city?: string
+  state?: string | null
+  metro_name?: string | null
+  area_key?: string | null
+  label?: string
+}
+
 interface AggregateData {
   error?: string
   label: string
@@ -232,6 +265,17 @@ function buildAggregateRequestCacheKey(zips: string[], label: string, areaKey?: 
   return `aggregate:${areaKey ?? normalizedZips}:${label.trim()}`
 }
 
+function buildAreaRequestUrl(
+  route: '/api/city' | '/api/county' | '/api/metro',
+  key: 'city' | 'county' | 'metro',
+  value: string,
+  stateAbbr?: string | null
+): string {
+  const params = new URLSearchParams({ [key]: value })
+  if (stateAbbr) params.set('state', stateAbbr)
+  return `${route}?${params.toString()}`
+}
+
 async function loadMarketData(zip: string): Promise<MarketData> {
   return dedupedFetchJson<MarketData>(`/api/market?zip=${encodeURIComponent(zip)}`, {
     allowErrorBody: true,
@@ -246,6 +290,40 @@ async function loadCycleData(zip: string, label?: string): Promise<unknown> {
   const params = new URLSearchParams({ zip })
   if (label) params.set('label', label)
   return dedupedFetchJson(`/api/cycle?${params.toString()}`)
+}
+
+async function loadTrendsData(url: string): Promise<Record<string, unknown>> {
+  return dedupedFetchJson<Record<string, unknown>>(url, {
+    allowErrorBody: true,
+    ttlMs: 60 * 1000,
+  })
+}
+
+async function loadBoroughSearchData(name: string): Promise<BoroughSearchResponse> {
+  return dedupedFetchJson<BoroughSearchResponse>(`/api/borough?name=${encodeURIComponent(name)}`, {
+    allowErrorBody: true,
+  })
+}
+
+async function loadCountySearchData(county: string, stateAbbr?: string | null): Promise<CountySearchResponse> {
+  return dedupedFetchJson<CountySearchResponse>(
+    buildAreaRequestUrl('/api/county', 'county', county, stateAbbr),
+    { allowErrorBody: true }
+  )
+}
+
+async function loadMetroSearchData(metro: string, stateAbbr?: string | null): Promise<MetroSearchResponse> {
+  return dedupedFetchJson<MetroSearchResponse>(
+    buildAreaRequestUrl('/api/metro', 'metro', metro, stateAbbr),
+    { allowErrorBody: true }
+  )
+}
+
+async function loadCitySearchData(city: string, stateAbbr?: string | null): Promise<CitySearchResponse> {
+  return dedupedFetchJson<CitySearchResponse>(
+    buildAreaRequestUrl('/api/city', 'city', city, stateAbbr),
+    { allowErrorBody: true }
+  )
 }
 
 async function loadAggregateData(zips: string[], label: string, areaKey?: string | null): Promise<AggregateData> {
@@ -918,20 +996,19 @@ export default function Home() {
       setTrends(null)
       setCycleData(null)
       try {
-        const [data, transitData, trendsRes, cycleJson] = await Promise.all([
+        const [data, transitData, trendsData, cycleJson] = await Promise.all([
           loadMarketData(zipInput),
           loadTransitData(zipInput).catch(() => null),
-          fetch(`/api/trends?zip=${zipInput}`),
+          loadTrendsData(`/api/trends?zip=${encodeURIComponent(zipInput)}`).catch(() => null),
           loadCycleData(zipInput).catch(() => null),
         ])
-        const trendsData = (await trendsRes.json()) as Record<string, unknown>
         if (data.error) {
           setError(data.error)
           return
         }
         setResult(data)
         if (transitData && !(hasErrorField(transitData) && transitData.error)) setTransit(transitData)
-        applyTrendsApiBody(trendsData, trendsRes.ok)
+        applyTrendsApiBody(trendsData, Boolean(trendsData))
         const parsedCycle =
           cycleJson && !(hasErrorField(cycleJson) && cycleJson.error) ? parseCycleAnalysisField(cycleJson) : null
         setCycleData(parsedCycle)
@@ -955,16 +1032,14 @@ export default function Home() {
       return
     }
     const st = args.state.trim().toUpperCase()
-    let url: string
-    if (st.length === 2) {
-      url = `/api/trends?city=${encodeURIComponent(args.cityForKeyword.trim())}&state=${encodeURIComponent(st)}&anchor_zip=${encodeURIComponent(first.zip)}`
-    } else {
-      url = `/api/trends?zip=${encodeURIComponent(first.zip)}`
-    }
     try {
-      const trendsRes = await fetch(url)
-      const trendsData = (await trendsRes.json()) as Record<string, unknown>
-      applyTrendsApiBody(trendsData, trendsRes.ok)
+      const trendsData =
+        st.length === 2
+          ? await loadTrendsData(
+              `/api/trends?city=${encodeURIComponent(args.cityForKeyword.trim())}&state=${encodeURIComponent(st)}&anchor_zip=${encodeURIComponent(first.zip)}`
+            )
+          : await loadTrendsData(`/api/trends?zip=${encodeURIComponent(first.zip)}`)
+      applyTrendsApiBody(trendsData, true)
     } catch {
       applyTrendsApiBody(null, false)
     }
@@ -987,8 +1062,7 @@ export default function Home() {
       const lowerInput = trimmed.toLowerCase().replace(/,.*$/, '').trim()
       if (isNycBoroughName(lowerInput)) {
         try {
-          const res = await fetch(`/api/borough?name=${encodeURIComponent(lowerInput)}`)
-          const data = await res.json()
+          const data = await loadBoroughSearchData(lowerInput)
           if (data.error || !data.zips?.length) {
             setError(`No data found for "${trimmed}"`)
             return
@@ -998,9 +1072,10 @@ export default function Home() {
           setResult(null)
           setTrends(null)
           setPanelOpen(true)
-          fetchAggregate(data.zips.map((z: CityZip) => z.zip), data.borough)
+          const boroughLabel = typeof data.borough === 'string' && data.borough ? data.borough : trimmed
+          fetchAggregate(data.zips.map((z: CityZip) => z.zip), boroughLabel)
           void fetchTrendsForMultiZipArea(data.zips, {
-            cityForKeyword: data.borough,
+            cityForKeyword: boroughLabel,
             state: typeof data.state === 'string' ? data.state : 'NY',
           })
           // Fetch transit for the centroid ZIP
@@ -1026,9 +1101,7 @@ export default function Home() {
         }
         if (looksLikeCountyQuery(cityName)) {
           try {
-            const url = `/api/county?county=${encodeURIComponent(cityName)}${stateForApi ? `&state=${encodeURIComponent(stateForApi)}` : ''}`
-            const res = await fetch(url)
-            const data = await res.json()
+            const data = await loadCountySearchData(cityName, stateForApi)
             if (data.error || !data.zips?.length) {
               setError(typeof data.error === 'string' && data.error ? data.error : `No data found for "${trimmed}"`)
               return
@@ -1062,13 +1135,9 @@ export default function Home() {
           }
         }
         try {
-          const url = `/api/city?city=${encodeURIComponent(cityName)}${stateForApi ? `&state=${encodeURIComponent(stateForApi)}` : ''}`
-          const res = await fetch(url)
-          const data = await res.json()
+          const data = await loadCitySearchData(cityName, stateForApi)
           if (data.error || !data.zips?.length) {
-            const metroUrl = `/api/metro?metro=${encodeURIComponent(cityName)}${stateForApi ? `&state=${encodeURIComponent(stateForApi)}` : ''}`
-            const metroRes = await fetch(metroUrl)
-            const metroData = await metroRes.json()
+            const metroData = await loadMetroSearchData(cityName, stateForApi)
             if (metroData.error || !metroData.zips?.length) {
               setError(
                 typeof metroData.error === 'string' && metroData.error
