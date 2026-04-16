@@ -162,6 +162,7 @@ _04.16.2026_
 - `CommandMap` now keeps the deck.gl overlay attached across layer updates so Texas county / metro searches stop losing visible map layers after navigation, and momentum scores are cached by ZIP set instead of re-fetching on unrelated layer toggles.
 - Momentum lookups now use a shared client ZIP-set cache across the map, analysis panel, and save flows so typing or rerendering does not spam `/api/momentum`, and off-by-default tract / amenity / flood / POI layers no longer preload until the user actually enables them.
 - NYC-only spatial analysis no longer falls back to Manhattan when the borough is missing, and the guide / export / upload / slash-help / agent prompt copy now defaults to ZIP / county / metro Texas workflows before mentioning borough-specific NYC paths.
+- The shared market page now reuses cached `/api/market`, `/api/aggregate`, `/api/transit`, and `/api/cycle` responses for repeated ZIP / county / metro loads so common Texas searches stop re-fetching the same payloads on replay.
 
 **Map & Visualization**
 
@@ -197,6 +198,7 @@ _04.16.2026_
 - Search, guide, and agent copy now lead with Texas market examples while keeping NYC borough entry points available only when relevant.
 - Aggregate county / metro views now label themselves by geography and surface supplemental precomputed area metrics without a second fetch.
 - Sidebar search, terminal suggestions, slash-command help, and market export prompts now present Texas ZIP / county / metro workflows as the default visible examples.
+- Agent starter prompts, aggregate-search fallback errors, and internal agent search instructions now use ZIP / county / metro market language first so shared workflows stop reading like borough-first NYC flows.
 
 ## Known Bugs
 
@@ -217,6 +219,10 @@ _04.16.2026_
 - **FRED missing for large metros** - Zips in large counties (e.g. Prince William County, VA) sometimes return no FRED data because the search query times out or returns no match. Likely needs a fallback to a direct LAUCN series ID lookup using the county FIPS.
 
 - **Population Growth 3yr is enrollment-sensitive** - For college towns, the 2019→2022 ACS population delta reflects COVID-era enrollment swings, not real migration. Consider adding a note in the UI or suppressing this metric for known university zip codes.
+
+- **Repeated area loads still refetch Google Trends** - The shared market page now caches `/api/market`, `/api/aggregate`, `/api/transit`, and `/api/cycle`, but `/api/trends` still re-runs on repeated ZIP / county / metro searches. Add a deduped client cache or a route-level cache if repeated market switching keeps showing avoidable latency.
+
+- **Metro detection still falls through city-first search** - Aggregate search still tries `/api/city` before `/api/metro` for non-county text queries, so obvious metro searches can pay an extra round trip before resolving. Add a narrow metro-query heuristic or a combined resolver if this shows up in real usage.
 
 - **Building permits are county-level, not zip-level** - Census BPS data is aggregated at the county level. A zip like 22193 (Woodbridge) shares permit counts with all of Prince William County. This overstates activity for individual zip codes. Noted for the demo script.
 

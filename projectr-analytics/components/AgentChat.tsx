@@ -101,9 +101,9 @@ const ACTION_LABELS: Record<string, string> = {
 }
 
 const SUGGESTIONS = [
-  'Load Houston, TX and show transit connectivity',
+  'Load 77002 and show transit connectivity',
   "What's the vacancy rate here?",
-  'Compare rent momentum across Dallas and Austin',
+  'Compare rent momentum across Dallas-Fort Worth and Austin',
 ]
 
 interface CaseStudyBundle {
@@ -144,7 +144,7 @@ function writePersistedChat(messages: Message[], bundle: CaseStudyBundle | null)
 
 const DEFAULT_GREETING: Message = {
   role: 'agent',
-  text: 'Spatial analyst ready. Start with a Texas market, ask for map layers, or paste a site-selection brief. NYC parcel analysis stays available when the market is in New York City.',
+  text: 'Spatial analyst ready. Start with a ZIP, county, metro, or Texas city, ask for map layers, or paste a site-selection brief. NYC parcel analysis stays available when the market is in New York City.',
 }
 
 export default function AgentChat({

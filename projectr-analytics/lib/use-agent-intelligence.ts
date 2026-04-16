@@ -63,7 +63,7 @@ type PersistedAgentSession = {
 
 const DEFAULT_GREETING: AgentMessage = {
   role: 'agent',
-  text: 'Engine ready. Load a Texas ZIP, county, or metro, or paste an analyst brief. NYC parcel workflows appear only in New York City.',
+  text: 'Engine ready. Load a ZIP, county, metro, or Texas city, or paste an analyst brief. NYC parcel workflows appear only in New York City.',
 }
 
 function readPersistedSession(): PersistedAgentSession | null {
@@ -861,8 +861,7 @@ export function useAgentIntelligence(
       runSequence,
       runAnalysis,
       maybeNotify,
-      options?.onAgentThinkingUpdate,
-      options?.onAgentThinkingStreamFinished,
+      options,
     ]
   )
 

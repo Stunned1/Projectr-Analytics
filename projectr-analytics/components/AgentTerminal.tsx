@@ -11,13 +11,14 @@ const STREAM_MS = 72
 const SUGGESTIONS = [
   '/help',
   '/go 77002',
+  '/go Harris County, TX',
   '/save',
   '/layers:transit,rent',
   '/clear:terminal',
   '/clear:workspace',
-  'Show flood risk in Houston',
-  'Transit + amenities on',
-  'Compare Dallas and Austin momentum',
+  'Show flood risk in Harris County, TX',
+  'Transit + amenities on in Houston',
+  'Compare Dallas-Fort Worth and Austin momentum',
 ]
 
 /** Scout orange / narrative / system / chrome */

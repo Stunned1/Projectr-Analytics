@@ -39,6 +39,7 @@ import { normalizeUsStateToAbbr } from '@/lib/us-state-abbr'
 import { MAP_VIEW_SAVE_ZIP } from '@/lib/saved-viewport'
 import { isNycBoroughName } from '@/lib/geography'
 import { fetchMomentumScores, getMomentumScore, normalizeMomentumZipList } from '@/lib/momentum-client'
+import { dedupedFetchJson } from '@/lib/request-cache'
 
 const CommandMap = dynamic(() => import('@/components/CommandMap'), { ssr: false })
 
@@ -53,6 +54,7 @@ interface DataRow {
 }
 
 interface TransitData {
+  error?: string
   zip: string
   stop_count: number
   route_count?: number
@@ -99,6 +101,7 @@ interface TrendsData {
 }
 
 interface AggregateData {
+  error?: string
   label: string
   area_key?: string | null
   area_kind?: 'county' | 'metro' | null
@@ -138,6 +141,7 @@ interface CityZip {
 }
 
 interface MarketData {
+  error?: string
   zip: string
   cached: boolean
   geo?: { lat: number; lng: number; city: string; state: string; stateFips?: string; countyFips?: string }
@@ -187,8 +191,7 @@ async function resolveAggregateAnchorGeo(cityZips: CityZip[]): Promise<{ zip: st
   if (!z) return null
   if (z.lat != null && z.lng != null) return { zip: z.zip, lat: z.lat, lng: z.lng }
   try {
-    const res = await fetch(`/api/market?zip=${encodeURIComponent(z.zip)}`)
-    const data = await res.json()
+    const data = await loadMarketData(z.zip)
     if (data.geo?.lat != null && data.geo?.lng != null) {
       return { zip: z.zip, lat: data.geo.lat, lng: data.geo.lng }
     }
@@ -218,6 +221,42 @@ async function loadMomentumScore(
 function fmtMoney(n: number | null | undefined) {
   if (n == null) return '-'
   return '$' + Number(n).toLocaleString('en-US', { maximumFractionDigits: 0 })
+}
+
+function hasErrorField(value: unknown): value is { error?: string } {
+  return typeof value === 'object' && value !== null && 'error' in value
+}
+
+function buildAggregateRequestCacheKey(zips: string[], label: string, areaKey?: string | null): string {
+  const normalizedZips = Array.from(new Set(zips)).sort().join(',')
+  return `aggregate:${areaKey ?? normalizedZips}:${label.trim()}`
+}
+
+async function loadMarketData(zip: string): Promise<MarketData> {
+  return dedupedFetchJson<MarketData>(`/api/market?zip=${encodeURIComponent(zip)}`, {
+    allowErrorBody: true,
+  })
+}
+
+async function loadTransitData(zip: string): Promise<TransitData> {
+  return dedupedFetchJson<TransitData>(`/api/transit?zip=${encodeURIComponent(zip)}`)
+}
+
+async function loadCycleData(zip: string, label?: string): Promise<unknown> {
+  const params = new URLSearchParams({ zip })
+  if (label) params.set('label', label)
+  return dedupedFetchJson(`/api/cycle?${params.toString()}`)
+}
+
+async function loadAggregateData(zips: string[], label: string, areaKey?: string | null): Promise<AggregateData> {
+  return dedupedFetchJson<AggregateData>('/api/aggregate', {
+    init: {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ zips, label, areaKey }),
+    },
+    cacheKey: buildAggregateRequestCacheKey(zips, label, areaKey),
+  })
 }
 
 function fmtNum(n: number | null | undefined, suffix = '') {
@@ -809,18 +848,12 @@ export default function Home() {
 
   async function fetchAggregate(zips: string[], label: string, areaKey?: string | null) {
     try {
-      const res = await fetch('/api/aggregate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ zips, label, areaKey }),
-      })
-      const data = await res.json()
+      const data = await loadAggregateData(zips, label, areaKey)
       if (!data.error) {
         setAggregateData(data)
         const anchor = zips.find((z) => /^\d{5}$/.test(z))
         if (anchor) {
-          void fetch(`/api/cycle?zip=${encodeURIComponent(anchor)}&label=${encodeURIComponent(label)}`)
-            .then((r) => r.json())
+          void loadCycleData(anchor, label)
             .then((j: unknown) => {
               const rec = j as { error?: string }
               if (rec.error) setCycleData(null)
@@ -885,25 +918,22 @@ export default function Home() {
       setTrends(null)
       setCycleData(null)
       try {
-        const [marketRes, transitRes, trendsRes, cycleRes] = await Promise.all([
-          fetch(`/api/market?zip=${zipInput}`),
-          fetch(`/api/transit?zip=${zipInput}`),
+        const [data, transitData, trendsRes, cycleJson] = await Promise.all([
+          loadMarketData(zipInput),
+          loadTransitData(zipInput).catch(() => null),
           fetch(`/api/trends?zip=${zipInput}`),
-          fetch(`/api/cycle?zip=${encodeURIComponent(zipInput)}`),
+          loadCycleData(zipInput).catch(() => null),
         ])
-        const data = await marketRes.json()
-        const transitData = await transitRes.json()
         const trendsData = (await trendsRes.json()) as Record<string, unknown>
-        const cycleJson = await cycleRes.json()
         if (data.error) {
           setError(data.error)
           return
         }
         setResult(data)
-        if (!transitData.error) setTransit(transitData)
+        if (transitData && !(hasErrorField(transitData) && transitData.error)) setTransit(transitData)
         applyTrendsApiBody(trendsData, trendsRes.ok)
         const parsedCycle =
-          cycleRes.ok && !('error' in cycleJson && cycleJson.error) ? parseCycleAnalysisField(cycleJson) : null
+          cycleJson && !(hasErrorField(cycleJson) && cycleJson.error) ? parseCycleAnalysisField(cycleJson) : null
         setCycleData(parsedCycle)
         setPanelOpen(true)
       } catch {
@@ -976,9 +1006,8 @@ export default function Home() {
           // Fetch transit for the centroid ZIP
           const centroidZip = data.zips.find((z: CityZip) => z.lat && z.lng)?.zip
           if (centroidZip) {
-            fetch(`/api/transit?zip=${centroidZip}`)
-              .then((r) => r.json())
-              .then((d) => { if (!d.error) setTransit({ ...d, zip: centroidZip }) })
+            loadTransitData(centroidZip)
+              .then((d) => { if (!(hasErrorField(d) && d.error)) setTransit({ ...d, zip: centroidZip }) })
               .catch(() => {})
           } else {
             setTransit(null)
@@ -1020,9 +1049,8 @@ export default function Home() {
             })
             const centroidZipCounty = data.zips.find((z: CityZip) => z.lat && z.lng)?.zip
             if (centroidZipCounty) {
-              fetch(`/api/transit?zip=${centroidZipCounty}`)
-                .then((r) => r.json())
-                .then((d) => { if (!d.error) setTransit({ ...d, zip: centroidZipCounty }) })
+              loadTransitData(centroidZipCounty)
+                .then((d) => { if (!(hasErrorField(d) && d.error)) setTransit({ ...d, zip: centroidZipCounty }) })
                 .catch(() => {})
             } else {
               setTransit(null)
@@ -1047,7 +1075,7 @@ export default function Home() {
                   ? metroData.error
                   : typeof data.error === 'string' && data.error
                     ? data.error
-                    : `No data found for "${trimmed}". Try "City, State", "County, ST", or a metro name such as "Dallas-Fort Worth, TX".`
+                    : `No data found for "${trimmed}". Try "77002", "Harris County, TX", "Dallas-Fort Worth, TX", or "Houston, TX".`
               )
               return
             }
@@ -1067,9 +1095,8 @@ export default function Home() {
             })
             const centroidZipMetro = metroData.zips.find((z: CityZip) => z.lat && z.lng)?.zip
             if (centroidZipMetro) {
-              fetch(`/api/transit?zip=${centroidZipMetro}`)
-                .then((r) => r.json())
-                .then((d) => { if (!d.error) setTransit({ ...d, zip: centroidZipMetro }) })
+              loadTransitData(centroidZipMetro)
+                .then((d) => { if (!(hasErrorField(d) && d.error)) setTransit({ ...d, zip: centroidZipMetro }) })
                 .catch(() => {})
             } else {
               setTransit(null)
@@ -1098,15 +1125,14 @@ export default function Home() {
           // Fetch transit for the centroid ZIP
           const centroidZipCity = data.zips.find((z: CityZip) => z.lat && z.lng)?.zip
           if (centroidZipCity) {
-            fetch(`/api/transit?zip=${centroidZipCity}`)
-              .then((r) => r.json())
-              .then((d) => { if (!d.error) setTransit({ ...d, zip: centroidZipCity }) })
+            loadTransitData(centroidZipCity)
+              .then((d) => { if (!(hasErrorField(d) && d.error)) setTransit({ ...d, zip: centroidZipCity }) })
               .catch(() => {})
           } else {
             setTransit(null)
           }
         } catch {
-          setError('Failed to fetch city data')
+          setError('Failed to fetch market data')
         }
       }
     } finally {
