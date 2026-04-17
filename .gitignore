@@ -1,0 +1,12 @@
+/zillow-csv's/
+node_modules/
+.next/
+projectr-analytics/.env.local
+.gitignore
+codex.toml
+projectr-analytics/next-env.d.ts
+google-credentials.json
+nyc_permits.jsonl
+projectr_master_data.jsonl
+zillow_zori_monthly.jsonl
+.worktrees/
