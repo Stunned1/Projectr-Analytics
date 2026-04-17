@@ -56,10 +56,10 @@ Save Site and area actions, and the full metrics table where exposed. Open the s
   },
   {
     id: 'feature-terminal',
-    title: 'Intelligence terminal',
-    body: `Docked at the bottom of the map: ask questions in natural language, trigger layer changes, and run
-agent-driven actions. Session can persist across reloads in the browser.`,
-    searchAliases: 'AI agent chat command',
+    title: 'EDA assistant',
+    body: `Docked at the bottom of the map: ask for dataset summaries, outliers, trend changes, metric explanations,
+and data-quality checks. Direct map controls still work for explicit prompts like search, layer toggles, or panel changes.`,
+    searchAliases: 'EDA assistant AI chat command layers search data quality outliers trends',
   },
   {
     id: 'feature-client-csv',

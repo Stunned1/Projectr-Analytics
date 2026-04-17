@@ -14,10 +14,10 @@ export function isNycActiveSurface(context: SurfaceContext): boolean {
 
 export function buildAgentGreeting(context: SurfaceContext): string {
   if (isNycActiveSurface(context)) {
-    return 'Engine ready. NYC parcel workflows are available in this market. Ask for parcels, permits, or the spatial model here, or switch back to ZIP / county / metro workflows at any time.'
+    return 'EDA assistant ready. Analyze the loaded market or imported dataset, and use explicit prompts for direct map controls like parcels, permits, search, or panel changes.'
   }
 
-  return 'Engine ready. Load a ZIP, county, metro, or Texas city, or paste an analyst brief. Texas-first market workflows are the default, and NYC parcel workflows appear only when the market is in New York City.'
+  return 'EDA assistant ready. Ask for summaries, outliers, trends, comparisons, or data-quality checks on the loaded market or imported CSV. Direct map controls still work when you ask for them explicitly.'
 }
 
 export function buildAgentStarterSuggestions(context: SurfaceContext): string[] {
@@ -27,9 +27,10 @@ export function buildAgentStarterSuggestions(context: SurfaceContext): string[] 
       '/go Brooklyn',
       '/layers:parcels,permits',
       '/save',
-      'Show parcels and permits in Brooklyn',
-      'Run the spatial model for this borough',
-      'Compare transit access and momentum across these ranked sites',
+      'Summarize the loaded market',
+      'Find outliers in the imported CSV',
+      'Explain what parcels and permits are showing here',
+      'Turn on parcels and permits',
     ]
   }
 
@@ -41,17 +42,19 @@ export function buildAgentStarterSuggestions(context: SurfaceContext): string[] 
     '/layers:transit,rent',
     '/clear:terminal',
     '/clear:workspace',
-    'Show flood risk in Harris County, TX',
-    'Transit + amenities on in Houston',
-    'Compare Dallas-Fort Worth and Austin momentum',
+    'Summarize the loaded market',
+    'Find outliers in the imported CSV',
+    'Explain this rent and vacancy snapshot',
+    'Turn on flood risk and transit',
+    'Open the data panel',
   ]
 }
 
 export function buildAgentInputPlaceholder(context: SurfaceContext, hasUserMessage: boolean, isRunningSequence: boolean): string {
-  if (isRunningSequence) return 'Sequence running…'
+  if (isRunningSequence) return 'Action running…'
   if (hasUserMessage) return '_'
   if (isNycActiveSurface(context)) {
-    return '/help · /go Brooklyn · /layers:parcels,permits · /restart · /clear:terminal · or ask…'
+    return 'Summarize this market · find outliers in the upload · turn on parcels and permits · or use /help…'
   }
-  return '/help · /go 77002 · /layers:rent · /restart · /clear:terminal · or ask…'
+  return 'Summarize this market · explain a metric · find outliers in the upload · or use /help…'
 }

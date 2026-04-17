@@ -16,6 +16,11 @@ import { useClientUploadMarkersStore, type ClientUploadMarker } from '@/lib/clie
 import { useClientUploadSessionStore } from '@/lib/client-upload-session-store'
 import type { NormalizerIngestPayload } from '@/lib/normalize-client-types'
 import { aggregateClientUploadSession } from '@/lib/client-upload-session-aggregate'
+import {
+  buildMarketSnapshotEdaProfile,
+  buildUploadedDatasetEdaProfile,
+  buildWorkspaceEdaContext,
+} from '@/lib/eda-primitives'
 import SitesBootstrap from '@/components/SitesBootstrap'
 import CommandCenterSidebar from '@/components/CommandCenterSidebar'
 import { takePendingNav } from '@/lib/pending-navigation'
@@ -771,6 +776,7 @@ export default function Home() {
         if (!action.layer) break
         const key = normalizeAgentLayerKey(action.layer)
         setAgentLayerOverrides((prev) => ({ ...prev, [key]: action.value ?? true }))
+        if (action.metric) setAgentMetric(action.metric)
         break
       }
       case 'toggle_layers': {
@@ -783,6 +789,7 @@ export default function Home() {
         } else {
           setAgentLayerOverrides((prev) => ({ ...prev, ...normalizeAgentLayersRecord(patch) }))
         }
+        if (action.metric) setAgentMetric(action.metric)
         break
       }
       case 'set_metric':
@@ -923,49 +930,84 @@ export default function Home() {
   )
 
   const mapContext = useMemo(
-    () => ({
-      label: result ? (result.zillow?.city ?? result.zip) : aggregateData?.label,
-      zip: result?.zip ?? null,
-      hasRankedSites: analysisSites.length > 0,
-      rankedSiteCount: analysisSites.length,
-      clientCsv: clientUploadAgg
-        ? {
-            fileName: clientUploadAgg.fileNameLabel,
-            fileCount: clientUploadAgg.sourceCount,
-            fileNames: clientUploadAgg.fileNames,
-            bucket: clientUploadAgg.triage.bucket,
-            visual_bucket: clientUploadAgg.triage.visual_bucket,
-            metric_name: clientUploadAgg.triage.metric_name,
-            reasoning: clientUploadAgg.reasoning,
-            rowsIngested: clientUploadAgg.rowsIngested,
-            mapPinCount: clientUploadAgg.markerCount,
-            mapEligible: clientUploadAgg.mapEligible,
-            ingestedAt: clientUploadAgg.ingestedAt,
-          }
-        : null,
-      layers: denormalizeAgentLayersForContext(agentLayerOverrides),
-      activeMetric: agentMetric ?? 'zori',
-      zori: result?.zillow?.zori_latest ?? aggregateData?.zillow.avg_zori,
-      zhvi: result?.zillow?.zhvi_latest ?? aggregateData?.zillow.avg_zhvi,
-      zoriGrowth: result?.zillow?.zori_growth_12m ?? aggregateData?.zillow.zori_growth_12m,
-      zhviGrowth: result?.zillow?.zhvi_growth_12m ?? aggregateData?.zillow.zhvi_growth_12m,
-      vacancyRate:
+    () => {
+      const label = result ? (result.zillow?.city ?? result.zip) : aggregateData?.label
+      const zori = result?.zillow?.zori_latest ?? aggregateData?.zillow.avg_zori
+      const zhvi = result?.zillow?.zhvi_latest ?? aggregateData?.zillow.avg_zhvi
+      const zoriGrowth = result?.zillow?.zori_growth_12m ?? aggregateData?.zillow.zori_growth_12m
+      const zhviGrowth = result?.zillow?.zhvi_growth_12m ?? aggregateData?.zillow.zhvi_growth_12m
+      const vacancyRate =
         result?.data.find((r) => r.metric_name === 'Vacancy_Rate')?.metric_value ??
-        aggregateData?.housing.vacancy_rate,
-      dozPending:
+        aggregateData?.housing.vacancy_rate
+      const dozPending =
         result?.metro_velocity?.doz_pending_latest ??
-        aggregateData?.metro_velocity?.doz_pending_latest,
-      priceCuts:
+        aggregateData?.metro_velocity?.doz_pending_latest
+      const priceCuts =
         result?.metro_velocity?.price_cut_pct_latest ??
-        aggregateData?.metro_velocity?.price_cut_pct_latest,
-      inventory:
+        aggregateData?.metro_velocity?.price_cut_pct_latest
+      const inventory =
         result?.metro_velocity?.inventory_latest ??
-        aggregateData?.metro_velocity?.inventory_latest,
-      transitStops: transit?.stop_count,
-      population:
+        aggregateData?.metro_velocity?.inventory_latest
+      const population =
         result?.data.find((r) => r.metric_name === 'Total_Population')?.metric_value ??
-        aggregateData?.total_population,
-    }),
+        aggregateData?.total_population
+      const uploadedDatasets = clientUploadAgg?.sources.map((source) => buildUploadedDatasetEdaProfile(source)) ?? []
+      const market = buildMarketSnapshotEdaProfile({
+        label,
+        zori,
+        zoriGrowth,
+        zhvi,
+        zhviGrowth,
+        vacancyRate,
+        dozPending,
+        priceCuts,
+        inventory,
+        transitStops: transit?.stop_count,
+        population,
+      })
+
+      return {
+        label,
+        zip: result?.zip ?? null,
+        hasRankedSites: analysisSites.length > 0,
+        rankedSiteCount: analysisSites.length,
+        clientCsv: clientUploadAgg
+          ? {
+              fileName: clientUploadAgg.fileNameLabel,
+              fileCount: clientUploadAgg.sourceCount,
+              fileNames: clientUploadAgg.fileNames,
+              bucket: clientUploadAgg.triage.bucket,
+              visual_bucket: clientUploadAgg.triage.visual_bucket,
+              metric_name: clientUploadAgg.triage.metric_name,
+              reasoning: clientUploadAgg.reasoning,
+              rowsIngested: clientUploadAgg.rowsIngested,
+              mapPinCount: clientUploadAgg.markerCount,
+              mapEligible: clientUploadAgg.mapEligible,
+              ingestedAt: clientUploadAgg.ingestedAt,
+              datasets: uploadedDatasets,
+              notes: clientUploadAgg.sources
+                .filter((source) => (source.rawTable?.truncated ?? false))
+                .map((source) => `${source.fileName ?? 'Imported dataset'} raw-table preview is truncated in the current workspace.`),
+            }
+          : null,
+        eda: buildWorkspaceEdaContext({
+          market,
+          uploadedDatasets,
+        }),
+        layers: denormalizeAgentLayersForContext(agentLayerOverrides),
+        activeMetric: agentMetric ?? 'zori',
+        zori,
+        zhvi,
+        zoriGrowth,
+        zhviGrowth,
+        vacancyRate,
+        dozPending,
+        priceCuts,
+        inventory,
+        transitStops: transit?.stop_count,
+        population,
+      }
+    },
     [result, aggregateData, analysisSites.length, clientUploadAgg, agentLayerOverrides, agentMetric, transit]
   )
 
@@ -1655,7 +1697,7 @@ export default function Home() {
                       marketPanelTab === t ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'
                     )}
                   >
-                    {t === 'analysis' ? 'Analysis' : t === 'data' ? 'Data' : 'Thinking'}
+                    {t === 'analysis' ? 'Analysis' : t === 'data' ? 'Data' : 'Notes'}
                   </button>
                 ))}
               </div>
@@ -1846,7 +1888,7 @@ export default function Home() {
                       marketPanelTab === t ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'
                     )}
                   >
-                    {t === 'analysis' ? 'Analysis' : t === 'data' ? 'Data' : 'Thinking'}
+                    {t === 'analysis' ? 'Analysis' : t === 'data' ? 'Data' : 'Notes'}
                   </button>
                 ))}
               </div>

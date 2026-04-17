@@ -465,7 +465,7 @@ export default function AgentTerminal({
             </span>
           ) : (
             <span className="truncate text-[9px] font-medium tracking-wide text-zinc-500">
-              SCOUT INTELLIGENCE ENGINE <span className="text-zinc-600">v1.0</span>
+              SCOUT EDA ASSISTANT <span className="text-zinc-600">v1.0</span>
               <span className="text-primary/80"> [{contextSubtitle}]</span>
             </span>
           )}
@@ -526,7 +526,7 @@ export default function AgentTerminal({
             <span className="font-mono text-zinc-500">/rotate °</span> (bearing);{' '}
             <span className="font-mono text-zinc-500">/go</span> search;{' '}
             <span className="font-mono text-zinc-500">/layers:a,b</span>;{' '}
-            <span className="font-mono text-zinc-500">/clear:…</span>;{' '}
+            <span className="font-mono text-zinc-500">/clear:…</span>; ask for EDA on the loaded market or imported dataset;{' '}
             <span className="font-mono text-zinc-500">/restart</span> → y/n; see /help
           </div>
 
@@ -590,7 +590,7 @@ export default function AgentTerminal({
                         onClick={() => onShowThinking(msg.trace!)}
                         className="max-w-full text-left text-[10px] font-semibold text-primary hover:underline"
                       >
-                        Show thinking
+                        Show analysis notes
                       </button>
                       <p className="mt-0.5 line-clamp-2 font-mono text-[9px] leading-snug text-zinc-500">
                         {msg.trace.summary}

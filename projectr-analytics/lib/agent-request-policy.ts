@@ -3,13 +3,13 @@ export type AgentRequestPolicyDecision =
   | { allowed: false; reason: 'empty' | 'slash_command' | 'arithmetic' | 'off_topic'; message: string }
 
 const BLOCKED_DEFAULT_MESSAGE =
-  'I can only route Scout real estate, map, market, and uploaded-data requests to the AI agent. Try asking about a ZIP/city, sites, rents, permits, transit, demographics, layers, the current map, or uploaded CSV data.'
+  'Scout now routes bounded EDA requests and explicit map controls here. Ask for a dataset summary, outliers, distributions, comparisons, trend changes, metric explanations, data-quality checks, or direct actions like loading a market or toggling a layer.'
 
 const BLOCKED_SHORT_MESSAGE =
-  'I can only route Scout real estate, map, market, and uploaded-data requests to the AI agent. I did not run the model for this prompt.'
+  'Scout only routes bounded EDA requests here. I did not run analysis for this prompt.'
 
 const OFF_TOPIC_CATEGORY_MESSAGE =
-  'That looks outside Scout real estate analytics. Ask about a real estate market, site, ZIP, map layer, or uploaded dataset and I will route it to the agent.'
+  'That looks outside Scout EDA and direct map control. Ask about the loaded market, an imported dataset, outliers, distributions, trend changes, metric explanations, data quality, or explicit map actions.'
 
 const ARITHMETIC_ONLY_PATTERN = /^(?:what(?:'s| is)\s+)?[\d\s+\-*/().=%]+(?:\?)?$/i
 
@@ -19,18 +19,21 @@ const REAL_ESTATE_DOMAIN_PATTERN =
 const SCOUT_PRODUCT_CONTEXT_PATTERN =
   /\b(current map|loaded market|loaded data|selected site|selected sites|uploaded|upload|uploads|csv|client data|map layer|map layers|layers|dashboard|shortlist|saved|data panel|analysis panel|brief|report|pdf|metrics|trend|trends|forecast|score|scoring|ranked sites?)\b/i
 
-const TASK_INTENT_PATTERN =
-  /\b(go to|load|search|navigate|fly to|show|map|plot|compare|analy[sz]e|rank|score|screen|evaluate|recommend|find|summari[sz]e|explain|visuali[sz]e|turn on|open)\b/i
+const EDA_INTENT_PATTERN =
+  /\b(compare|analy[sz]e|find|summari[sz]e|explain|describe|inspect|review|check|spot|detect|outlier|anomal|trend|quality|missing|top|bottom|what is)\b/i
+
+const MAP_CONTROL_INTENT_PATTERN =
+  /\b(go to|load|search|navigate|fly to|turn on|turn off|show|hide|open|tilt|3d|2d|rotate)\b/i
 
 const CONTEXTUAL_REAL_ESTATE_TASK_PATTERN =
-  /\b(rank|score|compare|analy[sz]e|summari[sz]e|show|map|plot|find|recommend|evaluate|explain|visuali[sz]e)\b.*\b(this|these|those|current|loaded|selected|upload|uploaded|csv|sites?|markets?|areas?|locations?|zips?|layers?|data)\b/i
+  /\b(compare|analy[sz]e|summari[sz]e|find|explain|describe|inspect|check|spot|detect|outlier|anomal|trend|quality|missing|top|bottom)\b.*\b(this|these|those|current|loaded|selected|upload|uploaded|csv|markets?|areas?|locations?|zips?|layers?|data|dataset)\b/i
 
 const ZIP_PATTERN = /\b\d{5}(?:-\d{4})?\b/
 const COORDINATE_PATTERN = /\b-?\d{1,2}\.\d{3,}\s*,\s*-?\d{1,3}\.\d{3,}\b/
 const CITY_STATE_PATTERN = /\b[A-Za-z][A-Za-z .'-]+,\s*[A-Z]{2}\b/
 
 const PLACE_NAVIGATION_PATTERN =
-  /\b(?:go to|load|search|navigate to|fly to|show|map|plot|compare|analy[sz]e|rank|score|evaluate|recommend)\s+(?:me\s+)?(.{2,140})$/i
+  /\b(?:compare|analy[sz]e|summari[sz]e|explain|inspect|review)\s+(?:me\s+)?(.{2,140})$/i
 
 const CAPITALIZED_PLACE_TOKEN_PATTERN = /\b[A-Z][A-Za-z'.-]*(?:\s+[A-Z][A-Za-z'.-]*)*\b/
 
@@ -85,7 +88,7 @@ export function evaluateAgentRequestPolicy(prompt: string): AgentRequestPolicyDe
 
   const hasRealEstateDomain = REAL_ESTATE_DOMAIN_PATTERN.test(normalized)
   const hasScoutProductContext = SCOUT_PRODUCT_CONTEXT_PATTERN.test(normalized)
-  const hasTaskIntent = TASK_INTENT_PATTERN.test(normalized)
+  const hasTaskIntent = EDA_INTENT_PATTERN.test(normalized)
   const hasContextualTask = CONTEXTUAL_REAL_ESTATE_TASK_PATTERN.test(normalized)
   const hasLocationToken =
     ZIP_PATTERN.test(normalized) || COORDINATE_PATTERN.test(normalized) || CITY_STATE_PATTERN.test(normalized)
@@ -99,11 +102,11 @@ export function evaluateAgentRequestPolicy(prompt: string): AgentRequestPolicyDe
     return { allowed: false, reason: 'off_topic', message: OFF_TOPIC_CATEGORY_MESSAGE }
   }
 
-  if (hasRealEstateDomain) return { allowed: true }
+  if (hasRealEstateDomain && (hasTaskIntent || MAP_CONTROL_INTENT_PATTERN.test(normalized))) return { allowed: true }
   if (hasScoutProductContext && (hasTaskIntent || hasContextualTask)) return { allowed: true }
+  if (hasScoutProductContext && MAP_CONTROL_INTENT_PATTERN.test(normalized)) return { allowed: true }
   if (hasContextualTask) return { allowed: true }
-  if (hasLocationToken && hasTaskIntent) return { allowed: true }
-  if (ZIP_PATTERN.test(normalized) && normalized.length <= 10) return { allowed: true }
+  if (hasLocationToken && (hasTaskIntent || MAP_CONTROL_INTENT_PATTERN.test(normalized))) return { allowed: true }
   if (hasPlaceNavigationIntent(normalized)) return { allowed: true }
 
   return { allowed: false, reason: 'off_topic', message: BLOCKED_DEFAULT_MESSAGE }

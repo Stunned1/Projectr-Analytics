@@ -788,13 +788,13 @@ export function useAgentIntelligence(
           const out = await consumeAgentNdjsonStream(res, {
             onThinkingDelta: (acc) => {
               options?.onAgentThinkingUpdate?.({
-                trace: { summary: 'Composing reasoning…', thinking: acc },
+                trace: { summary: 'Reviewing workspace evidence…', methodology: acc, thinking: acc },
                 phase: 'thinking',
               })
             },
             onJsonPhase: (thinkingSoFar) => {
               options?.onAgentThinkingUpdate?.({
-                trace: { summary: 'Selecting map actions…', thinking: thinkingSoFar },
+                trace: { summary: 'Preparing EDA findings…', methodology: thinkingSoFar, thinking: thinkingSoFar },
                 phase: 'json',
               })
             },

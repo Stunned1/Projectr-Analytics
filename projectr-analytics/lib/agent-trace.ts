@@ -16,6 +16,11 @@ function asStringArray(v: unknown): string[] | undefined {
   return out.length ? out : undefined
 }
 
+function asTaskType(v: unknown): AgentTrace['taskType'] {
+  if (typeof v !== 'string' || !v.trim()) return undefined
+  return v.trim() as AgentTrace['taskType']
+}
+
 function safeToolCalls(v: unknown): AgentTraceToolRow[] | undefined {
   if (!Array.isArray(v)) return undefined
   const rows: AgentTraceToolRow[] = []
@@ -48,6 +53,10 @@ export function normalizeAgentTrace(
   const fromJson = typeof o.thinking === 'string' && o.thinking.trim() ? o.thinking.trim() : null
   const draft = thinkingDraft?.trim() || null
   const thinking = draft || fromJson || null
+  const methodology =
+    typeof o.methodology === 'string' && o.methodology.trim()
+      ? o.methodology.trim()
+      : thinking
 
   let plan = asStringArray(o.plan)
   if (!plan?.length && steps?.length) {
@@ -60,9 +69,8 @@ export function normalizeAgentTrace(
   let summary =
     typeof o.summary === 'string' && o.summary.trim()
       ? o.summary.trim()
-      : exec?.length
-        ? `Planned ${exec.length} map steps`
-        : 'Agent response'
+      : asStringArray(o.keyFindings)?.[0] ??
+        (exec?.length ? `Planned ${exec.length} map steps` : 'Agent response')
 
   if (!o.summary && exec?.length) {
     const types = [...new Set(exec.map((e) => e.actionType).filter(Boolean))]
@@ -74,6 +82,12 @@ export function normalizeAgentTrace(
 
   return {
     summary,
+    taskType: asTaskType(o.taskType),
+    methodology: methodology ?? undefined,
+    keyFindings: asStringArray(o.keyFindings),
+    evidence: asStringArray(o.evidence),
+    caveats: asStringArray(o.caveats),
+    nextQuestions: asStringArray(o.nextQuestions),
     thinking: thinking ?? undefined,
     detail,
     plan,

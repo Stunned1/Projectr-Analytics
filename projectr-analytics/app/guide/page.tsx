@@ -381,9 +381,10 @@ export default function DocumentationPage() {
                             </li>
                             <li>
                               <span className="font-semibold text-primary">Analysis vs Data: </span>
-                              The right panel has two tabs: <em className="text-foreground/95">Analysis</em> for cycle,
+                              The right panel has three tabs: <em className="text-foreground/95">Analysis</em> for cycle,
                               momentum, and PDF brief; <em className="text-foreground/95">Data</em> for tables,
-                              trends, and exports.
+                              trends, and exports; and <em className="text-foreground/95">Notes</em> for EDA methodology,
+                              evidence, and caveats from the assistant.
                             </li>
                             <li>
                               <span className="font-semibold text-primary">Layers: </span>
@@ -391,9 +392,9 @@ export default function DocumentationPage() {
                               other overlays (availability depends on market).
                             </li>
                             <li>
-                              <span className="font-semibold text-primary">Intelligence terminal: </span>
-                              The bar at the bottom of the map opens the agent: natural-language questions and layer
-                              shortcuts.
+                              <span className="font-semibold text-primary">EDA assistant: </span>
+                              The bar at the bottom of the map opens the assistant for dataset analysis and explicit
+                              map controls.
                             </li>
                             <li>
                               <span className="font-semibold text-primary">Saved &amp; PDF: </span>
