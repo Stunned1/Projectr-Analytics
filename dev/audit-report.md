@@ -54,3 +54,47 @@ Scope: Next.js App Router, deck.gl, Supabase/PostGIS, and the Gemini agent pipel
 - ACID is still important for the parts of the app that mutate shared state: saved sites, ingest upserts, cache rows, and any future derived tables that need deterministic writes and conflict handling.
 - Postgres/PostGIS is the right system of record for the spatial core, with read optimization through materialized/cache tables, MVT tiles, denormalized lookup tables, and background warming rather than a document-store rewrite.
 - If scale becomes the next ceiling, the right sequence is: optimize query shape, reduce payloads, isolate the hot reads behind caching or tiles, and only then consider horizontal scale at the API edge or read replicas.
+
+## Demo-Focused Priority Breakdown
+
+### Must Do Before Demo
+
+1. Implement the FRED county-FIPS fallback for large metros.
+   - This directly addresses the README gap where county-level FRED search can time out or return no match for larger metros.
+   - A direct LAUCN lookup by county FIPS is the most targeted fix because it removes the fragile search step from the demo path.
+
+2. Add server-side bbox filtering for large map payloads.
+   - This is the highest-impact runtime fix for demo stability because `transit`, `tracts`, and permit payloads can otherwise overwhelm the browser.
+   - Even if full MVT tiling is deferred, viewport intersection filtering on the server should be treated as required before recording.
+
+3. Gate upload EDA on IndexedDB hydration after reload.
+   - This closes a visible trust issue where the assistant may analyze sampled rows instead of the full imported dataset after a refresh.
+   - For a demo, it is better to delay the assistant briefly than to let it produce conclusions from partial data.
+
+4. Keep Texas TREC backfills strictly scoped for the demo seed set.
+   - This is operational rather than architectural, but it materially reduces the risk of long-running ingest work or failed backfills before recording.
+   - Use `--scope`, `--match`, and `--limit` only for the counties and metros that appear in the case study.
+
+### Good To Have
+
+1. Hardcode Employment Rate FRED series IDs for the core demo states.
+   - This is a pragmatic demo patch for Texas, Louisiana, and Oklahoma where the series-name search is currently inconsistent.
+   - It improves reliability for the target story, but it does not solve the broader matching problem outside those predefined markets.
+
+2. Add client CSV geocode batching in chunks below the current Google cap.
+   - Chunking uploads into blocks of about 40 is a sensible near-term mitigation for the current 50-string practical limit.
+   - This should be paired with correct API-key scoping, but the batching logic is the actual user-facing fix.
+
+### Defer
+
+1. Any NoSQL migration discussion.
+   - The documented bottleneck is still read fan-out, payload size, and route shape on top of Postgres/PostGIS rather than transactional write pressure.
+   - Moving datastores before fixing caching, bbox filtering, and response shape would add risk without solving the main demo issue.
+
+2. Generalized nationwide FRED series-discovery hardening beyond the demo markets.
+   - The broad fix is still worth doing, but it is not the fastest path to a stable recording if the target geographies are already known.
+   - The county-FIPS fallback and a small hardcoded market list cover the highest-value cases first.
+
+3. Full statewide Texas backfill orchestration.
+   - Scheduled or background ingestion is the right longer-term answer, but it is not necessary to support a scoped prototype recording.
+   - For now, the safer path is targeted seeding, not broad automation.
