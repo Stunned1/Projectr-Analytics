@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useSitesStore } from '@/lib/sites-store'
 import type { Site } from '@/lib/sites-store'
 import { MAP_VIEW_SAVE_ZIP } from '@/lib/saved-viewport'
@@ -26,20 +26,16 @@ function SiteLabelInput({
   label: string
 }) {
   const updateLabel = useSitesStore((s) => s.updateLabel)
-  const [value, setValue] = useState(label)
-  useEffect(() => {
-    setValue(label)
-  }, [label, siteId])
 
   return (
     <Input
+      key={`${siteId}:${label}`}
       type="text"
-      value={value}
-      onChange={(e) => setValue(e.target.value)}
-      onBlur={() => {
-        const t = value.trim()
+      defaultValue={label}
+      onBlur={(e) => {
+        const t = e.target.value.trim()
         if (!t) {
-          setValue(label)
+          e.target.value = label
           return
         }
         if (t !== label) void updateLabel(siteId, t)
@@ -55,9 +51,6 @@ function SiteNotesPencil({ siteId, notes }: { siteId: string; notes: string | nu
   const updateNotes = useSitesStore((s) => s.updateNotes)
   const [open, setOpen] = useState(false)
   const [value, setValue] = useState(notes ?? '')
-  useEffect(() => {
-    setValue(notes ?? '')
-  }, [notes, siteId])
 
   if (!open) {
     return (
@@ -67,7 +60,10 @@ function SiteNotesPencil({ siteId, notes }: { siteId: string; notes: string | nu
         size="icon-xs"
         className="mt-0.5 h-6 w-6 shrink-0 text-zinc-500 hover:text-primary"
         title={notes?.trim() ? `Note: ${notes}` : 'Add analyst note'}
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          setValue(notes ?? '')
+          setOpen(true)
+        }}
       >
         <Pencil className="h-3 w-3" strokeWidth={2} />
       </Button>
@@ -130,7 +126,7 @@ export default function ShortlistPanel({
           {!loading && sites.length === 0 && (
             <p className="text-sm leading-relaxed text-muted-foreground">
               Nothing saved yet. Load a market on the map, then use <strong className="text-foreground">Save Site</strong>,{' '}
-              <strong className="text-foreground">Save area</strong> in the right data panel, or the intelligence terminal{' '}
+              <strong className="text-foreground">Save area</strong> in the right data panel, or the EDA assistant{' '}
               <strong className="text-foreground">/save</strong>.
             </p>
           )}

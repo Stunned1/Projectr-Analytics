@@ -3,8 +3,11 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import type { AgentAction, AgentMessage, AgentStep, AgentTrace, AnalysisSite, MapContext } from '@/lib/agent-types'
 import { consumeAgentNdjsonStream } from '@/lib/consume-agent-ndjson-stream'
+import { buildAgentGreeting } from '@/lib/agent-surface-copy'
+import { evaluateAgentRequestPolicy } from '@/lib/agent-request-policy'
 import { AGENT_CHAT_STORAGE_KEY } from '@/lib/agent-chat-storage-key'
 import { clearLocalWorkspaceForTesting, clearProjectrBrowserCachesAndReload } from '@/lib/local-workspace-reset'
+import { getNycBoroughFromZip, isNycBoroughName } from '@/lib/geography'
 import { ALL_LAYERS_OFF } from '@/lib/slash-layer-keys'
 import {
   buildSlashHelpMessage,
@@ -57,11 +60,6 @@ type PersistedAgentSession = {
   v: 1
   messages: AgentMessage[]
   caseStudyBundle: CaseStudyBundle | null
-}
-
-const DEFAULT_GREETING: AgentMessage = {
-  role: 'agent',
-  text: 'Engine ready. Enter a command or paste an analyst brief.',
 }
 
 function readPersistedSession(): PersistedAgentSession | null {
@@ -120,13 +118,15 @@ export function useAgentIntelligence(
     onNotifyWhileClosed?: () => void
     /** `/save` — persist ZIP, aggregate, or map camera to Saved (map page). */
     onSlashSave?: (customLabel: string | null) => Promise<{ ok: boolean; message: string }>
-    /** Live Thinking panel: streaming reasoning, JSON phase, then final trace (`done`). */
+    /** Live Notes panel: streamed notes updates, JSON phase, then final trace (`done`). */
     onAgentThinkingUpdate?: (u: { trace: AgentTrace; phase: AgentThinkingStreamPhase }) => void
     /** Always called when the agent request finishes (success, error, or abort) so UI can clear a “streaming” state. */
     onAgentThinkingStreamFinished?: () => void
   }
 ) {
-  const [messages, setMessages] = useState<AgentMessage[]>([DEFAULT_GREETING])
+  const defaultGreeting = useMemo(() => buildAgentGreeting(mapContext), [mapContext])
+  const defaultGreetingRef = useRef(defaultGreeting)
+  const [messages, setMessages] = useState<AgentMessage[]>(() => [{ role: 'agent', text: defaultGreeting }])
   const [caseStudyBundle, setCaseStudyBundle] = useState<CaseStudyBundle | null>(null)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -162,6 +162,26 @@ export function useAgentIntelligence(
   }, [])
 
   useEffect(() => {
+    if (!storageHydrated) {
+      defaultGreetingRef.current = defaultGreeting
+      return
+    }
+
+    setMessages((prev) => {
+      if (
+        prev.length === 1 &&
+        prev[0]?.role === 'agent' &&
+        prev[0]?.text === defaultGreetingRef.current
+      ) {
+        defaultGreetingRef.current = defaultGreeting
+        return [{ role: 'agent', text: defaultGreeting }]
+      }
+      defaultGreetingRef.current = defaultGreeting
+      return prev
+    })
+  }, [defaultGreeting, storageHydrated])
+
+  useEffect(() => {
     if (!storageHydrated) return
     writePersistedSession(messages, caseStudyBundle)
   }, [messages, caseStudyBundle, storageHydrated])
@@ -181,10 +201,32 @@ export function useAgentIntelligence(
     if (shouldNotifyRef.current?.()) notifyCbRef.current?.()
   }, [])
 
+  const resolveAnalysisBorough = useCallback((action: AgentAction) => {
+    const explicit = action.borough?.trim().toLowerCase()
+    if (isNycBoroughName(explicit)) return explicit
+
+    const label = mapContext.label?.trim().toLowerCase()
+    if (isNycBoroughName(label)) return label
+
+    return getNycBoroughFromZip(mapContext.zip ?? null)
+  }, [mapContext.label, mapContext.zip])
+
   const runAnalysis = useCallback(
     async (action: AgentAction) => {
-      const borough = action.borough ?? 'manhattan'
+      const borough = resolveAnalysisBorough(action)
       const topN = action.top_n ?? 5
+
+      if (!borough) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'agent',
+            text: 'The spatial ranking model is only available for NYC borough workflows. Load Manhattan, Brooklyn, Queens, the Bronx, or Staten Island first, or stay in the shared Texas / county / metro workflow.',
+          },
+        ])
+        maybeNotify()
+        return
+      }
 
       setMessages((prev) => [
         ...prev,
@@ -257,7 +299,7 @@ export function useAgentIntelligence(
         maybeNotify()
       }
     },
-    [onAction, maybeNotify]
+    [onAction, maybeNotify, resolveAnalysisBorough]
   )
 
   const executeStep = useCallback(
@@ -391,7 +433,7 @@ export function useAgentIntelligence(
         if (restartCmd.kind === 'cancel') {
           restartConfirmPendingRef.current = false
           setTerminalFirstVisibleIndex(0)
-          setMessages([DEFAULT_GREETING])
+          setMessages([{ role: 'agent', text: defaultGreetingRef.current }])
           return
         }
         restartConfirmPendingRef.current = false
@@ -410,7 +452,7 @@ export function useAgentIntelligence(
         if (low === 'n' || low === 'no') {
           restartConfirmPendingRef.current = false
           setTerminalFirstVisibleIndex(0)
-          setMessages([DEFAULT_GREETING])
+          setMessages([{ role: 'agent', text: defaultGreetingRef.current }])
           return
         }
         setMessages((prev) => [
@@ -476,14 +518,14 @@ export function useAgentIntelligence(
         if (clearCmd.mode === 'terminal') {
           restartConfirmPendingRef.current = false
           setTerminalFirstVisibleIndex(0)
-          setMessages([DEFAULT_GREETING])
+          setMessages([{ role: 'agent', text: defaultGreetingRef.current }])
           return
         }
         if (clearCmd.mode === 'memory') {
           restartConfirmPendingRef.current = false
           setTerminalFirstVisibleIndex(0)
           setCaseStudyBundle(null)
-          setMessages([DEFAULT_GREETING])
+          setMessages([{ role: 'agent', text: defaultGreetingRef.current }])
           return
         }
       }
@@ -695,13 +737,24 @@ export function useAgentIntelligence(
           { role: 'user', text: userPrompt, ts: Date.now() },
           {
             role: 'agent',
-            text: 'Unknown slash command. Try /help, or use colon forms like /clear:layers, /layers:rent, /go 10001. Anything else (no leading /, or text after a space mid-sentence) goes to the Gemini agent.',
+            text: 'Unknown slash command. Try /help, or use known forms like /clear:layers, /layers:rent, /go 77002, or /go Harris County, TX. Prompts that start with / are always handled locally and are never sent to the AI agent.',
           },
         ])
         return
       }
 
       if (loading || isRunningSequence) return
+
+      const policy = evaluateAgentRequestPolicy(userPrompt, mapContext)
+      if (!policy.allowed) {
+        setInput('')
+        setMessages((prev) => [
+          ...prev,
+          { role: 'user', text: userPrompt, ts: Date.now() },
+          { role: 'agent', text: policy.message },
+        ])
+        return
+      }
 
       setCaseStudyBundle({ userText: userPrompt, agentLead: '', insight: null })
       setMessages((prev) => [...prev, { role: 'user', text: userPrompt, ts: Date.now() }])
@@ -735,13 +788,13 @@ export function useAgentIntelligence(
           const out = await consumeAgentNdjsonStream(res, {
             onThinkingDelta: (acc) => {
               options?.onAgentThinkingUpdate?.({
-                trace: { summary: 'Composing reasoning…', thinking: acc },
+                trace: { summary: 'Reviewing workspace evidence…', methodology: acc, thinking: acc },
                 phase: 'thinking',
               })
             },
             onJsonPhase: (thinkingSoFar) => {
               options?.onAgentThinkingUpdate?.({
-                trace: { summary: 'Selecting map actions…', thinking: thinkingSoFar },
+                trace: { summary: 'Preparing EDA findings…', methodology: thinkingSoFar, thinking: thinkingSoFar },
                 phase: 'json',
               })
             },
@@ -806,7 +859,7 @@ export function useAgentIntelligence(
         const msg =
           e instanceof Error
             ? e.message === 'Agent stream ended without a result'
-              ? 'Stream ended before map actions finished—often an idle timeout while the second model runs. Retry the same prompt; Thinking may still show streamed reasoning.'
+              ? 'Stream ended before the EDA response completed. Retry the same prompt; partial notes may already be visible in the right panel.'
               : e.message === 'Failed to fetch' || e.name === 'TypeError'
                 ? 'Network error—check connection and retry.'
                 : e.message
@@ -826,8 +879,7 @@ export function useAgentIntelligence(
       runSequence,
       runAnalysis,
       maybeNotify,
-      options?.onAgentThinkingUpdate,
-      options?.onAgentThinkingStreamFinished,
+      options,
     ]
   )
 

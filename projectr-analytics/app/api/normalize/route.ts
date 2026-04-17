@@ -1,25 +1,21 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { GoogleGenerativeAI } from '@google/generative-ai'
-import Papa from 'papaparse'
 import { supabase } from '@/lib/supabase'
-import type { VisualBucket } from '@/lib/supabase'
 import { geocodeZip } from '@/lib/geocoder'
-import { GEMINI_NO_EM_DASH_RULE } from '@/lib/gemini-text-rules'
 import { geocodeAddressForward, getGoogleForwardGeocodeKey } from '@/lib/google-forward-geocode'
+import {
+  finalizeImportGeminiTriage,
+  IMPORT_TRIAGE_PROMPT,
+  parseImportGeminiTriage,
+  type ImportGeminiTriage,
+} from '@/lib/upload/import-decision-model'
+import { buildUploadMarkerCandidateRows, parseUploadFile, UPLOAD_ZIP_RE, type UploadRawRow } from '@/lib/upload'
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
 
 const triageCache = new Map<
   string,
-  {
-    bucket: string
-    visual_bucket: VisualBucket
-    metric_name: string
-    geo_column: string | null
-    value_column: string | null
-    date_column: string | null
-    reasoning: string
-  }
+  ImportGeminiTriage
 >()
 
 function hashPreview(preview: string): string {
@@ -30,183 +26,119 @@ function hashPreview(preview: string): string {
   return h.toString(36)
 }
 
-const TRIAGE_PROMPT = `You are a Data Triage Cop for a real estate analytics platform.
-Analyze the CSV headers and first 5 data rows provided and return ONLY valid JSON (no markdown).
-
-Classify into one of three buckets:
-- GEOSPATIAL: Has ZIP codes (5-digit US), latitude/longitude pairs, street addresses, city+state, or other geographic keys → can be shown on the map (server geocodes ZIPs and forward-geocodes address-like strings when an API key is configured)
-- TEMPORAL: Has dates (or periods) plus numeric values but NO usable geography → line chart in sidebar only
-- TABULAR: Cross-sectional grids, IDs without coordinates, or non-mappable text → data panel / grid only
-
-For GEOSPATIAL with point-level intent, set visual_bucket to "MARKER" (ZIP column, address column, or lat/lng — the server geocodes ZIPs and resolves street/place text via Google when configured).
-Use "HEATMAP" only if the user clearly has many points for density; default ZIP lists to MARKER.
-
-Return this exact JSON shape (single object, no markdown fences, no commentary):
-{
-  "bucket": "GEOSPATIAL" | "TEMPORAL" | "TABULAR",
-  "visual_bucket": "HEATMAP" | "MARKER" | "POLYGON" | "TIME_SERIES" | "TABULAR",
-  "metric_name": "string (best guess at what this data represents)",
-  "geo_column": "exact header string for geography (ZIP, address, etc.), or null",
-  "value_column": "exact header string for primary numeric value, or null",
-  "date_column": "exact header string containing dates, or null",
-  "reasoning": "one sentence explanation"
-}
-
-${GEMINI_NO_EM_DASH_RULE}`
-
-/** Strip ```json fences and isolate the outermost `{ ... }` when the model adds prose. */
-function extractJsonObject(raw: string): string {
-  let s = raw.trim()
-  s = s.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/m, '').trim()
-
-  const start = s.indexOf('{')
-  if (start < 0) return s
-
-  let depth = 0
-  for (let i = start; i < s.length; i++) {
-    const c = s[i]
-    if (c === '{') depth++
-    else if (c === '}') {
-      depth--
-      if (depth === 0) return s.slice(start, i + 1)
-    }
-  }
-  return s.slice(start)
-}
-
-type TriageShape = {
-  bucket: string
-  visual_bucket: VisualBucket
-  metric_name: string
-  geo_column: string | null
-  value_column: string | null
-  date_column: string | null
-  reasoning: string
-}
-
-function parseTriageJson(raw: string): TriageShape | null {
-  const attempts = [raw.trim(), extractJsonObject(raw)]
-  const seen = new Set<string>()
-  for (const chunk of attempts) {
-    const c = chunk.trim()
-    if (!c || seen.has(c)) continue
-    seen.add(c)
-    try {
-      const o = JSON.parse(c) as Record<string, unknown>
-      if (typeof o.bucket !== 'string' || typeof o.reasoning !== 'string') continue
-
-      const vb = o.visual_bucket
-      const allowed: VisualBucket[] = ['HEATMAP', 'MARKER', 'POLYGON', 'TIME_SERIES', 'TABULAR']
-      const visual_bucket: VisualBucket =
-        typeof vb === 'string' && (allowed as string[]).includes(vb)
-          ? (vb as VisualBucket)
-          : o.bucket === 'TEMPORAL'
-            ? 'TIME_SERIES'
-            : 'TABULAR'
-
-      return {
-        bucket: o.bucket,
-        visual_bucket,
-        metric_name: typeof o.metric_name === 'string' ? o.metric_name : 'Imported metric',
-        geo_column: o.geo_column == null ? null : String(o.geo_column),
-        value_column: o.value_column == null ? null : String(o.value_column),
-        date_column: o.date_column == null ? null : String(o.date_column),
-        reasoning: o.reasoning,
-      }
-    } catch {
-      /* next */
-    }
-  }
-  return null
-}
-
-const ZIP_RE = /^\d{5}$/
 const MAX_UNIQUE_ADDRESS_GEOCODE = 50
-
-function resolveHeader(headers: string[], name: string | null): string | null {
-  if (!name?.trim()) return null
-  const want = name.trim().toLowerCase()
-  const exact = headers.find((h) => h.trim().toLowerCase() === want)
-  return exact ?? headers.find((h) => h.trim().toLowerCase().includes(want)) ?? null
-}
-
-function latLngIndices(headers: string[]): { lat: string | null; lng: string | null } {
-  const lat =
-    headers.find((h) => {
-      const x = h.toLowerCase()
-      return x === 'lat' || x === 'latitude' || x.endsWith('_lat') || x.includes('latitude')
-    }) ?? null
-  const lng =
-    headers.find((h) => {
-      const x = h.toLowerCase()
-      return x === 'lng' || x === 'lon' || x === 'long' || x === 'longitude' || x.endsWith('_lng') || x.includes('longitude')
-    }) ?? null
-  return { lat, lng }
-}
-
-function parseNum(raw: string): number | null {
-  const n = parseFloat(String(raw).replace(/[$,]/g, '').trim())
-  return Number.isFinite(n) ? n : null
-}
+const MAX_RAW_TABLE_ROWS = 40
+const MAX_MARKER_POINTS = 500
 
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData()
     const file = formData.get('file') as File | null
     const zip = (formData.get('zip') as string | null)?.trim() || null
+    const reviewFingerprint = (formData.get('review_fingerprint') as string | null)?.trim() || null
+    const reviewedTriageRaw = (formData.get('reviewed_triage') as string | null)?.trim() || null
+    const mode = String(formData.get('mode') ?? 'import').trim().toLowerCase() === 'review'
+      ? 'review'
+      : 'import'
 
     if (!file) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 })
     }
 
-    const text = await file.text()
-    const parsed = Papa.parse<Record<string, string>>(text, {
-      header: true,
-      skipEmptyLines: 'greedy',
-      transformHeader: (h) => String(h).trim().replace(/^\uFEFF/, ''),
-    })
-
-    const headers = (parsed.meta.fields ?? []).map((h) => h.trim()).filter(Boolean)
-    const dataRows = parsed.data.filter((row) =>
-      Object.values(row).some((v) => v != null && String(v).trim() !== '')
-    )
-
-    if (headers.length === 0 || dataRows.length === 0) {
-      return NextResponse.json({ error: 'CSV has no headers or data rows' }, { status: 400 })
+    const parsedFile = await parseUploadFile(file)
+    const headers = parsedFile.columns
+    const dataRows = parsedFile.rows
+    const analysisSample = {
+      file: parsedFile.file,
+      headers,
+      sample_rows: parsedFile.sampleRows,
     }
 
-    const previewLines = [headers.join(','), ...dataRows.slice(0, 5).map((r) => headers.map((h) => r[h] ?? '').join(','))]
-    const preview = previewLines.join('\n')
+    const analysisInput = JSON.stringify(analysisSample)
+    const cacheKey = hashPreview(analysisInput)
+    let triageCandidate = triageCache.get(cacheKey)
+    let fallbackWarning: string | null = null
 
-    const cacheKey = hashPreview(preview)
-    let triage = triageCache.get(cacheKey)
-
-    if (!triage) {
-      const model = genAI.getGenerativeModel({
-        model: 'gemini-2.5-flash',
-        generationConfig: { responseMimeType: 'application/json' },
-      })
-      const result = await model.generateContent(`${TRIAGE_PROMPT}\n\nCSV Preview:\n${preview}`)
-      const raw = result.response.text().trim()
-      const parsed = parseTriageJson(raw)
-      if (!parsed) {
+    if (mode === 'import' && reviewedTriageRaw) {
+      if (!reviewFingerprint || reviewFingerprint !== cacheKey) {
         return NextResponse.json(
-          { error: 'Gemini returned invalid JSON', raw: raw.slice(0, 1200) },
-          { status: 500 }
+          { error: 'Reviewed import fingerprint does not match the uploaded file.' },
+          { status: 400 }
         )
       }
-      triage = parsed
-      triageCache.set(cacheKey, triage)
+
+      const reviewedTriage = parseImportGeminiTriage(reviewedTriageRaw, headers)
+      if (!reviewedTriage) {
+        return NextResponse.json(
+          { error: 'Reviewed import interpretation was invalid.' },
+          { status: 400 }
+        )
+      }
+
+      triageCandidate = finalizeImportGeminiTriage(reviewedTriage, {
+        file: parsedFile.file,
+        headers,
+        sampleRows: parsedFile.sampleRows,
+        hints: parsedFile.hints,
+      })
     }
 
-    if (!triage) {
-      return NextResponse.json({ error: 'Data triage unavailable' }, { status: 500 })
+    if (!triageCandidate) {
+      try {
+        const model = genAI.getGenerativeModel({
+          model: 'gemini-2.5-flash',
+          generationConfig: { responseMimeType: 'application/json' },
+        })
+        const result = await model.generateContent(
+          `${IMPORT_TRIAGE_PROMPT}\n\nImport sample JSON:\n${analysisInput}`
+        )
+        const raw = result.response.text().trim()
+        const parsed = parseImportGeminiTriage(raw, headers)
+        if (!parsed) {
+          fallbackWarning = 'Gemini returned invalid import JSON, so Projectr fell back to structural import heuristics.'
+        } else {
+          triageCandidate = finalizeImportGeminiTriage(parsed, {
+            file: parsedFile.file,
+            headers,
+            sampleRows: parsedFile.sampleRows,
+            hints: parsedFile.hints,
+          })
+          triageCache.set(cacheKey, triageCandidate)
+        }
+      } catch {
+        fallbackWarning = 'Gemini import triage was unavailable, so Projectr used structural import heuristics for this file.'
+      }
     }
 
-    const geoKey = resolveHeader(headers, triage.geo_column)
-    const valKey = resolveHeader(headers, triage.value_column)
-    const dateKey = resolveHeader(headers, triage.date_column)
-    const { lat: latKey, lng: lngKey } = latLngIndices(headers)
+    let triage: ImportGeminiTriage =
+      triageCandidate ??
+      finalizeImportGeminiTriage(null, {
+        file: parsedFile.file,
+        headers,
+        sampleRows: parsedFile.sampleRows,
+        hints: parsedFile.hints,
+        fallbackWarning,
+      })
+
+    if (
+      triage.mapability_classification === 'map_normalizable' &&
+      !getGoogleForwardGeocodeKey() &&
+      !triage.recommended_field_mappings.latitude &&
+      !triage.recommended_field_mappings.longitude &&
+      !triage.recommended_field_mappings.zip
+    ) {
+      triage = {
+        ...triage,
+        warnings: [
+          ...triage.warnings,
+          'Google forward geocoding is not configured, so address-based rows cannot be mapped automatically yet.',
+        ],
+      }
+    }
+
+    const shouldAttemptMapResolution =
+      triage.mapability_classification === 'map_ready' ||
+      triage.mapability_classification === 'map_normalizable'
 
     type RowAcc = {
       submarket_id: string | null
@@ -219,50 +151,44 @@ export async function POST(request: NextRequest) {
       _lat: number | null
       _lng: number | null
       _label: string
+      _rowPreview: UploadRawRow
     }
 
-    const insertRows: RowAcc[] = dataRows.map((row) => {
-      const geoRaw = geoKey ? String(row[geoKey] ?? '').trim() : ''
-      const submarket = geoRaw || zip
-      const value = valKey ? parseNum(String(row[valKey] ?? '')) : null
-      const dateRaw = dateKey ? String(row[dateKey] ?? '').trim() : ''
-      let time_period: string | null = null
-      if (dateRaw) {
-        const d = new Date(dateRaw)
-        time_period = Number.isNaN(d.getTime()) ? dateRaw : d.toISOString().split('T')[0]
-      }
+    const insertRows: RowAcc[] = buildUploadMarkerCandidateRows({
+      rows: dataRows,
+      headers,
+      triage,
+      currentZip: zip,
+    }).map((candidate) => ({
+      submarket_id: shouldAttemptMapResolution ? candidate.submarket_id : null,
+      geometry:
+        shouldAttemptMapResolution && candidate.lat != null && candidate.lng != null
+          ? `POINT(${candidate.lng} ${candidate.lat})`
+          : null,
+      metric_name: triage.metric_name,
+      metric_value: candidate.metric_value,
+      time_period: candidate.time_period,
+      data_source: 'Client Upload',
+      visual_bucket: triage.visual_bucket,
+      _lat: shouldAttemptMapResolution ? candidate.lat : null,
+      _lng: shouldAttemptMapResolution ? candidate.lng : null,
+      _label: candidate.label,
+      _rowPreview: candidate.row_preview,
+    }))
 
-      const latStr = latKey ? String(row[latKey] ?? '').trim() : ''
-      const lngStr = lngKey ? String(row[lngKey] ?? '').trim() : ''
-      const lat = latStr ? parseFloat(latStr) : null
-      const lng = lngStr ? parseFloat(lngStr) : null
-      const latOk = lat != null && !Number.isNaN(lat) && Math.abs(lat) <= 90
-      const lngOk = lng != null && !Number.isNaN(lng) && Math.abs(lng) <= 180
-
-      const labelParts = [geoRaw, triage.metric_name].filter(Boolean)
-      const _label = labelParts.length ? labelParts.join(' · ') : triage.metric_name
-
-      return {
-        submarket_id: submarket || null,
-        geometry: latOk && lngOk ? `POINT(${lng!} ${lat!})` : null,
-        metric_name: triage.metric_name,
-        metric_value: value,
-        time_period,
-        data_source: 'Client Upload',
-        visual_bucket: triage.visual_bucket,
-        _lat: latOk ? lat : null,
-        _lng: lngOk ? lng : null,
-        _label,
-      }
-    })
-
-    const kept = insertRows.filter((r) => r.metric_value !== null || r.submarket_id !== null)
+    const kept = insertRows.filter(
+      (r) =>
+        r.metric_value !== null ||
+        r.submarket_id !== null ||
+        r.time_period !== null
+    )
 
     const zipSet = new Set<string>()
     for (const r of kept) {
+      if (!shouldAttemptMapResolution) break
       if (r._lat != null && r._lng != null) continue
       const z = r.submarket_id?.trim() ?? ''
-      if (ZIP_RE.test(z)) zipSet.add(z)
+      if (UPLOAD_ZIP_RE.test(z)) zipSet.add(z)
     }
 
     const maxZipGeocode = 60
@@ -278,9 +204,10 @@ export async function POST(request: NextRequest) {
     }
 
     for (const r of kept) {
+      if (!shouldAttemptMapResolution) break
       if (r._lat != null && r._lng != null) continue
       const z = r.submarket_id?.trim() ?? ''
-      if (ZIP_RE.test(z)) {
+      if (UPLOAD_ZIP_RE.test(z)) {
         const p = zipToLatLng.get(z)
         if (p) {
           r._lat = p.lat
@@ -290,12 +217,12 @@ export async function POST(request: NextRequest) {
     }
 
     // Street addresses, "City, ST", etc. — Google Geocoding API (same keys as /api/upload/geocode)
-    if (getGoogleForwardGeocodeKey()) {
+    if (shouldAttemptMapResolution && getGoogleForwardGeocodeKey()) {
       const addressCandidates = new Set<string>()
       for (const r of kept) {
         if (r._lat != null && r._lng != null) continue
         const g = r.submarket_id?.trim() ?? ''
-        if (!g || ZIP_RE.test(g)) continue
+        if (!g || UPLOAD_ZIP_RE.test(g)) continue
         if (g.length < 3) continue
         addressCandidates.add(g)
       }
@@ -323,9 +250,11 @@ export async function POST(request: NextRequest) {
     }
 
     const mapVisual =
-      triage.bucket === 'GEOSPATIAL' && (triage.visual_bucket === 'MARKER' || triage.visual_bucket === 'HEATMAP')
+      shouldAttemptMapResolution &&
+      triage.bucket === 'GEOSPATIAL' &&
+      (triage.visual_bucket === 'MARKER' || triage.visual_bucket === 'HEATMAP')
 
-    const markerPoints = mapVisual
+    const markerCandidates = mapVisual
       ? kept
           .filter((r) => r._lat != null && r._lng != null)
           .map((r) => ({
@@ -333,23 +262,60 @@ export async function POST(request: NextRequest) {
             lng: r._lng!,
             value: r.metric_value,
             label: r._label,
+            file_name: file.name,
+            metric_name: r.metric_name,
+            submarket_id: r.submarket_id,
+            time_period: r.time_period,
+            row_preview: r._rowPreview,
           }))
       : []
+    const markerPoints =
+      markerCandidates.length > MAX_MARKER_POINTS
+        ? markerCandidates.slice(0, MAX_MARKER_POINTS)
+        : markerCandidates
 
-    const dbRows = kept.map((r) => {
-      const { _lat, _lng, _label, ...rest } = r
+    if (markerCandidates.length > MAX_MARKER_POINTS) {
+      triage = {
+        ...triage,
+        warnings: [
+          ...triage.warnings,
+          `Map preview capped at ${MAX_MARKER_POINTS.toLocaleString()} markers to keep the client layer responsive.`,
+        ],
+      }
+    }
+
+    const dbRows = kept
+      .filter((r) => r.metric_value !== null || r.submarket_id !== null)
+      .map((r) => {
+      const { _lat, _lng, _label, _rowPreview, ...rest } = r
       void _label
+      void _rowPreview
       const geometry =
         rest.geometry ?? (_lat != null && _lng != null ? `POINT(${_lng} ${_lat})` : null)
       return { ...rest, geometry }
-    })
-
-    if (kept.length > 0) {
-      const { error } = await supabase.from('projectr_master_data').upsert(dbRows as never[], {
-        onConflict: 'submarket_id,metric_name,time_period,data_source',
-        ignoreDuplicates: true,
       })
-      if (error) throw new Error(error.message)
+
+    let committed = mode === 'import'
+    let persistenceWarning: string | null = null
+    if (mode === 'import' && dbRows.length > 0) {
+      try {
+        const { error } = await supabase.from('projectr_master_data').upsert(dbRows as never[], {
+          onConflict: 'submarket_id,metric_name,time_period,data_source',
+          ignoreDuplicates: true,
+        })
+        if (error) throw new Error(error.message)
+      } catch (error) {
+        committed = false
+        persistenceWarning =
+          error instanceof Error ? error.message : 'Projectr could not persist this import to Supabase.'
+        triage = {
+          ...triage,
+          warnings: [
+            ...triage.warnings,
+            'Projectr imported this dataset locally, but server persistence failed. Map and sidebar workflows still work in this browser session.',
+          ],
+        }
+      }
     }
 
     const preview_rows = kept.slice(0, 8).map((r) => ({
@@ -362,10 +328,22 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       triage,
+      review_fingerprint: cacheKey,
       rows_ingested: kept.length,
       preview_rows,
+      parse_summary: analysisSample,
+      raw_table: {
+        headers,
+        rows: dataRows.slice(0, MAX_RAW_TABLE_ROWS),
+        total_rows: dataRows.length,
+        truncated: dataRows.length > MAX_RAW_TABLE_ROWS,
+      },
       marker_points: markerPoints,
-      map_eligible: markerPoints.length > 0,
+      map_eligible:
+        triage.mapability_classification === 'map_ready' ||
+        triage.mapability_classification === 'map_normalizable',
+      committed,
+      persistence_warning: persistenceWarning,
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unexpected error'

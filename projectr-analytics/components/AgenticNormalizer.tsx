@@ -2,14 +2,27 @@
 
 import { useState, useRef, useCallback } from 'react'
 import { useClientUploadMarkersStore } from '@/lib/client-upload-markers-store'
-import { useClientUploadSessionStore } from '@/lib/client-upload-session-store'
+import {
+  useClientUploadSessionStore,
+  type ClientUploadSourcePart,
+  type ClientUploadVisualizationMode,
+  type ClientUploadWorkflowStatus,
+} from '@/lib/client-upload-session-store'
+import {
+  buildClientUploadWorkingRowsKey,
+  collectClientUploadWorkingRowsKeys,
+  deleteClientUploadWorkingRowsMany,
+  putClientUploadWorkingRows,
+} from '@/lib/client-upload-working-rows'
 import type {
   ClientNormalizeApiResult,
   ClientNormalizeMarkerPoint,
   NormalizerIngestPayload,
 } from '@/lib/normalize-client-types'
+import type { UploadParseResult } from '@/lib/upload/types'
 
 const MAX_FILES_PER_DROP = 8
+type NormalizerStage = 'idle' | 'reviewing' | 'reviewed' | 'importing' | 'imported'
 
 const BUCKET_COLORS: Record<string, string> = {
   GEOSPATIAL: '#D76B3D',
@@ -29,6 +42,23 @@ const VISUAL_LABELS: Record<string, string> = {
   POLYGON: 'Polygon Fill',
   TIME_SERIES: 'Line Chart',
   TABULAR: 'Data Grid',
+}
+
+const MAPABILITY_LABELS: Record<string, string> = {
+  map_ready: 'Ready for map',
+  map_normalizable: 'Needs map normalization',
+  non_map_visualizable: 'Sidebar or chart',
+  unusable: 'Unusable',
+}
+
+const FALLBACK_LABELS: Record<string, string> = {
+  map_layer: 'Map layer',
+  raw_table: 'Raw table',
+  time_series_chart: 'Time-series chart',
+  bar_chart: 'Bar chart',
+  summary_cards: 'Summary cards',
+  table_then_chart: 'Table first',
+  none: 'No safe fallback',
 }
 
 function mergeMarkerPoints(lists: ClientNormalizeMarkerPoint[][]): ClientNormalizeMarkerPoint[] {
@@ -63,12 +93,145 @@ export default function AgenticNormalizer({ currentZip, onIngested }: AgenticNor
   const setSession = useClientUploadSessionStore((s) => s.setSession)
 
   const [dragging, setDragging] = useState(false)
-  const [loading, setLoading] = useState(false)
+  const [stage, setStage] = useState<NormalizerStage>('idle')
   const [results, setResults] = useState<ClientNormalizeApiResult[]>([])
-  const [ingestedNames, setIngestedNames] = useState<string[]>([])
+  const [reviewFiles, setReviewFiles] = useState<File[]>([])
+  const [reviewParses, setReviewParses] = useState<UploadParseResult[]>([])
+  const [resultNames, setResultNames] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
   const [fileLabel, setFileLabel] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  const loading = stage === 'reviewing' || stage === 'importing'
+
+  const requestNormalize = useCallback(
+    async (
+      file: File,
+      mode: 'review' | 'import',
+      reviewed?: ClientNormalizeApiResult | null
+    ): Promise<ClientNormalizeApiResult> => {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('mode', mode)
+      if (currentZip) formData.append('zip', currentZip)
+      if (mode === 'import' && reviewed?.review_fingerprint && reviewed?.triage) {
+        formData.append('review_fingerprint', reviewed.review_fingerprint)
+        formData.append('reviewed_triage', JSON.stringify(reviewed.triage))
+      }
+
+      const res = await fetch('/api/normalize', { method: 'POST', body: formData })
+      const data = (await res.json()) as ClientNormalizeApiResult & { error?: string }
+      if (!res.ok || data.error) {
+        throw new Error(data.error ?? `Normalize failed for ${file.name}`)
+      }
+      return data
+    },
+    [currentZip]
+  )
+
+  const persistImportedSession = useCallback(
+    async (
+      list: File[],
+      normalized: ClientNormalizeApiResult[],
+      parsedFiles: UploadParseResult[]
+    ) => {
+      const previousSession = useClientUploadSessionStore.getState().session
+      const previousWorkingRowsKeys = collectClientUploadWorkingRowsKeys(previousSession)
+      const ingestedAt = new Date().toISOString()
+      const perFileMarkers = normalized.map((d) => d.marker_points ?? [])
+      const merged = mergeMarkerPoints(perFileMarkers)
+      const hasPins = merged.length > 0
+
+      const sources: ClientUploadSourcePart[] = await Promise.all(
+        normalized.map(async (data, i) => {
+          const pts = data.marker_points ?? []
+          const fileName = list[i]?.name ?? null
+          const workingRows = parsedFiles[i]?.rows ?? []
+          const workingRowsKey = buildClientUploadWorkingRowsKey(ingestedAt, i, fileName)
+          let rowStorageWarning: string | null = null
+
+          try {
+            await putClientUploadWorkingRows(workingRowsKey, workingRows)
+          } catch {
+            rowStorageWarning =
+              'Full imported rows are available in this tab, but durable browser storage was unavailable, so reloading may fall back to preview rows only.'
+          }
+
+          const workflowStatus: ClientUploadWorkflowStatus =
+            pts.length > 0
+              ? 'mapped'
+              : data.triage.mapability_classification === 'unusable'
+                ? 'errored'
+                : 'sidebar_only'
+          const visualizationMode: ClientUploadVisualizationMode =
+            pts.length > 0
+              ? 'map'
+              : data.triage.fallback_visualization === 'time_series_chart' ||
+                  data.triage.fallback_visualization === 'bar_chart'
+                ? 'chart'
+                : 'table'
+          const inferredMapEligible =
+            data.triage.mapability_classification === 'map_ready' ||
+            data.triage.mapability_classification === 'map_normalizable'
+          const persistenceWarning = [data.persistence_warning, rowStorageWarning].filter(Boolean).join(' ') || null
+
+          return {
+            fileName,
+            triage: data.triage,
+            rowsIngested: data.rows_ingested,
+            previewRows: data.preview_rows ?? [],
+            workingRows,
+            workingRowsKey: rowStorageWarning ? null : workingRowsKey,
+            parseSummary: data.parse_summary
+              ? {
+                  file: data.parse_summary.file,
+                  headers: data.parse_summary.headers,
+                  sampleRows: data.parse_summary.sample_rows,
+                }
+              : undefined,
+            rawTable: data.raw_table,
+            markerPoints: pts,
+            markerCount: pts.length,
+            mapPinsActive: pts.length > 0,
+            mapEligible: data.map_eligible === true || inferredMapEligible,
+            workflowStatus,
+            visualizationMode,
+            persistenceWarning,
+            normalization: {
+              status:
+                pts.length > 0 && data.triage.mapability_classification === 'map_normalizable'
+                  ? 'resolved'
+                  : 'idle',
+              attemptedCount: 0,
+              resolvedCount: pts.length,
+              failedCount: 0,
+              lastRunAt: pts.length > 0 ? new Date().toISOString() : null,
+              message:
+                pts.length > 0 && data.triage.mapability_classification === 'map_normalizable'
+                  ? `Resolved ${pts.length.toLocaleString()} row${pts.length === 1 ? '' : 's'} for map rendering during import.`
+                  : null,
+            },
+          }
+        })
+      )
+
+      const nextWorkingRowsKeys = sources
+        .map((source) => source.workingRowsKey?.trim() ?? '')
+        .filter((key): key is string => key.length > 0)
+      const staleWorkingRowsKeys = previousWorkingRowsKeys.filter((key) => !nextWorkingRowsKeys.includes(key))
+      if (staleWorkingRowsKeys.length > 0) {
+        void deleteClientUploadWorkingRowsMany(staleWorkingRowsKeys)
+      }
+
+      setMarkers(hasPins ? merged : null)
+      setSession({
+        ingestedAt,
+        sources,
+      })
+      onIngested?.({ results: normalized, mergedMarkerPoints: merged })
+    },
+    [onIngested, setMarkers, setSession]
+  )
 
   const processFiles = useCallback(
     async (files: File[]) => {
@@ -78,71 +241,68 @@ export default function AgenticNormalizer({ currentZip, onIngested }: AgenticNor
         return
       }
 
-      setLoading(true)
+      setStage('reviewing')
       setError(null)
       setResults([])
-      setIngestedNames([])
+      setReviewFiles(list)
+      setReviewParses([])
+      setResultNames(list.map((f) => f.name))
       setFileLabel(list.length === 1 ? list[0].name : `${list.length} files`)
 
-      const done: ClientNormalizeApiResult[] = []
-
       try {
+        const reviewed: ClientNormalizeApiResult[] = []
+        const parsed: UploadParseResult[] = []
+        const { parseUploadFile } = await import('@/lib/upload')
         for (const file of list) {
-          const formData = new FormData()
-          formData.append('file', file)
-          if (currentZip) formData.append('zip', currentZip)
-
-          const res = await fetch('/api/normalize', { method: 'POST', body: formData })
-          const data = (await res.json()) as ClientNormalizeApiResult & { error?: string }
-          if (data.error) {
-            setError(`${file.name}: ${data.error}`)
-            setLoading(false)
-            return
-          }
-          done.push(data)
+          const [reviewedResult, parsedResult] = await Promise.all([
+            requestNormalize(file, 'review'),
+            parseUploadFile(file),
+          ])
+          reviewed.push(reviewedResult)
+          parsed.push(parsedResult)
         }
-
-        const perFileMarkers = done.map((d) => d.marker_points ?? [])
-        const merged = mergeMarkerPoints(perFileMarkers)
-        const hasPins = merged.length > 0
-
-        setMarkers(hasPins ? merged : null)
-
-        setSession({
-          ingestedAt: new Date().toISOString(),
-          sources: done.map((data, i) => {
-            const pts = data.marker_points ?? []
-            return {
-              fileName: list[i]?.name ?? null,
-              triage: {
-                bucket: data.triage.bucket,
-                visual_bucket: data.triage.visual_bucket,
-                metric_name: data.triage.metric_name,
-                reasoning: data.triage.reasoning,
-                geo_column: data.triage.geo_column,
-                value_column: data.triage.value_column,
-                date_column: data.triage.date_column,
-              },
-              rowsIngested: data.rows_ingested,
-              previewRows: data.preview_rows ?? [],
-              markerCount: pts.length,
-              mapPinsActive: pts.length > 0,
-              mapEligible: data.map_eligible ?? pts.length > 0,
-            }
-          }),
-        })
-
-        setResults(done)
-        setIngestedNames(list.map((f) => f.name))
-        onIngested?.({ results: done, mergedMarkerPoints: merged })
-      } catch {
-        setError('Failed to process file(s)')
-      } finally {
-        setLoading(false)
+        setResults(reviewed)
+        setReviewParses(parsed)
+        setStage('reviewed')
+      } catch (err) {
+        setStage('idle')
+        setResults([])
+        setReviewFiles([])
+        setReviewParses([])
+        setError(err instanceof Error ? err.message : 'Failed to review file(s)')
       }
     },
-    [currentZip, onIngested, setMarkers, setSession]
+    [requestNormalize]
   )
+
+  const importReviewedFiles = useCallback(async () => {
+    if (reviewFiles.length === 0) return
+
+    setStage('importing')
+    setError(null)
+    try {
+      const committed: ClientNormalizeApiResult[] = []
+      for (const [index, file] of reviewFiles.entries()) {
+        committed.push(await requestNormalize(file, 'import', results[index] ?? null))
+      }
+      await persistImportedSession(reviewFiles, committed, reviewParses)
+      setResults(committed)
+      setStage('imported')
+    } catch (err) {
+      setStage('reviewed')
+      setError(err instanceof Error ? err.message : 'Failed to import file(s)')
+    }
+  }, [persistImportedSession, requestNormalize, results, reviewFiles, reviewParses])
+
+  const clearReview = useCallback(() => {
+    setStage('idle')
+    setError(null)
+    setResults([])
+    setReviewFiles([])
+    setReviewParses([])
+    setResultNames([])
+    setFileLabel(null)
+  }, [])
 
   const onDrop = useCallback(
     (e: React.DragEvent) => {
@@ -189,16 +349,18 @@ export default function AgenticNormalizer({ currentZip, onIngested }: AgenticNor
         {loading ? (
           <div className="flex flex-col items-center gap-2">
             <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-            <p className="text-xs text-zinc-400">Gemini triage + normalize…</p>
+            <p className="text-xs text-zinc-400">
+              {stage === 'reviewing' ? 'Reviewing import…' : 'Importing reviewed file(s)…'}
+            </p>
             <p className="text-[10px] text-zinc-600">{fileLabel}</p>
           </div>
         ) : (
           <div className="flex flex-col items-center gap-2">
             <span className="text-2xl">📂</span>
-            <p className="text-xs font-medium text-white">Drop CSV(s) here or click to upload</p>
+            <p className="text-xs font-medium text-white">Drop CSV(s) here or click to review</p>
             <p className="text-[10px] text-zinc-500">
-              Up to {MAX_FILES_PER_DROP} files at once — pins and previews merge. Geospatial → 3D cone pins (ZIP +
-              addresses via Google when configured). Temporal / tabular → Data tab + Supabase ingest.
+              Up to {MAX_FILES_PER_DROP} files at once. Review happens before import so you can confirm mapability,
+              fallback mode, and the chosen rendering path before anything is committed.
             </p>
           </div>
         )}
@@ -210,6 +372,50 @@ export default function AgenticNormalizer({ currentZip, onIngested }: AgenticNor
 
       {results.length > 0 && (
         <div className="space-y-3">
+          <div className="rounded-lg border border-white/8 bg-white/4 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-primary/80">
+                  {stage === 'reviewed' ? 'Import review' : 'Import status'}
+                </p>
+                <p className="mt-1 text-xs text-zinc-300">
+                  {results.length} file{results.length === 1 ? '' : 's'} ·{' '}
+                  {results.reduce((sum, result) => sum + result.rows_ingested, 0).toLocaleString()} rows
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {stage === 'reviewed' && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void importReviewedFiles()}
+                      className="rounded-md border border-primary/35 bg-primary/10 px-3 py-1.5 text-[11px] font-semibold text-primary transition-colors hover:bg-primary/20"
+                    >
+                      Import reviewed files
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearReview}
+                      className="rounded-md border border-white/10 px-3 py-1.5 text-[11px] text-zinc-400 transition-colors hover:border-white/20 hover:text-white"
+                    >
+                      Clear review
+                    </button>
+                  </>
+                )}
+                {stage === 'imported' && (
+                  <span className="rounded-md border border-emerald-800/40 bg-emerald-950/30 px-3 py-1.5 text-[11px] font-medium text-emerald-300">
+                    Imported
+                  </span>
+                )}
+              </div>
+            </div>
+            <p className="mt-2 text-[10px] leading-relaxed text-zinc-500">
+              {stage === 'reviewed'
+                ? 'Nothing has been committed yet. Review the detected structure and chosen rendering path below, then import when it looks right.'
+                : 'The reviewed files are now available through the imported-data workflow, with map-ready rows on the Client layer and non-map datasets in the sidebar workspace.'}
+            </p>
+          </div>
+
           {results.length > 1 && (
             <p className="text-[10px] font-medium text-zinc-400">
               {results.length} files ·{' '}
@@ -226,6 +432,19 @@ export default function AgenticNormalizer({ currentZip, onIngested }: AgenticNor
                   <p className="text-[10px]" style={{ color: BUCKET_COLORS[result.triage.bucket] ?? '#888' }}>
                     {result.triage.bucket} → {VISUAL_LABELS[result.triage.visual_bucket] ?? result.triage.visual_bucket}
                   </p>
+                  <div className="mt-1 flex flex-wrap gap-1 text-[9px] text-zinc-300">
+                    <span className="rounded bg-white/6 px-1.5 py-0.5">
+                      {MAPABILITY_LABELS[result.triage.mapability_classification] ??
+                        result.triage.mapability_classification}
+                    </span>
+                    <span className="rounded bg-white/6 px-1.5 py-0.5">
+                      {FALLBACK_LABELS[result.triage.fallback_visualization] ??
+                        result.triage.fallback_visualization}
+                    </span>
+                    <span className="rounded bg-white/6 px-1.5 py-0.5">
+                      {(result.triage.confidence * 100).toFixed(0)}% confidence
+                    </span>
+                  </div>
                 </div>
                 <div className="ml-auto shrink-0 text-right">
                   <p className="text-xs font-semibold text-white">{result.rows_ingested.toLocaleString()}</p>
@@ -234,12 +453,34 @@ export default function AgenticNormalizer({ currentZip, onIngested }: AgenticNor
               </div>
 
               {results.length > 1 && (
-                <p className="mb-2 truncate font-mono text-[9px] text-zinc-500" title={ingestedNames[idx]}>
-                  {ingestedNames[idx] ?? `File ${idx + 1}`}
+                <p className="mb-2 truncate font-mono text-[9px] text-zinc-500" title={resultNames[idx]}>
+                  {resultNames[idx] ?? `File ${idx + 1}`}
                 </p>
               )}
 
               <p className="mb-3 text-[11px] italic text-zinc-400">&quot;{result.triage.reasoning}&quot;</p>
+              <p className="mb-3 text-[11px] leading-relaxed text-zinc-300">{result.triage.explanation}</p>
+
+              {result.parse_summary?.headers?.length ? (
+                <div className="mb-3">
+                  <p className="mb-1 text-[9px] uppercase tracking-widest text-zinc-500">Detected columns</p>
+                  <div className="flex flex-wrap gap-1">
+                    {result.parse_summary.headers.slice(0, 8).map((header) => (
+                      <span
+                        key={header}
+                        className="rounded bg-white/6 px-1.5 py-0.5 font-mono text-[9px] text-zinc-300"
+                      >
+                        {header}
+                      </span>
+                    ))}
+                    {result.parse_summary.headers.length > 8 && (
+                      <span className="rounded bg-white/6 px-1.5 py-0.5 text-[9px] text-zinc-500">
+                        +{result.parse_summary.headers.length - 8} more
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ) : null}
 
               <div className="grid grid-cols-3 gap-1.5 text-[10px]">
                 {result.triage.geo_column && (
@@ -262,20 +503,35 @@ export default function AgenticNormalizer({ currentZip, onIngested }: AgenticNor
                 )}
               </div>
 
+              {(result.persistence_warning || result.triage.warnings.length > 0) && (
+                <div className="mt-2 rounded border border-amber-900/40 bg-amber-950/20 px-2 py-1.5 text-[10px] text-amber-200">
+                  {result.persistence_warning ?? result.triage.warnings[0]}
+                </div>
+              )}
+
               {(result.marker_points?.length ?? 0) > 0 && (
                 <p className="mt-2 text-[10px] text-primary">
-                  ✓ {result.marker_points!.length} pin{result.marker_points!.length === 1 ? '' : 's'} in this file →{' '}
-                  <span className="font-semibold">Client</span> layer shows all files combined
+                  {stage === 'reviewed' ? 'Review detected' : 'Imported'} {result.marker_points!.length} pin
+                  {result.marker_points!.length === 1 ? '' : 's'} in this file →{' '}
+                  <span className="font-semibold">Client</span> layer
                 </p>
               )}
+              {result.triage.mapability_classification === 'map_normalizable' &&
+                (result.marker_points?.length ?? 0) === 0 && (
+                  <p className="mt-2 text-[10px] text-amber-300">
+                    {stage === 'reviewed' ? 'Will import' : 'Imported'} with a table-first fallback while map normalization remains unresolved
+                  </p>
+                )}
               {result.triage.bucket === 'TEMPORAL' && (
                 <p className="mt-2 text-[10px] text-blue-400">
-                  ✓ <span className="font-semibold">Data</span> tab — time series ingested
+                  {stage === 'reviewed' ? 'Will route to' : 'Available in'} the <span className="font-semibold">Imported Data</span>{' '}
+                  sidebar chart/table workflow
                 </p>
               )}
               {result.triage.bucket === 'TABULAR' && (
                 <p className="mt-2 text-[10px] text-zinc-400">
-                  ✓ <span className="font-semibold">Data</span> tab / metrics (Client Upload)
+                  {stage === 'reviewed' ? 'Will route to' : 'Available in'} the <span className="font-semibold">Imported Data</span>{' '}
+                  sidebar table workflow
                 </p>
               )}
             </div>

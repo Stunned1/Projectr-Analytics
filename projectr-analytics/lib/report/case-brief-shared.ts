@@ -49,9 +49,9 @@ Return ONLY valid JSON (no markdown) matching this shape:
     { "risk": "Short risk title", "mitigation": "How to underwrite or hedge it." }
   ],
   "recommendedNextSteps": [ "4–6 actionable steps for acquisitions / design / community / capital." ],
-  "assumptionsAndLimits": "2–4 sentences: data vintage, NYC-only PLUTO/DOB scope, model simplifications, what would change with better data.",
+  "assumptionsAndLimits": "2–4 sentences: data vintage, shared-market vs NYC-only source coverage where relevant, model simplifications, and what would change with better data.",
   "methodology": "2 short paragraphs: (1) scoring inputs and weights at a high level, (2) what the model does NOT optimize for.",
-  "footer": "Scout · Data: Zillow (ZORI/ZHVI), NYC PLUTO, NYC DOB permits where applicable."
+  "footer": "Scout · Data: Zillow (ZORI/ZHVI), Census / FRED / HUD shared market data, and NYC PLUTO / DOB where applicable."
 }
 
 Rules:

@@ -41,18 +41,18 @@ export function AgentThinkingPanel({
     }
     wasStreamingRef.current = streaming
 
-    if (!trace?.thinking) return
+    if (!trace?.methodology && !trace?.thinking) return
     const el = thinkingScrollRef.current
     if (!el || !stickToBottomRef.current) return
     el.scrollTop = el.scrollHeight
-  }, [trace?.thinking, streaming])
+  }, [trace?.methodology, trace?.thinking, streaming])
 
   if (!trace) {
     return (
       <div className={cn('flex min-h-0 flex-1 flex-col p-4', className)}>
         <p className="text-sm leading-relaxed text-muted-foreground">
-          Open the intelligence terminal and use <strong className="text-foreground">Show thinking</strong> on an agent
-          reply to load a plan, evaluation notes, and execution outline here.
+          Open the EDA assistant and use <strong className="text-foreground">Show analysis notes</strong> on a reply to
+          load methodology, evidence, caveats, and follow-up questions here.
         </p>
       </div>
     )
@@ -63,9 +63,9 @@ export function AgentThinkingPanel({
       {!embedded && (
         <div className="flex shrink-0 items-start justify-between gap-2 border-b border-border/50 p-4 pb-3">
           <div className="min-w-0">
-            <h2 className="text-base font-bold leading-tight text-foreground">Agent thinking</h2>
+            <h2 className="text-base font-bold leading-tight text-foreground">Analysis Notes</h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Long-form reasoning when available, then plan, checks, and map steps
+              Methodology, findings, evidence, and caveats for the active EDA response
             </p>
           </div>
           {onDismiss && (
@@ -82,18 +82,18 @@ export function AgentThinkingPanel({
       )}
 
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
-        {trace.thinking && (
+        {(trace.methodology || trace.thinking) && (
           <section className="flex min-h-0 flex-col">
-            <p className="mb-1 text-[9px] font-semibold uppercase tracking-widest text-primary">Full reasoning</p>
+            <p className="mb-1 text-[9px] font-semibold uppercase tracking-widest text-primary">Methodology</p>
             <p className="mb-2.5 text-[10px] leading-snug text-muted-foreground">
-              Markdown-style headings and lists from the reasoning model are rendered below (not raw API JSON).
+              Plain-language explanation of what workspace evidence the assistant used.
             </p>
             <div
               ref={thinkingScrollRef}
               onScroll={updateStickFromScroll}
               className="max-h-[min(55vh,520px)] min-h-[120px] overflow-y-auto rounded-lg border border-border/70 bg-muted/15 p-3 shadow-inner"
             >
-              <AgentThinkingMarkdown source={trace.thinking} />
+              <AgentThinkingMarkdown source={trace.methodology ?? trace.thinking ?? ''} />
             </div>
           </section>
         )}
@@ -110,16 +110,66 @@ export function AgentThinkingPanel({
           <p className="text-sm font-medium leading-snug text-foreground">{trace.summary}</p>
         </section>
 
+        {trace.keyFindings && trace.keyFindings.length > 0 && (
+          <section>
+            <p className="mb-2 text-[9px] font-semibold uppercase tracking-widest text-muted-foreground">Key Findings</p>
+            <ul className="space-y-2 text-xs leading-relaxed text-foreground/90">
+              {trace.keyFindings.map((finding, index) => (
+                <li key={index} className="border-l-2 border-primary/35 pl-3">
+                  {finding}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {trace.evidence && trace.evidence.length > 0 && (
+          <section>
+            <p className="mb-2 text-[9px] font-semibold uppercase tracking-widest text-muted-foreground">Evidence</p>
+            <ul className="space-y-2 text-xs leading-relaxed text-foreground/90">
+              {trace.evidence.map((item, index) => (
+                <li key={index} className="rounded-md border border-border/60 bg-muted/20 px-2.5 py-2">
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {trace.caveats && trace.caveats.length > 0 && (
+          <section className="rounded-lg border border-amber-500/25 bg-amber-500/5 px-3 py-2.5">
+            <p className="mb-1 text-[9px] font-semibold uppercase tracking-widest text-amber-600 dark:text-amber-400">
+              Caveats
+            </p>
+            <ul className="space-y-1.5 text-xs leading-relaxed text-foreground/90">
+              {trace.caveats.map((item, index) => (
+                <li key={index}>{item}</li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {trace.nextQuestions && trace.nextQuestions.length > 0 && (
+          <section>
+            <p className="mb-2 text-[9px] font-semibold uppercase tracking-widest text-muted-foreground">Next Questions</p>
+            <ol className="list-decimal space-y-1.5 pl-4 text-xs leading-relaxed text-foreground/90">
+              {trace.nextQuestions.map((item, index) => (
+                <li key={index}>{item}</li>
+              ))}
+            </ol>
+          </section>
+        )}
+
         {trace.detail && (
           <section>
-            <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-widest text-muted-foreground">Detail</p>
+            <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-widest text-muted-foreground">Legacy Detail</p>
             <p className="text-xs leading-relaxed text-muted-foreground whitespace-pre-wrap">{trace.detail}</p>
           </section>
         )}
 
         {trace.plan && trace.plan.length > 0 && (
           <section>
-            <p className="mb-2 text-[9px] font-semibold uppercase tracking-widest text-muted-foreground">Plan</p>
+            <p className="mb-2 text-[9px] font-semibold uppercase tracking-widest text-muted-foreground">Legacy Plan</p>
             <ol className="list-decimal space-y-1.5 pl-4 text-xs leading-relaxed text-foreground/90">
               {trace.plan.map((b, i) => (
                 <li key={i}>{b}</li>
@@ -131,7 +181,7 @@ export function AgentThinkingPanel({
         {trace.eval && (
           <section className="rounded-lg border border-amber-500/25 bg-amber-500/5 px-3 py-2.5">
             <p className="mb-1 text-[9px] font-semibold uppercase tracking-widest text-amber-600 dark:text-amber-400">
-              Self-check
+              Legacy Self-check
             </p>
             <p className="text-xs leading-relaxed text-foreground/90 whitespace-pre-wrap">{trace.eval}</p>
           </section>
@@ -163,7 +213,7 @@ export function AgentThinkingPanel({
         {trace.executionSteps && trace.executionSteps.length > 0 && (
           <section>
             <p className="mb-2 text-[9px] font-semibold uppercase tracking-widest text-muted-foreground">
-              Map execution sequence
+              Legacy Map Execution Sequence
             </p>
             <ul className="space-y-2">
               {trace.executionSteps.map((row, i) => (
@@ -185,7 +235,7 @@ export function AgentThinkingPanel({
               onClick={onDismiss}
               className="text-xs font-medium text-muted-foreground hover:text-primary"
             >
-              Clear thinking
+              Clear analysis notes
             </button>
           </div>
         )}

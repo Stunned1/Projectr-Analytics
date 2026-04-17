@@ -3,22 +3,12 @@
 import { Fragment, useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react'
 import type { AgentAction, AgentTrace, AnalysisSite } from '@/lib/agent-types'
 import type { MapContext } from '@/lib/agent-types'
+import { buildAgentInputPlaceholder, buildAgentStarterSuggestions } from '@/lib/agent-surface-copy'
 import { useAgentIntelligence, formatActionLogLine } from '@/lib/use-agent-intelligence'
 import { getSlashPaletteState } from '@/lib/slash-commands'
 import { cn } from '@/lib/utils'
 
 const STREAM_MS = 72
-const SUGGESTIONS = [
-  '/help',
-  '/go 11201',
-  '/save',
-  '/layers:transit,rent',
-  '/clear:terminal',
-  '/clear:workspace',
-  'Show flood risk',
-  'Transit + amenities on',
-  'Run Manhattan site analysis',
-]
 
 /** Scout orange / narrative / system / chrome */
 const C_USER_GT = '#D76B3D'
@@ -101,31 +91,19 @@ function StreamedAgentBody({
   isLatest: boolean
   isAnalyzing?: boolean
 }) {
-  const [lines, setLines] = useState<string[]>(() => (isLatest && !isAnalyzing ? [] : splitForTerminal(text)))
+  const parts = useMemo(() => splitForTerminal(text), [text])
+  const [revealedCount, setRevealedCount] = useState(() => (isLatest && !isAnalyzing ? 0 : parts.length))
 
   useEffect(() => {
-    if (isAnalyzing) {
-      setLines([text])
-      return
-    }
-    if (!isLatest) {
-      setLines(splitForTerminal(text))
-      return
-    }
-    const parts = splitForTerminal(text)
-    if (parts.length === 0) {
-      setLines([])
-      return
-    }
+    if (isAnalyzing || !isLatest || parts.length === 0) return
     let i = 0
-    setLines([])
     const id = window.setInterval(() => {
       i += 1
-      setLines(parts.slice(0, i))
+      setRevealedCount(i)
       if (i >= parts.length) window.clearInterval(id)
     }, STREAM_MS)
     return () => window.clearInterval(id)
-  }, [text, isLatest, isAnalyzing])
+  }, [parts, isLatest, isAnalyzing])
 
   if (isAnalyzing) {
     return (
@@ -135,6 +113,7 @@ function StreamedAgentBody({
     )
   }
 
+  const lines = isLatest ? parts.slice(0, revealedCount) : parts
   if (lines.length === 0) return null
 
   return (
@@ -156,7 +135,7 @@ export type AgentTerminalSize = 'collapsed' | 'compact' | 'expanded'
 interface AgentTerminalProps {
   mapContext: MapContext
   onAction: (action: AgentAction) => void
-  /** Shown in header, e.g. "Manhattan · 43 ZIPs" */
+  /** Shown in header, e.g. "Harris County, TX · County view · 37 ZIP codes" */
   contextSubtitle: string
   onUnreadChange?: (unread: boolean) => void
   /** For layout (e.g. floating stats bubble clearance). */
@@ -167,9 +146,9 @@ interface AgentTerminalProps {
   bottomOffsetClass?: string
   /** Map page: `/save` persists ZIP, aggregate, or camera to Saved. */
   onSlashSave?: (customLabel: string | null) => Promise<{ ok: boolean; message: string }>
-  /** Open right sidebar with plan / eval / execution trace from `/api/agent`. */
+  /** Open right sidebar with analysis notes from `/api/agent`. */
   onShowThinking?: (trace: AgentTrace) => void
-  /** Live updates while `/api/agent` streams reasoning (Thinking tab opens automatically). */
+  /** Live updates while `/api/agent` streams notes progress (Notes tab opens automatically). */
   onAgentThinkingUpdate?: (u: { trace: AgentTrace; phase: 'thinking' | 'json' | 'done' }) => void
   onAgentThinkingStreamFinished?: () => void
 }
@@ -229,28 +208,16 @@ export default function AgentTerminal({
   })
 
   const slashPalette = useMemo(() => getSlashPaletteState(input), [input])
-
-  useEffect(() => {
-    const { open, matches } = getSlashPaletteState(input)
-    const n = matches.length
-    if (!open || n === 0) {
-      setSlashHighlight(0)
-      return
-    }
-    setSlashHighlight((h) => Math.min(h, n - 1))
-  }, [input])
+  const starterSuggestions = useMemo(() => buildAgentStarterSuggestions(mapContext), [mapContext])
+  const activeSlashHighlight = useMemo(() => {
+    if (!slashPalette.open || slashPalette.matches.length === 0) return 0
+    return Math.min(slashHighlight, slashPalette.matches.length - 1)
+  }, [slashHighlight, slashPalette.open, slashPalette.matches.length])
 
   const showCaseBriefCta = useMemo(() => {
     const latest = [...messages].reverse().find((m) => m.analysisSites?.length)
     return Boolean(latest?.analysisSites?.length) && !isRunningSequence && !loading
   }, [messages, isRunningSequence, loading])
-
-  useEffect(() => {
-    if (size !== 'collapsed') {
-      setUnread(false)
-      onUnreadChange?.(false)
-    }
-  }, [size, onUnreadChange])
 
   useEffect(() => {
     onSizeChange?.(size)
@@ -264,6 +231,16 @@ export default function AgentTerminal({
     inputRef.current?.focus()
     setInput((p) => `${p}/`)
   }, [setInput])
+
+  const clearUnreadIndicator = useCallback(() => {
+    setUnread(false)
+    onUnreadChange?.(false)
+  }, [onUnreadChange])
+
+  const openTerminal = useCallback((nextSize: Exclude<AgentTerminalSize, 'collapsed'> = 'compact') => {
+    clearUnreadIndicator()
+    setSize(nextSize)
+  }, [clearUnreadIndicator])
 
   useLayoutEffect(() => {
     if (size === 'collapsed' || !slashOpenPendingRef.current) return
@@ -291,13 +268,13 @@ export default function AgentTerminal({
       e.preventDefault()
 
       if (loading || isRunningSequence) {
-        if (size === 'collapsed') setSize('compact')
+        if (size === 'collapsed') openTerminal('compact')
         return
       }
 
       if (size === 'collapsed') {
         slashOpenPendingRef.current = true
-        setSize('compact')
+        openTerminal('compact')
         return
       }
 
@@ -306,7 +283,7 @@ export default function AgentTerminal({
 
     document.addEventListener('keydown', onDocKeyDown, true)
     return () => document.removeEventListener('keydown', onDocKeyDown, true)
-  }, [size, loading, isRunningSequence, focusTerminalAndInsertSlash])
+  }, [size, loading, isRunningSequence, focusTerminalAndInsertSlash, openTerminal])
 
   useEffect(() => {
     outputRef.current?.scrollTo({ top: outputRef.current.scrollHeight, behavior: 'smooth' })
@@ -391,6 +368,10 @@ export default function AgentTerminal({
 
   const terminalMsgOffset = messages.length - visibleTerminalMessages.length
   const hasUserMessage = useMemo(() => messages.some((m) => m.role === 'user'), [messages])
+  const inputPlaceholder = useMemo(
+    () => buildAgentInputPlaceholder(mapContext, hasUserMessage, isRunningSequence),
+    [mapContext, hasUserMessage, isRunningSequence]
+  )
 
   const lastStatusLine = useMemo(() => {
     for (let i = visibleTerminalMessages.length - 1; i >= 0; i--) {
@@ -400,7 +381,7 @@ export default function AgentTerminal({
         return line.length > 72 ? `${line.slice(0, 69)}…` : line
       }
     }
-    return 'Idle — type a command to run the engine.'
+    return 'Idle — ask about the loaded market, imported dataset, or map.'
   }, [visibleTerminalMessages])
 
   function renderSiteTable(sites: AnalysisSite[]) {
@@ -469,7 +450,7 @@ export default function AgentTerminal({
         <div className="flex h-8 shrink-0 items-center gap-2 border-b border-zinc-800 px-2 pr-1">
         <button
           type="button"
-          onClick={() => (size === 'collapsed' ? setSize('compact') : beginSmoothCollapse())}
+          onClick={() => (size === 'collapsed' ? openTerminal('compact') : beginSmoothCollapse())}
           className="flex min-w-0 flex-1 items-center gap-2 text-left"
           title={size === 'collapsed' ? 'Expand terminal (or press /)' : 'Collapse terminal'}
         >
@@ -484,7 +465,7 @@ export default function AgentTerminal({
             </span>
           ) : (
             <span className="truncate text-[9px] font-medium tracking-wide text-zinc-500">
-              SCOUT INTELLIGENCE ENGINE <span className="text-zinc-600">v1.0</span>
+              SCOUT EDA ASSISTANT <span className="text-zinc-600">v1.0</span>
               <span className="text-primary/80"> [{contextSubtitle}]</span>
             </span>
           )}
@@ -498,10 +479,10 @@ export default function AgentTerminal({
             onClick={() => {
               if (size === 'expanded') {
                 setOpenHeightPx(TERMINAL_DEFAULT_OPEN_PX)
-                setSize('compact')
+                openTerminal('compact')
               } else {
                 setOpenHeightPx(clampOpenTerminalHeightPx(expandedPresetHeightPx()))
-                setSize('expanded')
+                openTerminal('expanded')
               }
             }}
           >
@@ -518,7 +499,7 @@ export default function AgentTerminal({
         )}
         <button
           type="button"
-          onClick={() => (size === 'collapsed' ? setSize('compact') : beginSmoothCollapse())}
+          onClick={() => (size === 'collapsed' ? openTerminal('compact') : beginSmoothCollapse())}
           className="shrink-0 rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
           aria-label={size === 'collapsed' ? 'Expand' : 'Collapse'}
         >
@@ -545,7 +526,7 @@ export default function AgentTerminal({
             <span className="font-mono text-zinc-500">/rotate °</span> (bearing);{' '}
             <span className="font-mono text-zinc-500">/go</span> search;{' '}
             <span className="font-mono text-zinc-500">/layers:a,b</span>;{' '}
-            <span className="font-mono text-zinc-500">/clear:…</span>;{' '}
+            <span className="font-mono text-zinc-500">/clear:…</span>; ask for EDA on the loaded market or imported dataset;{' '}
             <span className="font-mono text-zinc-500">/restart</span> → y/n; see /help
           </div>
 
@@ -585,7 +566,12 @@ export default function AgentTerminal({
               return (
                 <div key={i}>
                   {showNarrative && (
-                    <StreamedAgentBody text={msg.text} isLatest={isLatestAgent} isAnalyzing={msg.isAnalyzing} />
+                    <StreamedAgentBody
+                      key={`${i}:${msg.text}:${msg.isAnalyzing ? '1' : '0'}:${isLatestAgent ? '1' : '0'}`}
+                      text={msg.text}
+                      isLatest={isLatestAgent}
+                      isAnalyzing={msg.isAnalyzing}
+                    />
                   )}
                   {logLine && !msg.isAnalyzing && <SystemActionLine>{logLine}</SystemActionLine>}
                   {msg.insight && (
@@ -604,7 +590,7 @@ export default function AgentTerminal({
                         onClick={() => onShowThinking(msg.trace!)}
                         className="max-w-full text-left text-[10px] font-semibold text-primary hover:underline"
                       >
-                        Show thinking
+                        Show analysis notes
                       </button>
                       <p className="mt-0.5 line-clamp-2 font-mono text-[9px] leading-snug text-zinc-500">
                         {msg.trace.summary}
@@ -625,7 +611,7 @@ export default function AgentTerminal({
 
           {messages.length <= 2 && (
             <div className="flex shrink-0 flex-wrap gap-1 border-t border-zinc-800/60 px-2 py-1">
-              {SUGGESTIONS.map((s) => (
+              {starterSuggestions.map((s) => (
                 <button
                   key={s}
                   type="button"
@@ -683,10 +669,10 @@ export default function AgentTerminal({
                         key={cmd.command}
                         type="button"
                         role="option"
-                        aria-selected={i === slashHighlight}
+                        aria-selected={i === activeSlashHighlight}
                         className={cn(
                           'flex w-full flex-col gap-0.5 px-2 py-1.5 text-left font-mono text-[10px] transition-colors',
-                          i === slashHighlight ? 'bg-primary/15 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-800/80'
+                          i === activeSlashHighlight ? 'bg-primary/15 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-800/80'
                         )}
                         onMouseEnter={() => setSlashHighlight(i)}
                         onMouseDown={(ev) => ev.preventDefault()}
@@ -723,18 +709,12 @@ export default function AgentTerminal({
                   }
                   if ((e.key === 'Enter' || e.key === 'Tab') && matches.length > 0) {
                     e.preventDefault()
-                    const cmd = matches[slashHighlight]?.command
+                    const cmd = matches[activeSlashHighlight]?.command
                     if (cmd) setInput(`/${cmd}`)
                   }
                 }}
                 disabled={loading || isRunningSequence}
-                placeholder={
-                  isRunningSequence
-                    ? 'Sequence running…'
-                    : hasUserMessage
-                      ? '_'
-                      : '/help · /go ZIP · /layers:rent · /restart · /clear:terminal · or ask…'
-                }
+                placeholder={inputPlaceholder}
                 className="w-full min-w-0 bg-transparent font-mono text-[11px] text-zinc-200 caret-primary outline-none placeholder:text-zinc-700 disabled:opacity-50"
                 style={{ color: C_USER_TEXT }}
                 spellCheck={false}

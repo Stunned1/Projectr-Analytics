@@ -1,4 +1,5 @@
 import { AGENT_CHAT_STORAGE_KEY } from '@/lib/agent-chat-storage-key'
+import { clearClientUploadWorkingRows } from '@/lib/client-upload-working-rows'
 import { PENDING_NAV_KEY } from '@/lib/pending-navigation'
 
 /**
@@ -8,6 +9,7 @@ import { PENDING_NAV_KEY } from '@/lib/pending-navigation'
 export const LOCAL_WORKSPACE_SESSION_KEYS: readonly string[] = [
   'projectr-client-upload-session',
   'projectr-client-upload-markers',
+  'scout-client-upload-markers',
   AGENT_CHAT_STORAGE_KEY,
   PENDING_NAV_KEY,
 ]
@@ -18,14 +20,16 @@ export const LOCAL_WORKSPACE_SESSION_KEYS: readonly string[] = [
  */
 export function clearLocalWorkspaceForTesting(): void {
   if (typeof window === 'undefined') return
-  for (const key of LOCAL_WORKSPACE_SESSION_KEYS) {
-    try {
-      sessionStorage.removeItem(key)
-    } catch {
-      /* quota / private mode */
+  void clearClientUploadWorkingRows().finally(() => {
+    for (const key of LOCAL_WORKSPACE_SESSION_KEYS) {
+      try {
+        sessionStorage.removeItem(key)
+      } catch {
+        /* quota / private mode */
+      }
     }
-  }
-  window.location.reload()
+    window.location.reload()
+  })
 }
 
 const PROJECTR_STORAGE_KEY_PREFIX = 'projectr-'
@@ -37,17 +41,19 @@ const PROJECTR_STORAGE_KEY_PREFIX = 'projectr-'
  */
 export function clearProjectrBrowserCachesAndReload(): void {
   if (typeof window === 'undefined') return
-  for (const storage of [sessionStorage, localStorage] as const) {
-    try {
-      const toRemove: string[] = []
-      for (let i = 0; i < storage.length; i++) {
-        const k = storage.key(i)
-        if (k?.startsWith(PROJECTR_STORAGE_KEY_PREFIX)) toRemove.push(k)
+  void clearClientUploadWorkingRows().finally(() => {
+    for (const storage of [sessionStorage, localStorage] as const) {
+      try {
+        const toRemove: string[] = []
+        for (let i = 0; i < storage.length; i++) {
+          const k = storage.key(i)
+          if (k?.startsWith(PROJECTR_STORAGE_KEY_PREFIX)) toRemove.push(k)
+        }
+        for (const k of toRemove) storage.removeItem(k)
+      } catch {
+        /* quota / private mode */
       }
-      for (const k of toRemove) storage.removeItem(k)
-    } catch {
-      /* quota / private mode */
     }
-  }
-  window.location.reload()
+    window.location.reload()
+  })
 }

@@ -19,8 +19,13 @@ const dmMono = DM_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Scout Command Center",
+  title: "Scout",
   description: "ZIP-level real estate market intelligence and mapping.",
+  icons: {
+    icon: "/scout.png",
+    shortcut: "/scout.png",
+    apple: "/scout.png",
+  },
 };
 
 export default function RootLayout({

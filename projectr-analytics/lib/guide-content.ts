@@ -22,9 +22,9 @@ export type DocumentationOutlineNode = {
 /** Plain text for onboarding search (matches visible copy + common queries). */
 export const Documentation_ONBOARDING_SEARCH_TEXT = `
 FOR NEW USERS new users onboarding orientation quick command center product features metrics UI
-Load a market sidebar ZIP city state Austin borough NYC Enter map data panel Analysis Data tabs
+Load a market sidebar ZIP county metro city state Houston Austin Dallas Harris County Dallas-Fort Worth Texas NYC borough Enter map data panel Analysis Data tabs
 cycle momentum PDF brief tables trends exports Layers map layer control top-left choropleth
-transit tracts permits Intelligence terminal bottom agent natural language shortcuts
+transit tracts permits EDA assistant bottom terminal natural language shortcuts imported datasets upload chart table map fallback
 Saved tab sidebar saved sites comparison Market Report PDF exported
 `.trim()
 
@@ -32,7 +32,8 @@ export const Documentation_FEATURES: DocumentationFeatureBlock[] = [
   {
     id: 'feature-map-search',
     title: 'Map & search',
-    body: `Load a single ZIP, a city and state, or an NYC borough from the sidebar. The map shows the market footprint,
+    body: `Load a single ZIP, a county, a metro, or a city and state from the sidebar. Texas markets are the default MVP flow,
+so examples and demos favor Houston, Dallas-Fort Worth, Austin, San Antonio, and Harris County. NYC boroughs still work when you need borough-specific analysis. The map shows the market footprint,
 optional ZIP outline, and context ZIPs where applicable. Choropleth fill can display rent (ZORI) or home
 value (ZHVI) when enabled in the layer panel.`,
     searchAliases: 'neighbors boundary footprint geocode place state',
@@ -40,9 +41,9 @@ value (ZHVI) when enabled in the layer panel.`,
   {
     id: 'feature-layer-panel',
     title: 'Layer panel',
-    body: `Toggle vector layers: transit (routes and stops), Census tracts, block groups, NYC parcels, NYC building
-permits, flood zones, amenity heatmap, and optional client CSV pins when a session upload exists. Layer availability can depend on
-geography (for example borough-level behavior in NYC).`,
+    body: `Toggle vector layers: transit (routes and stops), Census tracts, block groups, flood zones, amenity heatmap,
+and optional client CSV pins when a session upload exists. NYC parcels and NYC building permits appear only when the active
+geography is in New York City.`,
     searchAliases: 'DOB FEMA NFHL OSM GTFS PLUTO routes stops heatmap',
   },
   {
@@ -55,25 +56,25 @@ Save Site and area actions, and the full metrics table where exposed. Open the s
   },
   {
     id: 'feature-terminal',
-    title: 'Intelligence terminal',
-    body: `Docked at the bottom of the map: ask questions in natural language, trigger layer changes, and run
-agent-driven actions. Session can persist across reloads in the browser.`,
-    searchAliases: 'AI agent chat command',
+    title: 'EDA assistant',
+    body: `Docked at the bottom of the map: ask for dataset summaries, outliers, trend changes, metric explanations,
+and data-quality checks. When an uploaded dataset is active, Scout prioritizes that workspace automatically unless you ask explicitly about market metrics. Direct map controls still work for explicit prompts like search, layer toggles, or panel changes.`,
+    searchAliases: 'EDA assistant AI chat command layers search data quality outliers trends imported dataset market metrics',
   },
   {
     id: 'feature-client-csv',
-    title: 'Client CSV (deferred)',
-    body: `Client CSV upload and normalize are still supported at /upload for this session, but the sidebar entry is
-removed while the workflow is relocated. See README Deferred.`,
-    searchAliases: 'normalize upload spreadsheet lat lng coordinates pins client upload',
+    title: 'Client CSV',
+    body: `Use /upload or the sidebar Upload entry to import analyst CSVs. Map-ready files can render as client pins on
+the map, while non-mappable files stay usable in summary, chart, and raw-table fallbacks in the imported-data workspace.`,
+    searchAliases: 'normalize upload spreadsheet lat lng coordinates pins client upload chart table fallback imported data',
   },
   {
     id: 'feature-shortlist-pdf',
     title: 'Saved & PDF',
-    body: `Use Save Site for a ZIP or Save for a whole city/borough area from the data panel; open the sidebar Saved tab
+    body: `Use Save Site for a ZIP or Save for a whole city / area from the data panel; open the sidebar Saved tab
 to see every row, edit labels and notes, and use comparison checkboxes. When two or more sites are selected, the
 Market Report PDF can include a comparison layout.`,
-    searchAliases: 'saved sites shortlist comparison checkboxes notes aggregate borough',
+    searchAliases: 'saved sites shortlist comparison checkboxes notes aggregate county metro borough area',
   },
   {
     id: 'feature-map-view',

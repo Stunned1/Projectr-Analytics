@@ -6,16 +6,21 @@ import AgenticNormalizer from '@/components/AgenticNormalizer'
 import MarketReportExport from '@/components/MarketReportExport'
 import { AgentThinkingPanel } from '@/components/AgentThinkingPanel'
 import AgentTerminal, { type AgentTerminalSize } from '@/components/AgentTerminal'
+import { ImportedDataPanel } from '@/components/ImportedDataPanel'
 import type { AgentAction, AgentTrace, AnalysisSite } from '@/lib/agent-types'
 import type { CycleAnalysis } from '@/lib/cycle/types'
 import type { MapLayersSnapshot } from '@/lib/report/types'
 import { parseCycleAnalysisField } from '@/lib/report/validate-cycle'
 import { useSitesStore } from '@/lib/sites-store'
-import type { Site } from '@/lib/sites-store'
-import { useClientUploadMarkersStore } from '@/lib/client-upload-markers-store'
+import { useClientUploadMarkersStore, type ClientUploadMarker } from '@/lib/client-upload-markers-store'
 import { useClientUploadSessionStore } from '@/lib/client-upload-session-store'
 import type { NormalizerIngestPayload } from '@/lib/normalize-client-types'
 import { aggregateClientUploadSession } from '@/lib/client-upload-session-aggregate'
+import {
+  buildMarketSnapshotEdaProfile,
+  buildUploadedDatasetEdaProfile,
+  buildWorkspaceEdaContext,
+} from '@/lib/eda-primitives'
 import SitesBootstrap from '@/components/SitesBootstrap'
 import CommandCenterSidebar from '@/components/CommandCenterSidebar'
 import { takePendingNav } from '@/lib/pending-navigation'
@@ -28,15 +33,18 @@ import { metricKeyFromDataRow, sparklineMetricKey } from '@/lib/metric-definitio
 import { cn } from '@/lib/utils'
 import type { LayerState, MapViewportSnapshot } from '@/components/CommandMap'
 import {
-  denormalizeAgentLayersForContext,
   normalizeAgentLayerKey,
   normalizeAgentLayersRecord,
   patchTurnsEveryLayerOff,
 } from '@/lib/agent-map-layers'
 import { ALL_LAYERS_OFF } from '@/lib/slash-layer-keys'
 import { normalizeHeadingDegrees } from '@/lib/slash-commands'
+import { looksLikeCountyQuery, looksLikeMetroQuery } from '@/lib/area-keys'
 import { normalizeUsStateToAbbr } from '@/lib/us-state-abbr'
 import { MAP_VIEW_SAVE_ZIP } from '@/lib/saved-viewport'
+import { isNycBoroughName } from '@/lib/geography'
+import { fetchMomentumScores, getMomentumScore, normalizeMomentumZipList } from '@/lib/momentum-client'
+import { dedupedFetchJson } from '@/lib/request-cache'
 
 const CommandMap = dynamic(() => import('@/components/CommandMap'), { ssr: false })
 
@@ -51,6 +59,7 @@ interface DataRow {
 }
 
 interface TransitData {
+  error?: string
   zip: string
   stop_count: number
   route_count?: number
@@ -96,8 +105,51 @@ interface TrendsData {
   zip?: string | null
 }
 
+interface AreaSearchResponse {
+  error?: string
+  zips?: CityZip[]
+}
+
+interface BoroughSearchResponse extends AreaSearchResponse {
+  borough?: string
+  state?: string | null
+  boundary?: object | null
+}
+
+interface CountySearchResponse extends AreaSearchResponse {
+  county?: string
+  state?: string | null
+  area_key?: string | null
+  label?: string
+}
+
+interface MetroSearchResponse extends AreaSearchResponse {
+  metro_name?: string | null
+  state?: string | null
+  area_key?: string | null
+  label?: string
+}
+
+interface CitySearchResponse extends AreaSearchResponse {
+  city?: string
+  state?: string | null
+  metro_name?: string | null
+  area_key?: string | null
+  label?: string
+}
+
 interface AggregateData {
+  error?: string
   label: string
+  area_key?: string | null
+  area_kind?: 'county' | 'metro' | null
+  uses_direct_area_metrics?: boolean
+  area_metrics?: Array<{
+    metric_name: string
+    metric_value: number
+    time_period: string | null
+    data_source: string
+  }>
   zip_count: number
   total_population: number | null
   zillow: { avg_zori: number | null; avg_zhvi: number | null; zori_growth_12m: number | null; zhvi_growth_12m: number | null }
@@ -126,9 +178,8 @@ interface CityZip {
   zhvi_growth_12m: number | null
 }
 
-const NYC_BOROUGHS = new Set(['manhattan', 'brooklyn', 'queens', 'bronx', 'staten island'])
-
 interface MarketData {
+  error?: string
   zip: string
   cached: boolean
   geo?: { lat: number; lng: number; city: string; state: string; stateFips?: string; countyFips?: string }
@@ -170,7 +221,7 @@ function defaultHumanSiteLabel(market: MarketData): string {
   return `ZIP ${market.zip}`
 }
 
-/** Map pin anchor for a city/borough ZIP list (first ZIP with coords, else geocode first ZIP). */
+/** Map pin anchor for a multi-ZIP area list (first ZIP with coords, else geocode first ZIP). */
 async function resolveAggregateAnchorGeo(cityZips: CityZip[]): Promise<{ zip: string; lat: number; lng: number } | null> {
   const withGeo = cityZips.find((z) => z.lat != null && z.lng != null && /^\d{5}$/.test(z.zip))
   const fallback = cityZips.find((z) => /^\d{5}$/.test(z.zip))
@@ -178,8 +229,7 @@ async function resolveAggregateAnchorGeo(cityZips: CityZip[]): Promise<{ zip: st
   if (!z) return null
   if (z.lat != null && z.lng != null) return { zip: z.zip, lat: z.lat, lng: z.lng }
   try {
-    const res = await fetch(`/api/market?zip=${encodeURIComponent(z.zip)}`)
-    const data = await res.json()
+    const data = await loadMarketData(z.zip)
     if (data.geo?.lat != null && data.geo?.lng != null) {
       return { zip: z.zip, lat: data.geo.lat, lng: data.geo.lng }
     }
@@ -189,11 +239,124 @@ async function resolveAggregateAnchorGeo(cityZips: CityZip[]): Promise<{ zip: st
   return null
 }
 
+async function loadMomentumScore(
+  zips: Iterable<string> | null | undefined,
+  targetZip: string | null | undefined
+): Promise<number | null> {
+  const normalizedZips = normalizeMomentumZipList(zips)
+  if (!targetZip || normalizedZips.length === 0) return null
+
+  try {
+    const response = await fetchMomentumScores(normalizedZips, { limit: normalizedZips.length })
+    return getMomentumScore(response, targetZip)
+  } catch {
+    return null
+  }
+}
+
 // ── Formatters ────────────────────────────────────────────────────────────────
 
 function fmtMoney(n: number | null | undefined) {
   if (n == null) return '-'
   return '$' + Number(n).toLocaleString('en-US', { maximumFractionDigits: 0 })
+}
+
+function hasErrorField(value: unknown): value is { error?: string } {
+  return typeof value === 'object' && value !== null && 'error' in value
+}
+
+function buildAggregateRequestCacheKey(zips: string[], label: string, areaKey?: string | null): string {
+  const normalizedZips = Array.from(new Set(zips)).sort().join(',')
+  return `aggregate:${areaKey ?? normalizedZips}:${label.trim()}`
+}
+
+function buildAreaRequestUrl(
+  route: '/api/city' | '/api/county' | '/api/metro',
+  key: 'city' | 'county' | 'metro',
+  value: string,
+  stateAbbr?: string | null
+): string {
+  const params = new URLSearchParams({ [key]: value })
+  if (stateAbbr) params.set('state', stateAbbr)
+  return `${route}?${params.toString()}`
+}
+
+async function loadMarketData(zip: string): Promise<MarketData> {
+  return dedupedFetchJson<MarketData>(`/api/market?zip=${encodeURIComponent(zip)}`, {
+    allowErrorBody: true,
+  })
+}
+
+async function loadTransitData(zip: string): Promise<TransitData> {
+  return dedupedFetchJson<TransitData>(`/api/transit?zip=${encodeURIComponent(zip)}`)
+}
+
+async function loadCycleData(zip: string, label?: string): Promise<unknown> {
+  const params = new URLSearchParams({ zip })
+  if (label) params.set('label', label)
+  return dedupedFetchJson(`/api/cycle?${params.toString()}`)
+}
+
+async function loadTrendsData(url: string): Promise<Record<string, unknown>> {
+  return dedupedFetchJson<Record<string, unknown>>(url, {
+    allowErrorBody: true,
+    ttlMs: 60 * 1000,
+  })
+}
+
+async function loadAreaTrendsData(
+  cityZips: CityZip[],
+  args: { cityForKeyword: string; state: string }
+): Promise<Record<string, unknown> | null> {
+  const first = cityZips[0]
+  if (!first?.zip) return null
+
+  const st = args.state.trim().toUpperCase()
+  if (st.length === 2) {
+    return loadTrendsData(
+      `/api/trends?city=${encodeURIComponent(args.cityForKeyword.trim())}&state=${encodeURIComponent(st)}&anchor_zip=${encodeURIComponent(first.zip)}`
+    )
+  }
+
+  return loadTrendsData(`/api/trends?zip=${encodeURIComponent(first.zip)}`)
+}
+
+async function loadBoroughSearchData(name: string): Promise<BoroughSearchResponse> {
+  return dedupedFetchJson<BoroughSearchResponse>(`/api/borough?name=${encodeURIComponent(name)}`, {
+    allowErrorBody: true,
+  })
+}
+
+async function loadCountySearchData(county: string, stateAbbr?: string | null): Promise<CountySearchResponse> {
+  return dedupedFetchJson<CountySearchResponse>(
+    buildAreaRequestUrl('/api/county', 'county', county, stateAbbr),
+    { allowErrorBody: true }
+  )
+}
+
+async function loadMetroSearchData(metro: string, stateAbbr?: string | null): Promise<MetroSearchResponse> {
+  return dedupedFetchJson<MetroSearchResponse>(
+    buildAreaRequestUrl('/api/metro', 'metro', metro, stateAbbr),
+    { allowErrorBody: true }
+  )
+}
+
+async function loadCitySearchData(city: string, stateAbbr?: string | null): Promise<CitySearchResponse> {
+  return dedupedFetchJson<CitySearchResponse>(
+    buildAreaRequestUrl('/api/city', 'city', city, stateAbbr),
+    { allowErrorBody: true }
+  )
+}
+
+async function loadAggregateData(zips: string[], label: string, areaKey?: string | null): Promise<AggregateData> {
+  return dedupedFetchJson<AggregateData>('/api/aggregate', {
+    init: {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ zips, label, areaKey }),
+    },
+    cacheKey: buildAggregateRequestCacheKey(zips, label, areaKey),
+  })
 }
 
 function fmtNum(n: number | null | undefined, suffix = '') {
@@ -225,13 +388,34 @@ function trendsShapeForReport(t: TrendsData | null): { series: { date: string; v
 }
 
 const MONEY_METRICS = ['Rent', 'Income', 'FMR', 'Value', 'Price']
-const RATE_METRICS = ['Unemployment', 'Rate']
+const RATE_METRICS = ['Unemployment', 'Rate', 'Pct', 'Ratio']
+const CORE_AGGREGATE_AREA_METRICS = new Set([
+  'Total_Population',
+  'Projected_Total_Population',
+  'Total_Housing_Units',
+  'Vacancy_Rate',
+  'Median_Household_Income',
+  'Median_Gross_Rent',
+  'Moved_From_Different_State',
+  'Permit_Units',
+  'Permit_Value_USD',
+  'Unemployment_Rate',
+  'Employment_Rate',
+  'Real_GDP',
+])
 
 function formatMetricValue(name: string, value: number) {
   if (MONEY_METRICS.some((k) => name.includes(k))) return fmtMoney(value)
   if (RATE_METRICS.some((k) => name.includes(k))) return fmtNum(value, '%')
   if (name === 'Population_Growth_3yr') return fmtNum(value, '%')
   return fmtNum(value)
+}
+
+function formatAggregateScopeLabel(aggregate: AggregateData) {
+  const zipLabel = `${aggregate.zip_count} ZIP code${aggregate.zip_count === 1 ? '' : 's'}`
+  if (aggregate.area_kind === 'county') return `County view · ${zipLabel}`
+  if (aggregate.area_kind === 'metro') return `Metro view · ${zipLabel}`
+  return `${zipLabel} · aggregated`
 }
 
 // ── Small components ──────────────────────────────────────────────────────────
@@ -267,20 +451,7 @@ function ShortlistToggleButton({
       return
     }
     setPending(true)
-    let momentum: number | null = null
-    try {
-      const res = await fetch('/api/momentum', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ zips: [zipCode] }),
-      })
-      if (res.ok) {
-        const j = (await res.json()) as { scores?: { zip: string; score: number }[] }
-        momentum = j.scores?.find((x) => x.zip === zipCode)?.score ?? null
-      }
-    } catch {
-      /* non-fatal */
-    }
+    const momentum = await loadMomentumScore([zipCode], zipCode)
     const human = defaultHumanSiteLabel(market)
     await addSite({
       label: human,
@@ -341,23 +512,7 @@ function AggregateShortlistToggle({
       setPending(false)
       return
     }
-    let momentum: number | null = null
-    try {
-      const zipsList = cityZips.map((z) => z.zip).filter((z) => /^\d{5}$/.test(z))
-      if (zipsList.length) {
-        const res = await fetch('/api/momentum', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ zips: zipsList.slice(0, 40) }),
-        })
-        if (res.ok) {
-          const j = (await res.json()) as { scores?: { zip: string; score: number }[] }
-          momentum = j.scores?.find((x) => x.zip === pin.zip)?.score ?? null
-        }
-      }
-    } catch {
-      /* optional */
-    }
+    const momentum = await loadMomentumScore(cityZips.map((z) => z.zip), pin.zip)
     const human = aggregateData.label.trim() || q
     await addSite({
       label: human,
@@ -525,6 +680,7 @@ export default function Home() {
   /** User 3D pill (45°) when agent has not overridden tilt. */
   const [map3DEnabled, setMap3DEnabled] = useState(false)
   const [analysisSites, setAnalysisSites] = useState<AnalysisSite[]>([])
+  const [selectedUploadedMarker, setSelectedUploadedMarker] = useState<ClientUploadMarker | null>(null)
   const [agentPermitFilter, setAgentPermitFilter] = useState<string[] | null>(null)
   const [selectedSite, setSelectedSite] = useState<AnalysisSite | null>(null)
   const [agentFlyTo, setAgentFlyTo] = useState<{ lat: number; lng: number } | null>(null)
@@ -569,15 +725,28 @@ export default function Home() {
     setAgentThinkingStreaming(false)
   }, [])
 
-  const handleNormalizerIngested = useCallback((payload: NormalizerIngestPayload) => {
-    const pts = payload.mergedMarkerPoints
-    if (pts.length > 0) {
+  const focusImportedMarkers = useCallback((markers: Array<{ lat: number; lng: number }>) => {
+    setSelectedUploadedMarker(null)
+    setMarketPanelTab('data')
+    setPanelOpen(true)
+    if (markers.length > 0) {
       setAgentLayerOverrides((prev) => ({ ...prev, clientData: true }))
-      const lat = pts.reduce((s, p) => s + p.lat, 0) / pts.length
-      const lng = pts.reduce((s, p) => s + p.lng, 0) / pts.length
+      const lat = markers.reduce((sum, marker) => sum + marker.lat, 0) / markers.length
+      const lng = markers.reduce((sum, marker) => sum + marker.lng, 0) / markers.length
       setAgentFlyTo({ lat, lng })
     } else {
       setAgentLayerOverrides((prev) => ({ ...prev, clientData: false }))
+    }
+  }, [])
+
+  const handleNormalizerIngested = useCallback((payload: NormalizerIngestPayload) => {
+    focusImportedMarkers(payload.mergedMarkerPoints)
+  }, [focusImportedMarkers])
+
+  const handleUploadedMarkerSelect = useCallback((marker: ClientUploadMarker | null) => {
+    setSelectedSite(null)
+    setSelectedUploadedMarker(marker)
+    if (marker) {
       setMarketPanelTab('data')
       setPanelOpen(true)
     }
@@ -600,12 +769,13 @@ export default function Home() {
     }))
   }, [sitesForMap, selectedComparisonIds])
 
-  function handleAgentAction(action: AgentAction) {
+  const handleAgentAction = useCallback((action: AgentAction) => {
     switch (action.type) {
       case 'toggle_layer': {
         if (!action.layer) break
         const key = normalizeAgentLayerKey(action.layer)
         setAgentLayerOverrides((prev) => ({ ...prev, [key]: action.value ?? true }))
+        if (action.metric) setAgentMetric(action.metric)
         break
       }
       case 'toggle_layers': {
@@ -618,6 +788,7 @@ export default function Home() {
         } else {
           setAgentLayerOverrides((prev) => ({ ...prev, ...normalizeAgentLayersRecord(patch) }))
         }
+        if (action.metric) setAgentMetric(action.metric)
         break
       }
       case 'set_metric':
@@ -668,7 +839,7 @@ export default function Home() {
         }
         break
     }
-  }
+  }, [])
 
   const handleSlashSave = useCallback(
     async (customLabel: string | null) => {
@@ -682,20 +853,7 @@ export default function Home() {
         }
         const zipCode = result.zip
         const geo = result.geo
-        let momentum: number | null = null
-        try {
-          const res = await fetch('/api/momentum', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ zips: [zipCode] }),
-          })
-          if (res.ok) {
-            const j = (await res.json()) as { scores?: { zip: string; score: number }[] }
-            momentum = j.scores?.find((x) => x.zip === zipCode)?.score ?? null
-          }
-        } catch {
-          /* non-fatal */
-        }
+        const momentum = await loadMomentumScore([zipCode], zipCode)
         const human = labelArg ?? defaultHumanSiteLabel(result)
         const ok = await addSite({
           label: human,
@@ -727,23 +885,7 @@ export default function Home() {
         if (!pin) {
           return { ok: false, message: 'Could not place a pin for this area (no coordinates).' }
         }
-        let momentum: number | null = null
-        try {
-          const zipsList = cityZips.map((z) => z.zip).filter((z) => /^\d{5}$/.test(z))
-          if (zipsList.length) {
-            const res = await fetch('/api/momentum', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ zips: zipsList.slice(0, 40) }),
-            })
-            if (res.ok) {
-              const j = (await res.json()) as { scores?: { zip: string; score: number }[] }
-              momentum = j.scores?.find((x) => x.zip === pin.zip)?.score ?? null
-            }
-          }
-        } catch {
-          /* optional */
-        }
+        const momentum = await loadMomentumScore(cityZips.map((z) => z.zip), pin.zip)
         const human = labelArg ?? (aggregateData.label.trim() || q)
         const ok = await addSite({
           label: human,
@@ -780,72 +922,111 @@ export default function Home() {
 
       return {
         ok: false,
-        message: 'Nothing to save — load a ZIP or city search, or wait for the map to finish loading.',
+        message: 'Nothing to save — load a ZIP, county, metro, or city search, or wait for the map to finish loading.',
       }
     },
     [result, aggregateData, cityZips, searchInput, cycleData]
   )
 
-  const mapContext = {
-    label: result ? (result.zillow?.city ?? result.zip) : aggregateData?.label,
-    zip: result?.zip ?? null,
-    hasRankedSites: analysisSites.length > 0,
-    rankedSiteCount: analysisSites.length,
-    clientCsv: clientUploadAgg
-      ? {
-          fileName: clientUploadAgg.fileNameLabel,
-          fileCount: clientUploadAgg.sourceCount,
-          fileNames: clientUploadAgg.fileNames,
-          bucket: clientUploadAgg.triage.bucket,
-          visual_bucket: clientUploadAgg.triage.visual_bucket,
-          metric_name: clientUploadAgg.triage.metric_name,
-          reasoning: clientUploadAgg.reasoning,
-          rowsIngested: clientUploadAgg.rowsIngested,
-          mapPinCount: clientUploadAgg.markerCount,
-          mapEligible: clientUploadAgg.mapEligible,
-          ingestedAt: clientUploadAgg.ingestedAt,
-        }
-      : null,
-    layers: denormalizeAgentLayersForContext(agentLayerOverrides),
-    activeMetric: agentMetric ?? 'zori',
-    zori: result?.zillow?.zori_latest ?? aggregateData?.zillow.avg_zori,
-    zhvi: result?.zillow?.zhvi_latest ?? aggregateData?.zillow.avg_zhvi,
-    zoriGrowth: result?.zillow?.zori_growth_12m ?? aggregateData?.zillow.zori_growth_12m,
-    zhviGrowth: result?.zillow?.zhvi_growth_12m ?? aggregateData?.zillow.zhvi_growth_12m,
-    vacancyRate: result?.data.find((r) => r.metric_name === 'Vacancy_Rate')?.metric_value ?? aggregateData?.housing.vacancy_rate,
-    dozPending: result?.metro_velocity?.doz_pending_latest ?? aggregateData?.metro_velocity?.doz_pending_latest,
-    priceCuts: result?.metro_velocity?.price_cut_pct_latest ?? aggregateData?.metro_velocity?.price_cut_pct_latest,
-    inventory: result?.metro_velocity?.inventory_latest ?? aggregateData?.metro_velocity?.inventory_latest,
-    transitStops: transit?.stop_count,
-    population: result?.data.find((r) => r.metric_name === 'Total_Population')?.metric_value ?? aggregateData?.total_population,
-  }
-
-  async function fetchAggregate(zips: string[], label: string) {
-    try {
-      const res = await fetch('/api/aggregate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ zips, label }),
-      })
-      const data = await res.json()
-      if (!data.error) {
-        setAggregateData(data)
-        const anchor = zips.find((z) => /^\d{5}$/.test(z))
-        if (anchor) {
-          void fetch(`/api/cycle?zip=${encodeURIComponent(anchor)}&label=${encodeURIComponent(label)}`)
-            .then((r) => r.json())
-            .then((j: unknown) => {
-              const rec = j as { error?: string }
-              if (rec.error) setCycleData(null)
-              else setCycleData(parseCycleAnalysisField(j))
-            })
-            .catch(() => setCycleData(null))
-        } else {
-          setCycleData(null)
-        }
+  const mapContext = useMemo(
+    () => {
+      const label = result ? (result.zillow?.city ?? result.zip) : aggregateData?.label
+      const zori = result?.zillow?.zori_latest ?? aggregateData?.zillow.avg_zori
+      const zhvi = result?.zillow?.zhvi_latest ?? aggregateData?.zillow.avg_zhvi
+      const zoriGrowth = result?.zillow?.zori_growth_12m ?? aggregateData?.zillow.zori_growth_12m
+      const zhviGrowth = result?.zillow?.zhvi_growth_12m ?? aggregateData?.zillow.zhvi_growth_12m
+      const vacancyRate =
+        result?.data.find((r) => r.metric_name === 'Vacancy_Rate')?.metric_value ??
+        aggregateData?.housing.vacancy_rate
+      const dozPending =
+        result?.metro_velocity?.doz_pending_latest ??
+        aggregateData?.metro_velocity?.doz_pending_latest
+      const priceCuts =
+        result?.metro_velocity?.price_cut_pct_latest ??
+        aggregateData?.metro_velocity?.price_cut_pct_latest
+      const inventory =
+        result?.metro_velocity?.inventory_latest ??
+        aggregateData?.metro_velocity?.inventory_latest
+      const population =
+        result?.data.find((r) => r.metric_name === 'Total_Population')?.metric_value ??
+        aggregateData?.total_population
+      const uploadedDatasets = clientUploadAgg?.sources.map((source) => buildUploadedDatasetEdaProfile(source)) ?? []
+      const contextLayers = {
+        zipBoundary: mapLayersSnapshot.zipBoundary,
+        transitStops: mapLayersSnapshot.transitStops,
+        rentChoropleth: mapLayersSnapshot.rentChoropleth,
+        blockGroups: mapLayersSnapshot.blockGroups,
+        parcels: mapLayersSnapshot.parcels,
+        tracts: mapLayersSnapshot.tracts,
+        amenityHeatmap: mapLayersSnapshot.amenityHeatmap,
+        floodRisk: mapLayersSnapshot.floodRisk,
+        permits: mapLayersSnapshot.nycPermits,
+        clientData: mapLayersSnapshot.clientData,
       }
-    } catch { /* non-critical */ }
-  }
+      const activeLayerKeys = Object.entries(contextLayers)
+        .filter(([, enabled]) => enabled)
+        .map(([key]) => key)
+      const market = buildMarketSnapshotEdaProfile({
+        label,
+        zori,
+        zoriGrowth,
+        zhvi,
+        zhviGrowth,
+        vacancyRate,
+        dozPending,
+        priceCuts,
+        inventory,
+        transitStops: transit?.stop_count,
+        population,
+      })
+
+      return {
+        label,
+        zip: result?.zip ?? null,
+        hasRankedSites: analysisSites.length > 0,
+        rankedSiteCount: analysisSites.length,
+        clientCsv: clientUploadAgg
+          ? {
+              fileName: clientUploadAgg.fileNameLabel,
+              fileCount: clientUploadAgg.sourceCount,
+              fileNames: clientUploadAgg.fileNames,
+              bucket: clientUploadAgg.triage.bucket,
+              visual_bucket: clientUploadAgg.triage.visual_bucket,
+              metric_name: clientUploadAgg.triage.metric_name,
+              reasoning: clientUploadAgg.reasoning,
+              rowsIngested: clientUploadAgg.rowsIngested,
+              mapPinCount: clientUploadAgg.markerCount,
+              mapEligible: clientUploadAgg.mapEligible,
+              ingestedAt: clientUploadAgg.ingestedAt,
+              datasets: uploadedDatasets,
+              notes: clientUploadAgg.sources
+                .filter((source) => (source.rawTable?.truncated ?? false))
+                .map((source) => `${source.fileName ?? 'Imported dataset'} raw-table preview is truncated in the current workspace.`),
+            }
+          : null,
+        eda: buildWorkspaceEdaContext({
+          market,
+          uploadedDatasets,
+          geographyLabel: label ?? null,
+          activeMetric: mapLayersSnapshot.choroplethMetric,
+          activeLayerKeys,
+        }),
+        layers: contextLayers,
+        activeMetric: mapLayersSnapshot.choroplethMetric,
+        zori,
+        zhvi,
+        zoriGrowth,
+        zhviGrowth,
+        vacancyRate,
+        dozPending,
+        priceCuts,
+        inventory,
+        transitStops: transit?.stop_count,
+        population,
+      }
+    },
+    [result, aggregateData, analysisSites.length, clientUploadAgg, mapLayersSnapshot, transit]
+  )
 
   /** Normalize `/api/trends` JSON into panel + PDF state (always sets `trends` so analysts see errors). */
   const applyTrendsApiBody = useCallback((body: Record<string, unknown> | null, httpOk: boolean) => {
@@ -887,6 +1068,61 @@ export default function Home() {
     })
   }, [])
 
+  const loadAggregateSurface = useCallback(
+    async ({
+      zips,
+      label,
+      areaKey,
+      trendsArgs,
+      transitZip,
+    }: {
+      zips: CityZip[]
+      label: string
+      areaKey?: string | null
+      trendsArgs: { cityForKeyword: string; state: string }
+      transitZip?: string | null
+    }) => {
+      const zipList = zips.map((z) => z.zip)
+      const anchorZip = zipList.find((candidate) => /^\d{5}$/.test(candidate)) ?? null
+
+      try {
+        const [aggregate, cycleJson, transitData, trendsData] = await Promise.all([
+          loadAggregateData(zipList, label, areaKey ?? null).catch(() => null),
+          anchorZip ? loadCycleData(anchorZip, label).catch(() => null) : Promise.resolve(null),
+          transitZip ? loadTransitData(transitZip).catch(() => null) : Promise.resolve(null),
+          loadAreaTrendsData(zips, trendsArgs).catch(() => null),
+        ])
+
+        if (aggregate && !aggregate.error) {
+          setAggregateData(aggregate)
+        }
+
+        const parsedCycle =
+          cycleJson && !(hasErrorField(cycleJson) && cycleJson.error)
+            ? parseCycleAnalysisField(cycleJson)
+            : null
+        setCycleData(parsedCycle)
+
+        if (transitZip) {
+          if (transitData && !(hasErrorField(transitData) && transitData.error)) {
+            setTransit({ ...transitData, zip: transitZip })
+          } else {
+            setTransit(null)
+          }
+        } else {
+          setTransit(null)
+        }
+
+        applyTrendsApiBody(trendsData, Boolean(trendsData))
+      } catch {
+        setCycleData(null)
+        setTransit(null)
+        applyTrendsApiBody(null, false)
+      }
+    },
+    [applyTrendsApiBody]
+  )
+
   const loadZipMarket = useCallback(
     async (zipInput: string) => {
       setSelectedSite(null)
@@ -898,25 +1134,21 @@ export default function Home() {
       setTrends(null)
       setCycleData(null)
       try {
-        const [marketRes, transitRes, trendsRes, cycleRes] = await Promise.all([
-          fetch(`/api/market?zip=${zipInput}`),
-          fetch(`/api/transit?zip=${zipInput}`),
-          fetch(`/api/trends?zip=${zipInput}`),
-          fetch(`/api/cycle?zip=${encodeURIComponent(zipInput)}`),
+        const [data, transitData, trendsData, cycleJson] = await Promise.all([
+          loadMarketData(zipInput),
+          loadTransitData(zipInput).catch(() => null),
+          loadTrendsData(`/api/trends?zip=${encodeURIComponent(zipInput)}`).catch(() => null),
+          loadCycleData(zipInput).catch(() => null),
         ])
-        const data = await marketRes.json()
-        const transitData = await transitRes.json()
-        const trendsData = (await trendsRes.json()) as Record<string, unknown>
-        const cycleJson = await cycleRes.json()
         if (data.error) {
           setError(data.error)
           return
         }
         setResult(data)
-        if (!transitData.error) setTransit(transitData)
-        applyTrendsApiBody(trendsData, trendsRes.ok)
+        if (transitData && !(hasErrorField(transitData) && transitData.error)) setTransit(transitData)
+        applyTrendsApiBody(trendsData, Boolean(trendsData))
         const parsedCycle =
-          cycleRes.ok && !('error' in cycleJson && cycleJson.error) ? parseCycleAnalysisField(cycleJson) : null
+          cycleJson && !(hasErrorField(cycleJson) && cycleJson.error) ? parseCycleAnalysisField(cycleJson) : null
         setCycleData(parsedCycle)
         setPanelOpen(true)
       } catch {
@@ -927,31 +1159,6 @@ export default function Home() {
     },
     [applyTrendsApiBody]
   )
-
-  async function fetchTrendsForMultiZipArea(
-    cityZips: CityZip[],
-    args: { cityForKeyword: string; state: string }
-  ) {
-    const first = cityZips[0]
-    if (!first?.zip) {
-      setTrends(null)
-      return
-    }
-    const st = args.state.trim().toUpperCase()
-    let url: string
-    if (st.length === 2) {
-      url = `/api/trends?city=${encodeURIComponent(args.cityForKeyword.trim())}&state=${encodeURIComponent(st)}&anchor_zip=${encodeURIComponent(first.zip)}`
-    } else {
-      url = `/api/trends?zip=${encodeURIComponent(first.zip)}`
-    }
-    try {
-      const trendsRes = await fetch(url)
-      const trendsData = (await trendsRes.json()) as Record<string, unknown>
-      applyTrendsApiBody(trendsData, trendsRes.ok)
-    } catch {
-      applyTrendsApiBody(null, false)
-    }
-  }
 
   async function runAggregateSearch(input: string) {
     const trimmed = input.trim()
@@ -968,10 +1175,9 @@ export default function Home() {
     setTransit(null)
     try {
       const lowerInput = trimmed.toLowerCase().replace(/,.*$/, '').trim()
-      if (NYC_BOROUGHS.has(lowerInput)) {
+      if (isNycBoroughName(lowerInput)) {
         try {
-          const res = await fetch(`/api/borough?name=${encodeURIComponent(lowerInput)}`)
-          const data = await res.json()
+          const data = await loadBoroughSearchData(lowerInput)
           if (data.error || !data.zips?.length) {
             setError(`No data found for "${trimmed}"`)
             return
@@ -981,21 +1187,17 @@ export default function Home() {
           setResult(null)
           setTrends(null)
           setPanelOpen(true)
-          fetchAggregate(data.zips.map((z: CityZip) => z.zip), data.borough)
-          void fetchTrendsForMultiZipArea(data.zips, {
-            cityForKeyword: data.borough,
-            state: typeof data.state === 'string' ? data.state : 'NY',
+          const boroughLabel = typeof data.borough === 'string' && data.borough ? data.borough : trimmed
+          const centroidZip = data.zips.find((z: CityZip) => z.lat && z.lng)?.zip ?? null
+          void loadAggregateSurface({
+            zips: data.zips,
+            label: boroughLabel,
+            trendsArgs: {
+              cityForKeyword: boroughLabel,
+              state: typeof data.state === 'string' ? data.state : 'NY',
+            },
+            transitZip: centroidZip,
           })
-          // Fetch transit for the centroid ZIP
-          const centroidZip = data.zips.find((z: CityZip) => z.lat && z.lng)?.zip
-          if (centroidZip) {
-            fetch(`/api/transit?zip=${centroidZip}`)
-              .then((r) => r.json())
-              .then((d) => { if (!d.error) setTransit({ ...d, zip: centroidZip }) })
-              .catch(() => {})
-          } else {
-            setTransit(null)
-          }
         } catch {
           setError('Failed to fetch borough data')
         }
@@ -1008,16 +1210,102 @@ export default function Home() {
           setError(`Could not parse state "${stateRaw}". Try a full name (e.g. New Jersey) or USPS code (NJ).`)
           return
         }
+        if (looksLikeCountyQuery(cityName)) {
+          try {
+            const data = await loadCountySearchData(cityName, stateForApi)
+            if (data.error || !data.zips?.length) {
+              setError(typeof data.error === 'string' && data.error ? data.error : `No data found for "${trimmed}"`)
+              return
+            }
+            setCityZips(data.zips)
+            setBoroughBoundary(null)
+            setResult(null)
+            setTrends(null)
+            setPanelOpen(true)
+            const centroidZipCounty = data.zips.find((z: CityZip) => z.lat && z.lng)?.zip ?? null
+            void loadAggregateSurface({
+              zips: data.zips,
+              label: typeof data.label === 'string' && data.label ? data.label : trimmed,
+              areaKey: typeof data.area_key === 'string' ? data.area_key : null,
+              trendsArgs: {
+                cityForKeyword: typeof data.county === 'string' ? data.county : cityName,
+                state: (stateForApi || data.state || data.zips[0]?.state || '')
+                  .toString()
+                  .trim()
+                  .toUpperCase()
+                  .slice(0, 2),
+              },
+              transitZip: centroidZipCounty,
+            })
+            return
+          } catch {
+            setError('Failed to fetch county data')
+            return
+          }
+        }
         try {
-          const url = `/api/city?city=${encodeURIComponent(cityName)}${stateForApi ? `&state=${encodeURIComponent(stateForApi)}` : ''}`
-          const res = await fetch(url)
-          const data = await res.json()
+          const tryMetroFirst = looksLikeMetroQuery(cityName)
+          const cityPromise = tryMetroFirst ? null : loadCitySearchData(cityName, stateForApi)
+          const metroPromise = tryMetroFirst ? loadMetroSearchData(cityName, stateForApi) : null
+
+          const metroData = metroPromise ? await metroPromise : null
+          if (metroData && !metroData.error && metroData.zips?.length) {
+            setCityZips(metroData.zips)
+            setBoroughBoundary(null)
+            setResult(null)
+            setTrends(null)
+            setPanelOpen(true)
+            const centroidZipMetro = metroData.zips.find((z: CityZip) => z.lat && z.lng)?.zip ?? null
+            void loadAggregateSurface({
+              zips: metroData.zips,
+              label: typeof metroData.label === 'string' && metroData.label ? metroData.label : cityName,
+              areaKey: typeof metroData.area_key === 'string' ? metroData.area_key : null,
+              trendsArgs: {
+                cityForKeyword: typeof metroData.metro_name === 'string' ? metroData.metro_name : cityName,
+                state: (stateForApi || metroData.state || metroData.zips[0]?.state || '')
+                  .toString()
+                  .trim()
+                  .toUpperCase()
+                  .slice(0, 2),
+              },
+              transitZip: centroidZipMetro,
+            })
+            return
+          }
+
+          const data = cityPromise ? await cityPromise : await loadCitySearchData(cityName, stateForApi)
           if (data.error || !data.zips?.length) {
-            setError(
-              typeof data.error === 'string' && data.error
-                ? data.error
-                : `No data found for "${trimmed}". Try "City, State" or "City, ST" (e.g. Newark, New Jersey).`
-            )
+            const metroData = await loadMetroSearchData(cityName, stateForApi)
+            if (metroData.error || !metroData.zips?.length) {
+              setError(
+                typeof metroData.error === 'string' && metroData.error
+                  ? metroData.error
+                  : typeof data.error === 'string' && data.error
+                    ? data.error
+                    : `No data found for "${trimmed}". Try "77002", "Harris County, TX", "Dallas-Fort Worth, TX", or "Houston, TX".`
+              )
+              return
+            }
+            setCityZips(metroData.zips)
+            setBoroughBoundary(null)
+            setResult(null)
+            setTrends(null)
+            setPanelOpen(true)
+            const centroidZipMetro = metroData.zips.find((z: CityZip) => z.lat && z.lng)?.zip ?? null
+            void loadAggregateSurface({
+              zips: metroData.zips,
+              label: typeof metroData.label === 'string' && metroData.label ? metroData.label : cityName,
+              areaKey: typeof metroData.area_key === 'string' ? metroData.area_key : null,
+              trendsArgs: {
+                cityForKeyword: typeof metroData.metro_name === 'string' ? metroData.metro_name : cityName,
+                state: (stateForApi || metroData.state || metroData.zips[0]?.state || '')
+                  .toString()
+                  .trim()
+                  .toUpperCase()
+                  .slice(0, 2),
+              },
+              transitZip: centroidZipMetro,
+            })
             return
           }
           setCityZips(data.zips)
@@ -1033,20 +1321,16 @@ export default function Home() {
               .slice(0, 2) || ''
           const aggregateLabel =
             stateRaw ? `${cityName}, ${stateRaw}` : stateForApi ? `${cityName}, ${stateForApi}` : cityName
-          fetchAggregate(data.zips.map((z: CityZip) => z.zip), aggregateLabel)
-          void fetchTrendsForMultiZipArea(data.zips, { cityForKeyword: cityName, state: st })
-          // Fetch transit for the centroid ZIP
-          const centroidZipCity = data.zips.find((z: CityZip) => z.lat && z.lng)?.zip
-          if (centroidZipCity) {
-            fetch(`/api/transit?zip=${centroidZipCity}`)
-              .then((r) => r.json())
-              .then((d) => { if (!d.error) setTransit({ ...d, zip: centroidZipCity }) })
-              .catch(() => {})
-          } else {
-            setTransit(null)
-          }
+          const centroidZipCity = data.zips.find((z: CityZip) => z.lat && z.lng)?.zip ?? null
+          void loadAggregateSurface({
+            zips: data.zips,
+            label: aggregateLabel,
+            areaKey: typeof data.area_key === 'string' ? data.area_key : null,
+            trendsArgs: { cityForKeyword: cityName, state: st },
+            transitZip: centroidZipCity,
+          })
         } catch {
-          setError('Failed to fetch city data')
+          setError('Failed to fetch market data')
         }
       }
     } finally {
@@ -1102,7 +1386,7 @@ export default function Home() {
 
   const hasStatsBar = !!(result || aggregateData)
   const intelligenceContextSubtitle = useMemo(() => {
-    if (aggregateData) return `${aggregateData.label} · ${aggregateData.zip_count} ZIPs`
+    if (aggregateData) return `${aggregateData.label} · ${formatAggregateScopeLabel(aggregateData)}`
     if (result && cityZips && cityZips.length > 1) {
       const place = cityZips[0]?.city ?? result.zillow?.city ?? result.zip
       return `${place} · ${cityZips.length} ZIPs`
@@ -1110,6 +1394,11 @@ export default function Home() {
     if (result) return `${result.zillow?.city ?? result.zip} · ${result.zip}`
     return 'No market loaded'
   }, [aggregateData, result, cityZips])
+  const supplementalAreaMetrics = useMemo(
+    () =>
+      aggregateData?.area_metrics?.filter((row) => !CORE_AGGREGATE_AREA_METRICS.has(row.metric_name)) ?? [],
+    [aggregateData]
+  )
 
   const statsBubbleBottomClass = useMemo(() => {
     if (!hasStatsBar) return 'bottom-5'
@@ -1126,7 +1415,7 @@ export default function Home() {
   const effectiveMapTilt = agentTilt != null ? agentTilt : map3DEnabled ? 45 : 0
   const map3DActive = effectiveMapTilt > 0
 
-  function handleMap3DToggle() {
+  const handleMap3DToggle = useCallback(() => {
     if (map3DActive) {
       setMap3DEnabled(false)
       setAgentTilt(null)
@@ -1134,11 +1423,19 @@ export default function Home() {
       setMap3DEnabled(true)
       setAgentTilt(null)
     }
-  }
+  }, [map3DActive])
+
+  const handleClearAgentOverride = useCallback((key: string) => {
+    setAgentLayerOverrides((prev) => {
+      const next = { ...prev }
+      delete next[key]
+      return next
+    })
+  }, [])
 
   const rightPanelVisible =
     panelOpen &&
-    (result != null || aggregateData != null || selectedSite != null || agentSidebarTrace != null)
+    (result != null || aggregateData != null || selectedSite != null || agentSidebarTrace != null || clientUploadAgg != null)
 
   const sidebarActiveMarket =
     result != null
@@ -1150,8 +1447,8 @@ export default function Home() {
       : cityZips != null && cityZips.length > 0
         ? {
             kind: 'aggregate' as const,
-            title: cityZips[0]?.city ?? '',
-            subtitle: `${cityZips.length} ZIPs · ${cityZips[0]?.state ?? '-'}`,
+            title: aggregateData?.label ?? cityZips[0]?.city ?? '',
+            subtitle: aggregateData ? formatAggregateScopeLabel(aggregateData) : `${cityZips.length} ZIPs · ${cityZips[0]?.state ?? '-'}`,
           }
         : null
 
@@ -1183,6 +1480,7 @@ export default function Home() {
         <CommandMap
           zip={result?.zip ?? null}
           marketData={result}
+          aggregateData={aggregateData}
           transitData={transit}
           cityZips={cityZips}
           boroughBoundary={boroughBoundary}
@@ -1196,15 +1494,12 @@ export default function Home() {
           mapHeading={mapHeading}
           agentFlyTo={agentFlyTo}
           onLayersChange={handleMapLayersChange}
-          onClearAgentOverride={(key) => setAgentLayerOverrides((prev) => {
-            const next = { ...prev }
-            delete next[key]
-            return next
-          })}
+          onClearAgentOverride={handleClearAgentOverride}
           layerStateResync={layerStateResync}
           map3DActive={map3DActive}
           onToggleMap3D={handleMap3DToggle}
           mapViewportRef={mapViewportRef}
+          onUploadedMarkerSelect={handleUploadedMarkerSelect}
         />
         </div>
 
@@ -1343,7 +1638,8 @@ export default function Home() {
           agentSidebarTrace != null &&
           !selectedSite &&
           !result &&
-          !aggregateData && (
+          !aggregateData &&
+          !clientUploadAgg && (
             <div className="flex min-h-0 min-w-[360px] flex-1 flex-col overflow-hidden">
               <AgentThinkingPanel
                 trace={agentSidebarTrace}
@@ -1357,6 +1653,38 @@ export default function Home() {
             </div>
           )}
 
+        {panelOpen && !selectedSite && !result && !aggregateData && clientUploadAgg && (
+          <div className="flex min-h-0 min-w-[360px] flex-1 flex-col overflow-hidden">
+            <div className="shrink-0 border-b border-border/50 p-4 pb-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <h2 className="text-base font-bold leading-tight text-foreground">Imported Data</h2>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {clientUploadAgg.fileNameLabel ?? 'Last imported dataset'}
+                  </p>
+                </div>
+                <div className="flex flex-shrink-0 items-center gap-1.5">
+                  <button type="button" onClick={() => setPanelOpen(false)} className="text-xl leading-none text-muted-foreground hover:text-foreground">×</button>
+                </div>
+              </div>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+              <PanelSection title="Imported datasets">
+                <ImportedDataPanel
+                  session={clientUploadSession}
+                  selectedMarker={selectedUploadedMarker}
+                  onClearSelectedMarker={() => setSelectedUploadedMarker(null)}
+                  currentZip={cityZips?.find((candidate) => /^\d{5}$/.test(candidate.zip))?.zip ?? null}
+                  onMarkersResolved={focusImportedMarkers}
+                />
+              </PanelSection>
+              <PanelSection title="Agentic Normalizer">
+                <AgenticNormalizer onIngested={handleNormalizerIngested} />
+              </PanelSection>
+            </div>
+          </div>
+        )}
+
         {panelOpen && selectedSite != null && (
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <SiteDetailRightPanel site={selectedSite} onBack={() => setSelectedSite(null)} />
@@ -1369,7 +1697,7 @@ export default function Home() {
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <h2 className="text-base font-bold leading-tight text-foreground">{aggregateData.label}</h2>
-                  <p className="mt-0.5 text-xs text-muted-foreground">{aggregateData.zip_count} ZIP codes · aggregated</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{formatAggregateScopeLabel(aggregateData)}</p>
                 </div>
                 <div className="flex flex-shrink-0 items-center gap-1.5">
                   <button type="button" onClick={() => setPanelOpen(false)} className="text-xl leading-none text-muted-foreground hover:text-foreground">×</button>
@@ -1386,7 +1714,7 @@ export default function Home() {
                       marketPanelTab === t ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'
                     )}
                   >
-                    {t === 'analysis' ? 'Analysis' : t === 'data' ? 'Data' : 'Thinking'}
+                    {t === 'analysis' ? 'Analysis' : t === 'data' ? 'Data' : 'Notes'}
                   </button>
                 ))}
               </div>
@@ -1447,6 +1775,20 @@ export default function Home() {
                 <MetricRow metricKey="migration" label="Migration movers (diff. state)" value={fmtNum(aggregateData.housing.migration_movers)} />
               )}
             </PanelSection>
+
+            {supplementalAreaMetrics.length > 0 && (
+              <PanelSection title="Area Source Metrics">
+                {supplementalAreaMetrics.map((row) => (
+                  <MetricRow
+                    key={`${row.metric_name}:${row.data_source}:${row.time_period ?? ''}`}
+                    metricKey={metricKeyFromDataRow(row.metric_name) ?? undefined}
+                    label={row.metric_name.replace(/_/g, ' ')}
+                    value={formatMetricValue(row.metric_name, row.metric_value)}
+                    sub={[row.data_source, row.time_period?.slice(0, 7)].filter(Boolean).join(' · ')}
+                  />
+                ))}
+              </PanelSection>
+            )}
 
             {aggregateData.permits.total_units != null && aggregateData.permits.total_units > 0 && (
               <PanelSection title="Building Permits (2021–2023)">
@@ -1563,7 +1905,7 @@ export default function Home() {
                       marketPanelTab === t ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'
                     )}
                   >
-                    {t === 'analysis' ? 'Analysis' : t === 'data' ? 'Data' : 'Thinking'}
+                    {t === 'analysis' ? 'Analysis' : t === 'data' ? 'Data' : 'Notes'}
                   </button>
                 ))}
               </div>
@@ -1760,53 +2102,14 @@ export default function Home() {
             </details>
 
             {clientUploadAgg && (
-              <PanelSection title="Client CSV (last upload)">
-                <p className="mb-2 text-[10px] leading-relaxed text-muted-foreground">
-                  {clientUploadAgg.fileNameLabel && (
-                    <span className="font-mono text-foreground/90">{clientUploadAgg.fileNameLabel}</span>
-                  )}{' '}
-                  {clientUploadAgg.sourceCount > 1 ? (
-                    <span className="text-zinc-500">({clientUploadAgg.sourceCount} files)</span>
-                  ) : null}{' '}
-                  · {clientUploadAgg.triage.bucket} / {clientUploadAgg.triage.visual_bucket} ·{' '}
-                  {clientUploadAgg.rowsIngested} rows
-                  {clientUploadAgg.mapPinsActive ? (
-                    <span className="text-primary"> · {clientUploadAgg.markerCount} map pin(s)</span>
-                  ) : null}
-                </p>
-                <p className="mb-2 text-[10px] italic text-zinc-500">&quot;{clientUploadAgg.reasoning}&quot;</p>
-                <div className="max-h-40 overflow-auto rounded border border-border/50 text-[10px]">
-                  <table className="w-full border-collapse">
-                    <thead>
-                      <tr className="border-b border-border/60 bg-muted/30 text-left text-[9px] uppercase text-muted-foreground">
-                        <th className="p-1.5">Geo</th>
-                        <th className="p-1.5">Metric</th>
-                        <th className="p-1.5">Value</th>
-                        <th className="p-1.5">Period</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {clientUploadAgg.previewRows.map((r, i) => (
-                        <tr key={i} className="border-b border-border/40">
-                          <td className="p-1.5 font-mono text-foreground/90">{r.submarket_id ?? '—'}</td>
-                          <td className="p-1.5 text-muted-foreground">{r.metric_name}</td>
-                          <td className="p-1.5">{r.metric_value != null ? r.metric_value.toLocaleString() : '—'}</td>
-                          <td className="p-1.5 text-zinc-500">{r.time_period ?? '—'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                {!clientUploadAgg.mapPinsActive && (
-                  <p className="mt-2 text-[10px] text-muted-foreground">
-                    Not on map — you are viewing it here in this <span className="text-foreground">preview table</span>{' '}
-                    (first rows returned from normalize). Full series is in Supabase{' '}
-                    <span className="text-foreground">projectr_master_data</span> under{' '}
-                    <span className="text-foreground">Client Upload</span>. Rows keyed to the loaded ZIP may also appear
-                    in <span className="text-foreground">All metrics (flat table)</span> above; borough-wide or non-ZIP
-                    keys often will not.
-                  </p>
-                )}
+              <PanelSection title="Imported Data">
+                <ImportedDataPanel
+                  session={clientUploadSession}
+                  selectedMarker={selectedUploadedMarker}
+                  onClearSelectedMarker={() => setSelectedUploadedMarker(null)}
+                  currentZip={result?.zip}
+                  onMarkersResolved={focusImportedMarkers}
+                />
               </PanelSection>
             )}
 

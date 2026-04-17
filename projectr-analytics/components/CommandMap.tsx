@@ -12,6 +12,9 @@ import { Layers } from 'lucide-react'
 import { dedupedFetchJson } from '@/lib/request-cache'
 import type { Site } from '@/lib/sites-store'
 import type { AnalysisSite } from '@/lib/agent-types'
+import type { ClientUploadMarker } from '@/lib/client-upload-markers-store'
+import { detectNycBoroughFromZips, isNycZip } from '@/lib/geography'
+import { fetchMomentumScores, normalizeMomentumZipList } from '@/lib/momentum-client'
 import { cn } from '@/lib/utils'
 
 function shortlistPinColor(stage: string | undefined): [number, number, number, number] {
@@ -26,6 +29,11 @@ interface MarketData {
   zip: string
   geo?: { lat: number; lng: number; city: string; state: string; stateFips?: string; countyFips?: string }
   zillow: { zori_latest: number | null; zhvi_latest: number | null } | null
+}
+
+interface AggregateMapData {
+  label: string
+  area_kind?: 'county' | 'metro' | null
 }
 
 interface TransitStop {
@@ -71,22 +79,6 @@ interface ZipBoundary {
   geojson: GeoJSON
   zori: number | null
   zhvi: number | null
-}
-
-interface BlockGroupFeature {
-  type: 'Feature'
-  geometry: object
-  properties: {
-    GEOID: string
-    population: number
-    housing_units: number
-    owner_occupied: number
-  }
-}
-
-interface BlockGroupCollection {
-  type: 'FeatureCollection'
-  features: BlockGroupFeature[]
 }
 
 interface POIPoint {
@@ -139,6 +131,26 @@ export interface LayerState {
   clientData: boolean
 }
 
+interface KeyedValue<T> {
+  key: string | null
+  value: T
+}
+
+const DEFAULT_LAYER_STATE: LayerState = {
+  zipBoundary: true,
+  transitStops: true,
+  rentChoropleth: true,
+  blockGroups: false,
+  parcels: false,
+  tracts: false,
+  amenityHeatmap: false,
+  floodRisk: false,
+  nycPermits: false,
+  pois: false,
+  momentum: false,
+  clientData: true,
+}
+
 /** Pill colors - reused for collapsed layer “active” dot stack (CommandMap chrome). */
 const LAYER_DOT_INDICATORS: Array<{
   key: keyof LayerState
@@ -158,12 +170,6 @@ const LAYER_DOT_INDICATORS: Array<{
   { key: 'momentum', color: '#d946ef', label: 'Momentum' },
   { key: 'clientData', color: '#D76B3D', label: 'Client markers', needsClientMarkers: true },
 ]
-
-interface MapViewState {
-  lat: number
-  lng: number
-  zoom: number
-}
 
 interface PermitPayload {
   id: string
@@ -216,6 +222,71 @@ interface PermitResponse {
   count?: number
 }
 
+interface TexasPermitActivityPayload {
+  id: string
+  place_name: string
+  county_name: string | null
+  metro_name: string | null
+  state_name: string
+  lat: number
+  lng: number
+  latest_month: string | null
+  total_units: number
+  total_buildings: number
+  total_value: number
+  single_family_units: number
+  multi_family_units: number
+  activity_score: number
+  months_covered: number
+  centroid_source: 'zip_lookup' | 'google_geocode'
+}
+
+interface TexasPermitActivityResponse {
+  places?: TexasPermitActivityPayload[]
+  latest_month?: string | null
+  raw_row_count?: number
+  truncated?: boolean
+  unresolved_places?: number
+}
+
+type TexasRawPermitCategory = 'new_construction' | 'major_renovation' | 'demolition'
+
+interface TexasRawPermitPayload {
+  id: string
+  source_city: string
+  source_name: string
+  category: TexasRawPermitCategory
+  category_label: string
+  permit_number: string | null
+  permit_type_desc: string | null
+  permit_class_mapped: string | null
+  work_class: string | null
+  description: string | null
+  address: string | null
+  zip_code: string | null
+  issue_date: string | null
+  lat: number
+  lng: number
+  valuation: number | null
+  square_feet: number | null
+  housing_units: number | null
+  source_url: string | null
+}
+
+interface TexasRawPermitResponse {
+  city: string
+  state: string
+  source: string
+  categories: Record<TexasRawPermitCategory, number>
+  permits: TexasRawPermitPayload[]
+}
+
+const TEXAS_RAW_PERMIT_FILTER_META = [
+  { key: 'new_construction' as const, label: 'New', color: '#D76B3D' },
+  { key: 'major_renovation' as const, label: 'Major Reno', color: '#60a5fa' },
+  { key: 'demolition' as const, label: 'Demo', color: '#f87171' },
+]
+
 interface ParcelResponse {
   parcels?: ParcelPayload[]
   stats?: { p25_per_sqft: number; p75_per_sqft: number; p75_air_rights: number; max_air_rights: number; underbuilt_count: number; top_underbuilt: unknown[] }
@@ -226,31 +297,67 @@ function hasFeatures(value: unknown): value is { features: unknown[] } {
   return Array.isArray((value as { features?: unknown[] }).features)
 }
 
-// ── Dev sidebar registry ──────────────────────────────────────────────────────
+const BOROUGH_TRACT_FIPS: Record<string, { state: string; county: string }> = {
+  manhattan: { state: '36', county: '061' },
+  bronx: { state: '36', county: '005' },
+  brooklyn: { state: '36', county: '047' },
+  queens: { state: '36', county: '081' },
+  'staten island': { state: '36', county: '085' },
+}
 
-const DATA_LAYER_REGISTRY = [
-  { label: 'ZIP Boundary', source: 'Census TIGER', visualized: true, layerType: 'GeoJsonLayer (outline)' },
-  { label: 'Rent/value fill', source: 'Zillow Research', visualized: true, layerType: 'GeoJsonLayer choropleth - ZORI or ZHVI (metric toggle)' },
-  { label: 'Transit Stops', source: 'GTFS / OSM', visualized: true, layerType: 'ScatterplotLayer (cyan dots)' },
-  { label: 'Census Tracts', source: 'Census TIGER + ACS', visualized: true, layerType: 'GeoJsonLayer (rent/income choropleth)' },
-  { label: 'Amenity Heatmap', source: 'OpenStreetMap', visualized: true, layerType: 'HeatmapLayer (weighted by amenity type)' },
-  { label: 'Flood Risk Zones', source: 'FEMA NFHL', visualized: true, layerType: 'GeoJsonLayer (red = high risk)' },
-  { label: 'NYC Parcels (PLUTO)', source: 'NYC Open Data', visualized: true, layerType: 'ColumnLayer (3D columns - height = assessed value/sqft)' },
-  { label: 'Block Groups', source: 'Census TIGER + ACS', visualized: true, layerType: 'GeoJsonLayer (population density - replaced by Tracts)' },
-  { label: 'Vacancy Rate', source: 'Census ACS', visualized: false, layerType: null, note: 'Now included in Tracts layer' },
-  { label: 'PoP Momentum Score', source: 'Computed', visualized: false, layerType: null, note: 'Computed API exists; no map layer yet' },
-  { label: 'Unemployment Rate', source: 'FRED', visualized: false, layerType: null, note: 'County aggregate - sidebar chart only' },
-  { label: 'Real GDP', source: 'FRED', visualized: false, layerType: null, note: 'County aggregate - sidebar chart only' },
-  { label: 'Median Household Income', source: 'Census ACS', visualized: false, layerType: null, note: 'Now included in Tracts layer' },
-  { label: 'FMR by Bedroom', source: 'HUD / Census ACS', visualized: false, layerType: null, note: 'No spatial variation within ZIP' },
-  { label: 'Days on Market', source: 'Zillow Metro', visualized: false, layerType: null, note: 'Metro-level - stat card only' },
-  { label: 'Google Trends Score', source: 'Google Trends', visualized: false, layerType: null, note: 'City/state sentiment - sidebar sparkline only' },
-  { label: 'Permit Pin Locations', source: 'ArcGIS REST', visualized: false, layerType: null, note: 'DEFERRED - jurisdiction-specific feeds required' },
-]
+function buildPermitHeatPoints(permits: PermitPayload[]): PermitHeatPoint[] {
+  return permits.map((permit) => ({
+    position: [permit.lng, permit.lat] as [number, number],
+    weight: permit.job_type === 'NB' ? 3 : permit.job_type === 'A1' ? 2 : 1,
+  }))
+}
 
-// Reuse expensive county blockgroup responses across CommandMap remounts.
-const BLOCKGROUP_CACHE: Record<string, BlockGroupCollection> = {}
-let commandMapRenderCounter = 0
+function buildTexasPermitHeatPoints(places: TexasPermitActivityPayload[]): PermitHeatPoint[] {
+  return places.map((place) => ({
+    position: [place.lng, place.lat] as [number, number],
+    weight: Math.max(place.activity_score, 1),
+  }))
+}
+
+function buildTexasRawPermitHeatPoints(permits: TexasRawPermitPayload[]): PermitHeatPoint[] {
+  return permits.map((permit) => ({
+    position: [permit.lng, permit.lat] as [number, number],
+    weight: getTexasRawPermitWeight(permit.category),
+  }))
+}
+
+function getTexasRawPermitWeight(category: TexasRawPermitCategory): number {
+  switch (category) {
+    case 'new_construction':
+      return 3
+    case 'major_renovation':
+      return 2
+    case 'demolition':
+      return 1
+  }
+}
+
+function getTexasRawPermitFillColor(
+  category: TexasRawPermitCategory
+): [number, number, number, number] {
+  switch (category) {
+    case 'new_construction':
+      return [215, 107, 61, 240]
+    case 'major_renovation':
+      return [100, 180, 255, 225]
+    case 'demolition':
+      return [220, 80, 80, 230]
+  }
+}
+
+function formatPermitDate(value: string | null | undefined): string | null {
+  if (!value) return null
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return value.slice(0, 10)
+  }
+  return parsed.toLocaleDateString()
+}
 
 // ── Color scale: blue (low rent) → red (high rent) ───────────────────────────
 // Normalized across the set of loaded ZIPs for relative contrast
@@ -376,19 +483,19 @@ function DeckGlOverlay({ layers }: { layers: Layer[] }) {
   /** Vector Map ID: interleaved mode avoids `getViewports()[0]` being undefined during Maps’ WebGL draw. */
   const deck = useMemo(() => new GoogleMapsOverlay({ interleaved: true }), [])
   const map = useMap()
-  const [overlayReady, setOverlayReady] = useState(false)
+  const attachedMapRef = useRef<google.maps.Map | null>(null)
 
   useEffect(() => {
     if (!map) return
-    setOverlayReady(false)
     let cancelled = false
-    let attached = false
     const attach = () => {
-      if (cancelled || attached) return
+      if (cancelled || attachedMapRef.current === map) return
       try {
+        if (attachedMapRef.current && attachedMapRef.current !== map) {
+          deck.setMap(null)
+        }
         deck.setMap(map)
-        attached = true
-        setOverlayReady(true)
+        attachedMapRef.current = map
       } catch {
         /* map not ready */
       }
@@ -400,23 +507,28 @@ function DeckGlOverlay({ layers }: { layers: Layer[] }) {
       cancelled = true
       google.maps.event.removeListener(once)
       window.clearTimeout(fallback)
-      try {
-        deck.setMap(null)
-      } catch {
-        /* ignore */
-      }
-      setOverlayReady(false)
     }
   }, [map, deck])
 
   useEffect(() => {
-    if (!map || !overlayReady) return
+    if (!map) return
     try {
       deck.setProps({ layers })
     } catch {
       /* ignore */
     }
-  }, [layers, deck, map, overlayReady])
+  }, [layers, deck, map])
+
+  useEffect(() => {
+    return () => {
+      try {
+        deck.setMap(null)
+        attachedMapRef.current = null
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [deck])
 
   return null
 }
@@ -573,10 +685,11 @@ function TiltController({ tilt, heading }: { tilt: number; heading: number }) {
 interface CommandMapProps {
   zip: string | null
   marketData: MarketData | null
+  aggregateData?: AggregateMapData | null
   transitData: TransitData | null
   cityZips?: Array<{ zip: string; lat: number | null; lng: number | null; zori_latest: number | null; zhvi_latest: number | null; city: string; state: string | null }> | null
   boroughBoundary?: object | null
-  uploadedMarkers?: Array<{ lat: number; lng: number; value: number | null; label: string }> | null
+  uploadedMarkers?: ClientUploadMarker[] | null
   /** Saved analyst shortlist - always drawn while browsing other ZIPs. */
   shortlistSites?: Site[]
   /** Analysis result sites from agent spatial model - glowing pins */
@@ -601,11 +714,13 @@ interface CommandMapProps {
   onToggleMap3D: () => void
   /** When set, updated on map idle for `/save` without a loaded market. */
   mapViewportRef?: MutableRefObject<MapViewportSnapshot | null>
+  onUploadedMarkerSelect?: (marker: ClientUploadMarker | null) => void
 }
 
 function CommandMap({
   zip,
   marketData,
+  aggregateData,
   transitData,
   cityZips,
   boroughBoundary,
@@ -624,13 +739,13 @@ function CommandMap({
   map3DActive,
   onToggleMap3D,
   mapViewportRef,
+  onUploadedMarkerSelect,
 }: CommandMapProps) {
   const perfDebug = process.env.NEXT_PUBLIC_PERF_DEBUG === '1'
 
-  const [primaryBoundary, setPrimaryBoundary] = useState<GeoJSON | null>(null)
-  const [neighborBoundaries, setNeighborBoundaries] = useState<ZipBoundary[]>([])
-  const [cityBoundaries, setCityBoundaries] = useState<ZipBoundary[]>([])
-  const [blockGroupData, setBlockGroupData] = useState<BlockGroupCollection | null>(null)
+  const [primaryBoundaryState, setPrimaryBoundaryState] = useState<KeyedValue<GeoJSON | null>>({ key: null, value: null })
+  const [neighborBoundariesState, setNeighborBoundariesState] = useState<KeyedValue<ZipBoundary[]>>({ key: null, value: [] })
+  const [cityBoundariesState, setCityBoundariesState] = useState<KeyedValue<ZipBoundary[]>>({ key: null, value: [] })
   const [parcelData, setParcelData] = useState<{ parcels: ParcelPayload[]; stats: { p25_per_sqft: number; p75_per_sqft: number; p75_air_rights: number; max_air_rights: number; underbuilt_count: number; top_underbuilt: unknown[] } } | null>(null)
   const [tractData, setTractData] = useState<TractCollection | null>(null)
   const [amenityPoints, setAmenityPoints] = useState<AmenityPoint[]>([])
@@ -638,9 +753,14 @@ function CommandMap({
   const [momentumScores, setMomentumScores] = useState<Record<string, number>>({})
   const [floodData, setFloodData] = useState<FloodCollection | null>(null)
   const [nycPermitData, setNycPermitData] = useState<PermitPayload[]>([])
+  const [texasRawPermitData, setTexasRawPermitData] = useState<TexasRawPermitPayload[]>([])
+  const [texasPermitActivity, setTexasPermitActivity] = useState<TexasPermitActivityPayload[]>([])
   const [permitHeatPoints, setPermitHeatPoints] = useState<PermitHeatPoint[]>([])
   // Multi-select type filter - Set of active types, empty = all
   const [permitTypeFilter, setPermitTypeFilter] = useState<Set<string>>(new Set())
+  const [texasRawPermitCategoryFilter, setTexasRawPermitCategoryFilter] = useState<
+    Set<TexasRawPermitCategory>
+  >(new Set())
   const [mapZoom, setMapZoom] = useState(11)
   const handleZoomChange = useCallback((zoom: number) => { setMapZoom(zoom) }, [])
   const fitClientMarkersOnly =
@@ -648,32 +768,105 @@ function CommandMap({
     !(cityZips && cityZips.length > 0) &&
     (uploadedMarkers?.length ?? 0) > 0
   const [selectedPermit, setSelectedPermit] = useState<PermitPayload | null>(null)
-  const [layers, setLayers] = useState<LayerState>({
-    zipBoundary: true,
-    transitStops: true,
-    rentChoropleth: true,
-    blockGroups: false,
-    parcels: false,
-    tracts: false,
-    amenityHeatmap: false,
-    floodRisk: false,
-    nycPermits: false,
-    pois: false,
-    momentum: false,
-    clientData: true,
-  })
+  const [selectedTexasRawPermit, setSelectedTexasRawPermit] = useState<TexasRawPermitPayload | null>(null)
+  const [selectedTexasPermit, setSelectedTexasPermit] = useState<TexasPermitActivityPayload | null>(null)
+  const [layerStateSnapshot, setLayerStateSnapshot] = useState<KeyedValue<LayerState>>({ key: '0', value: DEFAULT_LAYER_STATE })
   const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null)
   const [activeMetric, setActiveMetric] = useState<'zori' | 'zhvi'>('zori')
   const [parcelColorMode, setParcelColorMode] = useState<'landuse' | 'airRights'>('landuse')
   const [layerPanelOpen, setLayerPanelOpen] = useState(false)
-  const lastLayerResyncId = useRef(0)
+  const renderCounterRef = useRef(0)
   const mapId = process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID ?? process.env.NEXT_PUBLIC_GOOGLE_MAPS_ID ?? undefined
-
-  useEffect(() => {
-    if (!layerStateResync || layerStateResync.id === lastLayerResyncId.current) return
-    lastLayerResyncId.current = layerStateResync.id
-    setLayers(layerStateResync.state)
-  }, [layerStateResync])
+  const detectedNycBorough = useMemo(() => detectNycBoroughFromZips(cityZips), [cityZips])
+  const nycFeatureAvailable = detectedNycBorough !== null || isNycZip(marketData?.zip ?? zip ?? null)
+  const activeStateAbbr = useMemo(
+    () => marketData?.geo?.state?.toUpperCase() ?? cityZips?.[0]?.state?.toUpperCase() ?? null,
+    [cityZips, marketData]
+  )
+  const texasPermitAvailable = activeStateAbbr === 'TX'
+  const permitFeatureAvailable = nycFeatureAvailable || texasPermitAvailable
+  const texasPermitScope = useMemo(() => {
+    if (!texasPermitAvailable) return null
+    if (aggregateData?.area_kind && aggregateData.label?.trim()) {
+      return {
+        kind: aggregateData.area_kind,
+        value: aggregateData.label.trim(),
+      }
+    }
+    if (cityZips?.length && cityZips[0]?.city?.trim()) {
+      return {
+        kind: 'city' as const,
+        value: cityZips[0].city.trim(),
+      }
+    }
+    if (marketData?.geo?.city?.trim()) {
+      return {
+        kind: 'city' as const,
+        value: marketData.geo.city.trim(),
+      }
+    }
+    return null
+  }, [aggregateData, cityZips, marketData, texasPermitAvailable])
+  const texasPermitQuery = useMemo(() => {
+    if (!texasPermitScope || !activeStateAbbr) return null
+    const params = new URLSearchParams({ state: activeStateAbbr })
+    params.set(texasPermitScope.kind, texasPermitScope.value)
+    return params.toString()
+  }, [activeStateAbbr, texasPermitScope])
+  const texasRawPermitQuery = useMemo(() => {
+    if (!texasPermitScope || texasPermitScope.kind !== 'city' || !activeStateAbbr) return null
+    return new URLSearchParams({
+      city: texasPermitScope.value,
+      state: activeStateAbbr,
+    }).toString()
+  }, [activeStateAbbr, texasPermitScope])
+  const usingTexasRawPermits = !nycFeatureAvailable && texasRawPermitData.length > 0
+  const cityBoundaryKey = useMemo(
+    () => (cityZips?.length ? cityZips.map((z) => z.zip).join(',') : null),
+    [cityZips]
+  )
+  const zipBoundaryKey = cityBoundaryKey ? null : zip ?? null
+  const visibleCityBoundaries = useMemo(
+    () => (cityBoundaryKey && cityBoundariesState.key === cityBoundaryKey ? cityBoundariesState.value : []),
+    [cityBoundariesState, cityBoundaryKey]
+  )
+  const visiblePrimaryBoundary = useMemo(
+    () => (zipBoundaryKey && primaryBoundaryState.key === zipBoundaryKey ? primaryBoundaryState.value : null),
+    [primaryBoundaryState, zipBoundaryKey]
+  )
+  const visibleNeighborBoundaries = useMemo(
+    () => (zipBoundaryKey && neighborBoundariesState.key === zipBoundaryKey ? neighborBoundariesState.value : []),
+    [neighborBoundariesState, zipBoundaryKey]
+  )
+  const localLayers =
+    layerStateResync && layerStateResync.id.toString() !== layerStateSnapshot.key
+      ? layerStateResync.state
+      : layerStateSnapshot.value
+  const effectiveLayers = useMemo((): LayerState => {
+    const merged = { ...localLayers, ...agentLayerOverrides } as LayerState & { permits?: boolean }
+    if (agentLayerOverrides && Object.prototype.hasOwnProperty.call(agentLayerOverrides, 'permits')) {
+      merged.nycPermits = Boolean(agentLayerOverrides.permits)
+    }
+    if (!nycFeatureAvailable) {
+      merged.parcels = false
+    }
+    if (!permitFeatureAvailable) {
+      merged.nycPermits = false
+    }
+    delete merged.permits
+    return merged as LayerState
+  }, [localLayers, agentLayerOverrides, nycFeatureAvailable, permitFeatureAvailable])
+  const momentumEnabled = Boolean(effectiveLayers.momentum)
+  const momentumZips = useMemo(
+    () =>
+      normalizeMomentumZipList([
+        ...(visibleCityBoundaries.map((boundary) => boundary.zip) ?? []),
+        ...(zip ? [zip] : []),
+        ...visibleNeighborBoundaries.map((boundary) => boundary.zip),
+      ]),
+    [visibleCityBoundaries, zip, visibleNeighborBoundaries]
+  )
+  const momentumZipKey = momentumZips.length > 0 ? momentumZips.join(',') : null
 
   const setTooltipStable = useCallback((next: { x: number; y: number; text: string } | null) => {
     setTooltip((prev) => {
@@ -688,157 +881,149 @@ function CommandMap({
 
   // Fetch momentum scores when layer is toggled on and we have ZIPs loaded
   useEffect(() => {
-    const isOn = (layers.momentum || agentLayerOverrides?.momentum)
-    if (!isOn) return
+    if (!momentumEnabled || !momentumZipKey) return
 
-    const allZips = [
-      ...(cityZips?.map((z) => z.zip) ?? []),
-      ...(zip ? [zip] : []),
-      ...neighborBoundaries.map((n) => n.zip),
-    ].filter(Boolean)
-
-    if (!allZips.length) return
-
-    fetch('/api/momentum', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ zips: allZips }),
-    })
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.scores) {
-          const scoreMap: Record<string, number> = {}
-          for (const s of d.scores) scoreMap[s.zip] = s.score
-          setMomentumScores(scoreMap)
+    let cancelled = false
+    const activeMomentumZips = momentumZipKey.split(',')
+    fetchMomentumScores(activeMomentumZips, { limit: activeMomentumZips.length })
+      .then((response) => {
+        const scoreMap: Record<string, number> = {}
+        for (const row of response.scores) {
+          scoreMap[row.zip] = row.score
         }
+        return scoreMap
       })
-      .catch(() => {})
-  }, [layers.momentum, agentLayerOverrides, zip, cityZips, neighborBoundaries])
+      .catch(() => ({}))
+      .then((scoreMap: Record<string, number>) => {
+      if (!cancelled) setMomentumScores(scoreMap)
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [momentumEnabled, momentumZipKey])
 
   // Fetch city ZIP boundaries when city search is performed
   useEffect(() => {
-    if (!cityZips?.length) { setCityBoundaries([]); return }
-    setCityBoundaries([])
-    // Also clear single-ZIP layers when switching to city mode
-    setPrimaryBoundary(null)
-    setNeighborBoundaries([])
-
-    // Fetch borough parcels if this is an NYC borough search
-    // Detect by checking if all ZIPs are in the same NYC borough range
-    const firstZip = cityZips[0]?.zip ?? ''
-    const nycBoroughMap: Record<string, string> = {
-      '10': 'manhattan', '11': 'bronx',
-    }
-    const manhattanZips = cityZips.every((z) => z.zip >= '10001' && z.zip <= '10282')
-    const bronxZips = cityZips.every((z) => z.zip >= '10451' && z.zip <= '10475')
-    const brooklynZips = cityZips.every((z) => z.zip >= '11200' && z.zip <= '11256')
-    const queensZips = cityZips.every((z) => z.zip >= '11100' && z.zip <= '11436')
-    const siZips = cityZips.every((z) => z.zip >= '10300' && z.zip <= '10315')
-
-    const detectedBorough = manhattanZips ? 'manhattan'
-      : bronxZips ? 'bronx'
-      : brooklynZips ? 'brooklyn'
-      : queensZips ? 'queens'
-      : siZips ? 'staten island'
-      : null
-
-    void nycBoroughMap // suppress unused warning
-    void firstZip
-
-    if (detectedBorough) {
-      dedupedFetchJson<ParcelResponse>(`/api/parcels?borough=${encodeURIComponent(detectedBorough)}`)
-        .then((d) => {
-          if (Array.isArray(d.parcels) && d.stats) {
-            setParcelData({ parcels: d.parcels, stats: d.stats })
-          }
-        })
-        .catch(() => {})
-
-      // Fetch permits for this borough - load full scatter data upfront, derive heatmap client-side
-      const boroughParam = detectedBorough.toUpperCase().replace(' ', '+')
-      dedupedFetchJson<PermitResponse>(`/api/permits?borough=${encodeURIComponent(detectedBorough.toUpperCase())}&zoom=14`)
-        .then((d) => {
-          if (d.permits) {
-            setNycPermitData(d.permits)
-            // Build heatmap points client-side from the same data
-            setPermitHeatPoints(d.permits.map((p) => ({
-              position: [p.lng, p.lat] as [number, number],
-              weight: p.job_type === 'NB' ? 3 : p.job_type === 'A1' ? 2 : 1,
-            })))
-          }
-        })
-        .catch(() => {})
-      void boroughParam
-    }
-
-    // Fetch tracts for NYC boroughs using known county FIPS
-    const boroughFips: Record<string, { state: string; county: string }> = {
-      manhattan: { state: '36', county: '061' },
-      bronx: { state: '36', county: '005' },
-      brooklyn: { state: '36', county: '047' },
-      queens: { state: '36', county: '081' },
-      'staten island': { state: '36', county: '085' },
-    }
-    if (detectedBorough && boroughFips[detectedBorough]) {
-      const { state, county } = boroughFips[detectedBorough]
-      dedupedFetchJson<TractCollection>(`/api/tracts?state=${state}&county=${county}`)
-        .then((d) => { if (d.features) setTractData(d) })
-        .catch(() => {})
-    }
-
-    // Fetch amenity/POI/flood data using centroid of first ZIP with coordinates
-    const first = cityZips.find((z) => z.lat && z.lng)
-    if (first?.lat && first?.lng) {
-      const { lat: cLat, lng: cLng } = first
-      dedupedFetchJson<{ points?: AmenityPoint[] }>(`/api/amenities?lat=${cLat}&lng=${cLng}&radius=0.12`)
-        .then((d) => { if (d.points) setAmenityPoints(d.points) })
-        .catch(() => {})
-      dedupedFetchJson<{ points?: POIPoint[] }>(`/api/pois?lat=${cLat}&lng=${cLng}&radius=3000`)
-        .then((d) => { if (d.points) setPoiPoints(d.points) })
-        .catch(() => {})
-      dedupedFetchJson<FloodCollection>(`/api/floodrisk?lat=${cLat}&lng=${cLng}&radius=0.12`)
-        .then((d) => { if (d.features) setFloodData(d) })
-        .catch(() => {})
-    }
+    if (!cityZips?.length || !cityBoundaryKey) return
+    let cancelled = false
 
     // Fetch boundaries for all city ZIPs in parallel (limit 30)
     const sample = cityZips.filter((z) => z.lat && z.lng).slice(0, 30)
     Promise.allSettled(
       sample.map((z) =>
-        fetch('/api/boundaries?zip=' + z.zip)
-          .then((r) => r.json())
+        dedupedFetchJson<GeoJSON>('/api/boundaries?zip=' + z.zip)
           .then((geojson) => ({ zip: z.zip, geojson, zori: z.zori_latest, zhvi: z.zhvi_latest }))
       )
     ).then((results) => {
+      if (cancelled) return
       const loaded: ZipBoundary[] = results
-        .filter((r): r is PromiseFulfilledResult<ZipBoundary> => r.status === 'fulfilled' && r.value.geojson?.features?.length > 0)
+        .filter((r): r is PromiseFulfilledResult<ZipBoundary> => r.status === 'fulfilled' && hasFeatures(r.value.geojson) && r.value.geojson.features.length > 0)
         .map((r) => r.value)
-      setCityBoundaries(loaded)
+      setCityBoundariesState({ key: cityBoundaryKey, value: loaded })
     })
-  }, [cityZips])
+    return () => {
+      cancelled = true
+    }
+  }, [cityZips, cityBoundaryKey])
+
+  useEffect(() => {
+    if (!cityZips?.length || !detectedNycBorough) return
+    let cancelled = false
+
+    if (effectiveLayers.parcels) {
+      dedupedFetchJson<ParcelResponse>(`/api/parcels?borough=${encodeURIComponent(detectedNycBorough)}`)
+        .then((d) => {
+          if (!cancelled && Array.isArray(d.parcels) && d.stats) {
+            setParcelData({ parcels: d.parcels, stats: d.stats })
+          }
+        })
+        .catch(() => {})
+    }
+
+    if (effectiveLayers.nycPermits) {
+      dedupedFetchJson<PermitResponse>(`/api/permits?borough=${encodeURIComponent(detectedNycBorough.toUpperCase())}&zoom=14`)
+        .then((d) => {
+          if (!cancelled && d.permits) {
+            setNycPermitData(d.permits)
+            setPermitHeatPoints(buildPermitHeatPoints(d.permits))
+            setTexasRawPermitData([])
+            setTexasRawPermitCategoryFilter(new Set())
+            setSelectedTexasRawPermit(null)
+            setSelectedTexasPermit(null)
+          }
+        })
+        .catch(() => {})
+    }
+
+    return () => {
+      cancelled = true
+    }
+  }, [cityZips, detectedNycBorough, effectiveLayers.nycPermits, effectiveLayers.parcels])
+
+  useEffect(() => {
+    if (!cityZips?.length) return
+    let cancelled = false
+
+    if (effectiveLayers.tracts && detectedNycBorough && BOROUGH_TRACT_FIPS[detectedNycBorough]) {
+      const { state, county } = BOROUGH_TRACT_FIPS[detectedNycBorough]
+      dedupedFetchJson<TractCollection>(`/api/tracts?state=${state}&county=${county}`)
+        .then((d) => {
+          if (!cancelled && d.features) setTractData(d)
+        })
+        .catch(() => {})
+    }
+
+    const first = cityZips.find((z) => z.lat && z.lng)
+    if (first?.lat && first?.lng) {
+      const { lat: cLat, lng: cLng } = first
+      if (effectiveLayers.amenityHeatmap) {
+        dedupedFetchJson<{ points?: AmenityPoint[] }>(`/api/amenities?lat=${cLat}&lng=${cLng}&radius=0.12`)
+          .then((d) => {
+            if (!cancelled && d.points) setAmenityPoints(d.points)
+          })
+          .catch(() => {})
+      }
+      if (effectiveLayers.pois) {
+        dedupedFetchJson<{ points?: POIPoint[] }>(`/api/pois?lat=${cLat}&lng=${cLng}&radius=3000`)
+          .then((d) => {
+            if (!cancelled && d.points) setPoiPoints(d.points)
+          })
+          .catch(() => {})
+      }
+      if (effectiveLayers.floodRisk) {
+        dedupedFetchJson<FloodCollection>(`/api/floodrisk?lat=${cLat}&lng=${cLng}&radius=0.12`)
+          .then((d) => {
+            if (!cancelled && d.features) setFloodData(d)
+          })
+          .catch(() => {})
+      }
+    }
+
+    return () => {
+      cancelled = true
+    }
+  }, [cityZips, detectedNycBorough, effectiveLayers.amenityHeatmap, effectiveLayers.floodRisk, effectiveLayers.pois, effectiveLayers.tracts])
 
   // Fetch primary boundary + transit + neighbors when zip changes
   useEffect(() => {
-    if (!zip) {
-      // Aggregate / cold map: drop single-ZIP polygons so they do not sit under city choropleth
-      setPrimaryBoundary(null)
-      setNeighborBoundaries([])
-      return
-    }
-    // Clear city mode layers when switching to ZIP mode
-    setCityBoundaries([])
-    // Skip neighbor loading when city mode is active - city ZIPs provide the context
-    const inCityMode = (cityZips?.length ?? 0) > 0
+    if (!zip || !zipBoundaryKey) return
+    let cancelled = false
 
     // Primary boundary
     dedupedFetchJson<GeoJSON>('/api/boundaries?zip=' + zip)
-      .then((d) => { if (hasFeatures(d)) setPrimaryBoundary(d) })
+      .then((d) => {
+        if (cancelled) return
+        setPrimaryBoundaryState({ key: zipBoundaryKey, value: hasFeatures(d) ? d : null })
+      })
       .catch(() => {})
     dedupedFetchJson<{ zips?: NeighborZip[] }>('/api/neighbors?zip=' + zip)
       .then(async (d) => {
-        if (inCityMode) return // city ZIPs already provide context
         const neighbors: NeighborZip[] = d.zips ?? []
-        if (!neighbors.length) return
+        if (!neighbors.length || cancelled) {
+          setNeighborBoundariesState({ key: zipBoundaryKey, value: [] })
+          return
+        }
 
         // Fetch boundaries for all neighbors in parallel (limit for perf/GPU load)
         const sample = neighbors.slice(0, 10)
@@ -852,82 +1037,137 @@ function CommandMap({
           if (r.status !== 'fulfilled') return []
           return hasFeatures(r.value.geojson) && r.value.geojson.features.length > 0 ? [r.value] : []
         })
-        setNeighborBoundaries(loaded)
+        if (!cancelled) {
+          setNeighborBoundariesState({ key: zipBoundaryKey, value: loaded })
+        }
       })
       .catch(() => {})
-  }, [zip, cityZips])
+    return () => {
+      cancelled = true
+    }
+  }, [zip, zipBoundaryKey])
 
-  // Fetch block groups + parcels when we have geo data
+  // Fetch NYC-only parcel + permit layers for single-ZIP NYC workflows.
+  useEffect(() => {
+    if (!marketData?.geo) return
+
+    const activeZip = marketData?.zip ?? null
+
+    if (activeZip && isNycZip(activeZip)) {
+      if (effectiveLayers.parcels) {
+        dedupedFetchJson<ParcelResponse>(`/api/parcels?zip=${marketData.zip}`)
+          .then((d) => {
+            if (Array.isArray(d.parcels) && d.stats) {
+              setParcelData({ parcels: d.parcels, stats: d.stats })
+            }
+          })
+          .catch(() => {})
+      }
+
+      if (effectiveLayers.nycPermits) {
+        dedupedFetchJson<PermitResponse>(`/api/permits?zip=${marketData.zip}&zoom=14`)
+          .then((d) => {
+            if (d.permits) {
+              setNycPermitData(d.permits)
+              setPermitHeatPoints(buildPermitHeatPoints(d.permits))
+              setTexasRawPermitData([])
+              setTexasRawPermitCategoryFilter(new Set())
+              setSelectedTexasRawPermit(null)
+              setSelectedTexasPermit(null)
+            }
+          })
+          .catch(() => {})
+      }
+    }
+  }, [marketData, effectiveLayers.nycPermits, effectiveLayers.parcels])
+
+  useEffect(() => {
+    if (!effectiveLayers.nycPermits || nycFeatureAvailable || !texasPermitAvailable || !texasPermitQuery) return
+
+    let cancelled = false
+    const load = async () => {
+      if (texasRawPermitQuery) {
+        try {
+          const rawData = await dedupedFetchJson<TexasRawPermitResponse>(`/api/permits/texas/raw?${texasRawPermitQuery}`, {
+            ttlMs: 15 * 60 * 1000,
+          })
+          if (cancelled) return
+          const permits = rawData.permits ?? []
+          if (permits.length > 0) {
+            setTexasRawPermitData(permits)
+            setTexasPermitActivity([])
+            setPermitHeatPoints(buildTexasRawPermitHeatPoints(permits))
+            setTexasRawPermitCategoryFilter(new Set())
+            setSelectedPermit(null)
+            setSelectedTexasRawPermit(null)
+            setSelectedTexasPermit(null)
+            return
+          }
+        } catch {
+          // Raw city feed not available; fall through to the shared Texas aggregate layer.
+        }
+      }
+
+      try {
+        const aggregateData = await dedupedFetchJson<TexasPermitActivityResponse>(`/api/permits/texas?${texasPermitQuery}`, {
+          ttlMs: 15 * 60 * 1000,
+        })
+        if (cancelled) return
+        const places = aggregateData.places ?? []
+        setTexasRawPermitData([])
+        setTexasPermitActivity(places)
+        setPermitHeatPoints(buildTexasPermitHeatPoints(places))
+        setTexasRawPermitCategoryFilter(new Set())
+        setSelectedPermit(null)
+        setSelectedTexasRawPermit(null)
+        setSelectedTexasPermit(null)
+      } catch {
+        if (cancelled) return
+        setTexasRawPermitData([])
+        setTexasPermitActivity([])
+        setPermitHeatPoints([])
+        setTexasRawPermitCategoryFilter(new Set())
+        setSelectedTexasRawPermit(null)
+        setSelectedTexasPermit(null)
+      }
+    }
+
+    void load()
+
+    return () => {
+      cancelled = true
+    }
+  }, [effectiveLayers.nycPermits, nycFeatureAvailable, texasPermitAvailable, texasPermitQuery, texasRawPermitQuery])
+
+  // Fetch shared tract / amenity / flood / POI context for single-ZIP flows.
   useEffect(() => {
     if (!marketData?.geo) return
     const { lat, lng, stateFips, countyFips } = marketData.geo
 
-    // Block groups - need state + county FIPS
-    if (stateFips && countyFips && countyFips !== '000') {
-      const countyKey = `${stateFips}-${countyFips}`
-      const cached = BLOCKGROUP_CACHE[countyKey]
-      const blockgroupsPromise: Promise<BlockGroupCollection> = cached
-        ? Promise.resolve(cached)
-        : fetch(`/api/blockgroups?state=${stateFips}&county=${countyFips}`)
-            .then((r) => r.json())
-
-      blockgroupsPromise
-        .then((d) => {
-          if (d.features?.length) {
-            BLOCKGROUP_CACHE[countyKey] = d
-            setBlockGroupData(d)
-          }
-        })
-        .catch(() => {})
-    }
-
-    // NYC parcels (PLUTO) - ZIP mode or borough mode
-    if (marketData?.zip) {
-      dedupedFetchJson<ParcelResponse>(`/api/parcels?zip=${marketData.zip}`)
-        .then((d) => {
-          if (Array.isArray(d.parcels) && d.stats) {
-            setParcelData({ parcels: d.parcels, stats: d.stats })
-          }
-        })
-        .catch(() => {})
-
-      // Fetch permits for this ZIP - load upfront, derive heatmap client-side
-      dedupedFetchJson<PermitResponse>(`/api/permits?zip=${marketData.zip}&zoom=14`)
-        .then((d) => {
-          if (d.permits) {
-            setNycPermitData(d.permits)
-            setPermitHeatPoints(d.permits.map((p) => ({
-              position: [p.lng, p.lat] as [number, number],
-              weight: p.job_type === 'NB' ? 3 : p.job_type === 'A1' ? 2 : 1,
-            })))
-          }
-        })
-        .catch(() => {})
-    }
-
-    // Census Tracts with rent/income data
-    if (stateFips && countyFips && countyFips !== '000') {
-      fetch(`/api/tracts?state=${stateFips}&county=${countyFips}`)
-        .then((r) => r.json())
+    if (effectiveLayers.tracts && stateFips && countyFips && countyFips !== '000') {
+      dedupedFetchJson<TractCollection>(`/api/tracts?state=${stateFips}&county=${countyFips}`)
         .then((d: TractCollection) => { if (d.features) setTractData(d) })
         .catch(() => {})
     }
 
-    // OSM Amenity heatmap points
-    dedupedFetchJson<{ points?: AmenityPoint[] }>(`/api/amenities?lat=${lat}&lng=${lng}&radius=0.06`)
-      .then((d) => { if (d.points) setAmenityPoints(d.points) })
-      .catch(() => {})
+    if (effectiveLayers.amenityHeatmap) {
+      dedupedFetchJson<{ points?: AmenityPoint[] }>(`/api/amenities?lat=${lat}&lng=${lng}&radius=0.06`)
+        .then((d) => { if (d.points) setAmenityPoints(d.points) })
+        .catch(() => {})
+    }
 
-    // Overture Maps POIs - neighborhood signals + anchor tenants
-    dedupedFetchJson<{ points?: POIPoint[] }>(`/api/pois?lat=${lat}&lng=${lng}&radius=1500`)
-      .then((d) => { if (d.points) setPoiPoints(d.points) })
-      .catch(() => {})
+    if (effectiveLayers.pois) {
+      dedupedFetchJson<{ points?: POIPoint[] }>(`/api/pois?lat=${lat}&lng=${lng}&radius=1500`)
+        .then((d) => { if (d.points) setPoiPoints(d.points) })
+        .catch(() => {})
+    }
 
-    // FEMA Flood Risk zones
-    dedupedFetchJson<FloodCollection>(`/api/floodrisk?lat=${lat}&lng=${lng}&radius=0.05`)
-      .then((d) => { if (d.features) setFloodData(d) })
-      .catch(() => {})
-  }, [marketData])
+    if (effectiveLayers.floodRisk) {
+      dedupedFetchJson<FloodCollection>(`/api/floodrisk?lat=${lat}&lng=${lng}&radius=0.05`)
+        .then((d) => { if (d.features) setFloodData(d) })
+        .catch(() => {})
+    }
+  }, [marketData, effectiveLayers.amenityHeatmap, effectiveLayers.floodRisk, effectiveLayers.pois, effectiveLayers.tracts])
 
   const transitStops = useMemo(() => {
     if (!transitData?.geojson?.features) return []
@@ -956,16 +1196,6 @@ function CommandMap({
     })
   }, [transitData])
 
-  // Merge agent layer overrides into local layer state (`permits` is agent JSON alias for nycPermits)
-  const effectiveLayers = useMemo((): LayerState => {
-    const merged = { ...layers, ...agentLayerOverrides } as LayerState & { permits?: boolean }
-    if (agentLayerOverrides && Object.prototype.hasOwnProperty.call(agentLayerOverrides, 'permits')) {
-      merged.nycPermits = Boolean(agentLayerOverrides.permits)
-    }
-    delete merged.permits
-    return merged as LayerState
-  }, [layers, agentLayerOverrides])
-
   // Agent can override the active metric
   const effectiveMetric = agentMetric ?? activeMetric
 
@@ -982,10 +1212,10 @@ function CommandMap({
       ? marketData?.zillow?.zhvi_latest ?? null
       : marketData?.zillow?.zori_latest ?? null
     const vals: (number | null)[] = [primaryValue]
-    neighborBoundaries.forEach((n) => vals.push(effectiveMetric === 'zhvi' ? n.zhvi : n.zori))
-    cityBoundaries.forEach((n) => vals.push(effectiveMetric === 'zhvi' ? n.zhvi : n.zori))
+    visibleNeighborBoundaries.forEach((n) => vals.push(effectiveMetric === 'zhvi' ? n.zhvi : n.zori))
+    visibleCityBoundaries.forEach((n) => vals.push(effectiveMetric === 'zhvi' ? n.zhvi : n.zori))
     return vals
-  }, [effectiveMetric, marketData, neighborBoundaries, cityBoundaries])
+  }, [effectiveMetric, marketData, visibleNeighborBoundaries, visibleCityBoundaries])
 
   const colorScale = useMemo(() => buildColorScale(allMetricValues), [allMetricValues])
 
@@ -997,8 +1227,8 @@ function CommandMap({
     const result: Layer[] = []
 
     // City ZIP boundaries (rendered first when in city mode)
-    if (effectiveLayers.zipBoundary && cityBoundaries.length > 0) {
-      cityBoundaries.forEach((n) => {
+    if (effectiveLayers.zipBoundary && visibleCityBoundaries.length > 0) {
+      visibleCityBoundaries.forEach((n) => {
         const metricValue = effectiveMetric === 'zhvi' ? n.zhvi : n.zori
         result.push(
           new GeoJsonLayer({
@@ -1042,9 +1272,9 @@ function CommandMap({
     // Momentum choropleth - overlays ZIP boundaries with score-based color
     if (effectiveLayers.momentum && Object.keys(momentumScores).length > 0) {
       const allBoundaries = [
-        ...(primaryBoundary ? [{ zip: zip ?? '', geojson: primaryBoundary }] : []),
-        ...neighborBoundaries.map((n) => ({ zip: n.zip, geojson: n.geojson })),
-        ...cityBoundaries.map((n) => ({ zip: n.zip, geojson: n.geojson })),
+        ...(visiblePrimaryBoundary ? [{ zip: zip ?? '', geojson: visiblePrimaryBoundary }] : []),
+        ...visibleNeighborBoundaries.map((n) => ({ zip: n.zip, geojson: n.geojson })),
+        ...visibleCityBoundaries.map((n) => ({ zip: n.zip, geojson: n.geojson })),
       ]
       allBoundaries.forEach(({ zip: z, geojson }) => {
         const score = momentumScores[z] ?? null
@@ -1082,8 +1312,8 @@ function CommandMap({
     }
 
     // Neighbor ZIP boundaries (rendered first, behind primary)
-    if (effectiveLayers.zipBoundary && neighborBoundaries.length > 0) {
-      neighborBoundaries.forEach((n) => {
+    if (effectiveLayers.zipBoundary && visibleNeighborBoundaries.length > 0) {
+      visibleNeighborBoundaries.forEach((n) => {
         const metricValue = effectiveMetric === 'zhvi' ? n.zhvi : n.zori
         result.push(
           new GeoJsonLayer({
@@ -1110,11 +1340,11 @@ function CommandMap({
 
     // Primary ZIP boundary (on top, brighter outline)
     // When block groups are active, show outline only - block groups provide the color
-    if (effectiveLayers.zipBoundary && primaryBoundary) {
+    if (effectiveLayers.zipBoundary && visiblePrimaryBoundary) {
       result.push(
         new GeoJsonLayer({
           id: 'zip-primary',
-          data: primaryBoundary,
+          data: visiblePrimaryBoundary,
           stroked: true,
           filled: true,
           getFillColor: effectiveLayers.rentChoropleth ? colorScale(primaryMetricValue) : [255, 255, 255, 30],
@@ -1371,85 +1601,233 @@ function CommandMap({
       )
     }
 
-    // NYC Permits - zoom-adaptive: heatmap below zoom 15, 3D ColumnLayer at zoom ≥ 15
-    // All filtering is client-side - no API calls on zoom/pan
+    // Permits - NYC uses raw permit points, Texas uses scoped place-level permit activity.
+    // Both paths fetch once per scope and switch between heatmap / 3D client-side.
     if (effectiveLayers.nycPermits) {
-      // Merge agent permit filter with user toggle filter
-      const agentFilterSet = agentPermitFilter ? new Set(agentPermitFilter) : null
-      const activeTypes = agentFilterSet ?? (permitTypeFilter.size === 0 ? null : permitTypeFilter)
+      if (nycFeatureAvailable) {
+        const agentFilterSet = agentPermitFilter ? new Set(agentPermitFilter) : null
+        const activeTypes = agentFilterSet ?? (permitTypeFilter.size === 0 ? null : permitTypeFilter)
 
-      if (mapZoom < 15) {
-        // Heatmap - filter by type client-side
-        const heatData = activeTypes
-          ? permitHeatPoints.filter((_, i) => {
-              const p = nycPermitData[i]
-              return p ? activeTypes.has(p.job_type ?? '') : true
-            })
-          : permitHeatPoints
+        if (mapZoom < 15) {
+          const heatData = activeTypes
+            ? permitHeatPoints.filter((_, i) => {
+                const permit = nycPermitData[i]
+                return permit ? activeTypes.has(permit.job_type ?? '') : true
+              })
+            : permitHeatPoints
 
-        if (heatData.length > 0) {
-          result.push(
-            new HeatmapLayer({
-              id: 'permit-heatmap',
-              data: heatData,
-              getPosition: (d: PermitHeatPoint) => d.position,
-              getWeight: (d: PermitHeatPoint) => d.weight,
-              radiusPixels: 40,
-              intensity: 2.5,
-              threshold: 0.04,
-              colorRange: [
-                [20, 8, 2, 0],
-                [90, 35, 10, 100],
-                [160, 65, 20, 170],
-                [215, 107, 61, 210],
-                [240, 155, 70, 230],
-                [255, 215, 130, 250],
-              ],
-            })
-          )
+          if (heatData.length > 0) {
+            result.push(
+              new HeatmapLayer({
+                id: 'permit-heatmap',
+                data: heatData,
+                getPosition: (d: PermitHeatPoint) => d.position,
+                getWeight: (d: PermitHeatPoint) => d.weight,
+                radiusPixels: 40,
+                intensity: 2.5,
+                threshold: 0.04,
+                colorRange: [
+                  [20, 8, 2, 0],
+                  [90, 35, 10, 100],
+                  [160, 65, 20, 170],
+                  [215, 107, 61, 210],
+                  [240, 155, 70, 230],
+                  [255, 215, 130, 250],
+                ],
+              })
+            )
+          }
+        } else {
+          const filtered = activeTypes
+            ? nycPermitData.filter((permit) => activeTypes.has(permit.job_type ?? ''))
+            : nycPermitData
+
+          if (filtered.length > 0) {
+            result.push(
+              new ColumnLayer({
+                id: 'nyc-permits-3d',
+                data: filtered,
+                diskResolution: 6,
+                radius: 6,
+                extruded: true,
+                getPosition: (d: PermitPayload) => [d.lng, d.lat],
+                getElevation: (d: PermitPayload) => {
+                  const cost = Math.max(d.initial_cost ?? 0, 1)
+                  const logVal = Math.log10(cost)
+                  const t = Math.min(Math.max((logVal - 5) / 3.5, 0), 1)
+                  return 15 + t * 280
+                },
+                getFillColor: (d: PermitPayload) => {
+                  switch (d.job_type) {
+                    case 'NB': return [215, 107, 61, 240]
+                    case 'A1': return [100, 180, 255, 220]
+                    case 'DM': return [220, 80, 80, 230]
+                    default: return [160, 160, 160, 180]
+                  }
+                },
+                pickable: true,
+                onClick: (info: PickingInfo) => {
+                  const permit = info.object as PermitPayload | undefined
+                  setSelectedPermit(permit ?? null)
+                },
+                onHover: (info: PickingInfo) => {
+                  const permit = info.object as PermitPayload | undefined
+                  if (permit) {
+                    setTooltipStable({ x: info.x, y: info.y, text: `${permit.job_type_label} · ${permit.address}` })
+                  } else {
+                    setTooltipStable(null)
+                  }
+                },
+              })
+            )
+          }
         }
-      } else {
-        // 3D ColumnLayer - filter by active types
-        const filtered = activeTypes
-          ? nycPermitData.filter((p) => activeTypes.has(p.job_type ?? ''))
-          : nycPermitData
+      } else if (texasPermitAvailable) {
+        if (usingTexasRawPermits) {
+          const activeTexasRawCategories =
+            texasRawPermitCategoryFilter.size === 0 ? null : texasRawPermitCategoryFilter
+          const rawPermits = activeTexasRawCategories
+            ? texasRawPermitData.filter((permit) => activeTexasRawCategories.has(permit.category))
+            : texasRawPermitData
+          const rawHeatData =
+            activeTexasRawCategories == null ? permitHeatPoints : buildTexasRawPermitHeatPoints(rawPermits)
+          const texasRawPermit3DZoomThreshold = 13
 
-        if (filtered.length > 0) {
-          result.push(
-            new ColumnLayer({
-              id: 'nyc-permits-3d',
-              data: filtered,
-              diskResolution: 6,
-              radius: 6,
-              extruded: true,
-              getPosition: (d: PermitPayload) => [d.lng, d.lat],
-              getElevation: (d: PermitPayload) => {
-                const cost = Math.max(d.initial_cost ?? 0, 1)
-                const logVal = Math.log10(cost)
-                // log scale: $100k → ~20m, $1M → ~80m, $50M → ~250m
-                const t = Math.min(Math.max((logVal - 5) / 3.5, 0), 1)
-                return 15 + t * 280
-              },
-              getFillColor: (d: PermitPayload) => {
-                switch (d.job_type) {
-                  case 'NB': return [215, 107, 61, 240]   // orange - new building
-                  case 'A1': return [100, 180, 255, 220]  // blue - major alteration
-                  case 'DM': return [220, 80, 80, 230]    // red - demolition
-                  default:   return [160, 160, 160, 180]
-                }
-              },
-              pickable: true,
-              onClick: (info: PickingInfo) => {
-                const d = info.object as PermitPayload | undefined
-                setSelectedPermit(d ?? null)
-              },
-              onHover: (info: PickingInfo) => {
-                const d = info.object as PermitPayload | undefined
-                if (d) setTooltipStable({ x: info.x, y: info.y, text: `${d.job_type_label} · ${d.address}` })
-                else setTooltipStable(null)
-              },
-            })
-          )
+          if (mapZoom < texasRawPermit3DZoomThreshold) {
+            if (rawHeatData.length > 0) {
+              result.push(
+                new HeatmapLayer({
+                  id: 'texas-raw-permit-heatmap',
+                  data: rawHeatData,
+                  getPosition: (d: PermitHeatPoint) => d.position,
+                  getWeight: (d: PermitHeatPoint) => d.weight,
+                  radiusPixels: 42,
+                  intensity: 2.2,
+                  threshold: 0.035,
+                  colorRange: [
+                    [20, 8, 2, 0],
+                    [90, 35, 10, 100],
+                    [160, 65, 20, 170],
+                    [215, 107, 61, 210],
+                    [240, 155, 70, 230],
+                    [255, 215, 130, 250],
+                  ],
+                })
+              )
+            }
+          } else if (rawPermits.length > 0) {
+            result.push(
+              new ColumnLayer({
+                id: 'texas-raw-permits-3d',
+                data: rawPermits,
+                diskResolution: 6,
+                radius: 10,
+                extruded: true,
+                getPosition: (d: TexasRawPermitPayload) => [d.lng, d.lat],
+                getElevation: (d: TexasRawPermitPayload) => {
+                  const valuation = Math.max(d.valuation ?? 0, 0)
+                  const squareFeet = Math.max(d.square_feet ?? 0, 0)
+                  const units = Math.max(d.housing_units ?? 0, 0)
+                  return (
+                    16 +
+                    Math.log10(valuation + 1) * 22 +
+                    Math.log10(squareFeet + 1) * 14 +
+                    units * 10
+                  )
+                },
+                getFillColor: (d: TexasRawPermitPayload) => getTexasRawPermitFillColor(d.category),
+                getLineColor: [255, 230, 180, 220],
+                lineWidthMinPixels: 1,
+                stroked: true,
+                pickable: true,
+                onClick: (info: PickingInfo) => {
+                  const permit = info.object as TexasRawPermitPayload | undefined
+                  setSelectedTexasRawPermit(permit ?? null)
+                  if (permit) setSelectedTexasPermit(null)
+                },
+                onHover: (info: PickingInfo) => {
+                  const permit = info.object as TexasRawPermitPayload | undefined
+                  if (permit) {
+                    setTooltipStable({
+                      x: info.x,
+                      y: info.y,
+                      text: `${permit.category_label} · ${permit.address ?? permit.source_city}`,
+                    })
+                  } else {
+                    setTooltipStable(null)
+                  }
+                },
+              })
+            )
+          }
+        } else {
+          const texasPermit3DZoomThreshold = 10.75
+
+          if (mapZoom < texasPermit3DZoomThreshold) {
+            if (permitHeatPoints.length > 0) {
+              result.push(
+                new HeatmapLayer({
+                  id: 'texas-permit-activity-heatmap',
+                  data: permitHeatPoints,
+                  getPosition: (d: PermitHeatPoint) => d.position,
+                  getWeight: (d: PermitHeatPoint) => d.weight,
+                  radiusPixels: 48,
+                  intensity: 1.8,
+                  threshold: 0.03,
+                  colorRange: [
+                    [20, 8, 2, 0],
+                    [90, 35, 10, 100],
+                    [160, 65, 20, 170],
+                    [215, 107, 61, 210],
+                    [240, 155, 70, 230],
+                    [255, 215, 130, 250],
+                  ],
+                })
+              )
+            }
+          } else if (texasPermitActivity.length > 0) {
+            result.push(
+              new ColumnLayer({
+                id: 'texas-permit-activity-3d',
+                data: texasPermitActivity,
+                diskResolution: 8,
+                radius: mapZoom >= 12 ? 420 : 560,
+                extruded: true,
+                getPosition: (d: TexasPermitActivityPayload) => [d.lng, d.lat],
+                getElevation: (d: TexasPermitActivityPayload) => {
+                  const units = Math.max(d.total_units, 1)
+                  const valueMillions = Math.max((d.total_value ?? 0) / 1_000_000, 0)
+                  return 24 + Math.log2(units + 1) * 55 + Math.log10(valueMillions + 1) * 30
+                },
+                getFillColor: (d: TexasPermitActivityPayload) => {
+                  const multiFamilyShare = d.total_units > 0 ? d.multi_family_units / d.total_units : 0
+                  return multiFamilyShare >= 0.5
+                    ? [240, 155, 70, 235]
+                    : [215, 107, 61, 225]
+                },
+                getLineColor: [255, 230, 180, 220],
+                lineWidthMinPixels: 1,
+                stroked: true,
+                pickable: true,
+                onClick: (info: PickingInfo) => {
+                  const place = info.object as TexasPermitActivityPayload | undefined
+                  setSelectedTexasPermit(place ?? null)
+                },
+                onHover: (info: PickingInfo) => {
+                  const place = info.object as TexasPermitActivityPayload | undefined
+                  if (place) {
+                    setTooltipStable({
+                      x: info.x,
+                      y: info.y,
+                      text: `${place.place_name} · ${place.total_units.toLocaleString()} units`,
+                    })
+                  } else {
+                    setTooltipStable(null)
+                  }
+                },
+              })
+            )
+          }
         }
       }
     }
@@ -1567,26 +1945,42 @@ function CommandMap({
           lineWidthMinPixels: 1,
           pickable: true,
           onHover: (info: PickingInfo) => {
-            const d = info.object as { label: string; value: number | null } | undefined
+            const d = info.object as ClientUploadMarker | undefined
             if (d) setTooltipStable({ x: info.x, y: info.y, text: `📍 ${d.label}${d.value != null ? ': $' + d.value.toLocaleString() : ''}` })
             else setTooltipStable(null)
+          },
+          onClick: (info: PickingInfo) => {
+            const d = info.object as ClientUploadMarker | undefined
+            onUploadedMarkerSelect?.(d ?? null)
           },
         })
       )
     }
 
     return result
-  }, [primaryBoundary, neighborBoundaries, cityBoundaries, boroughBoundary, transitStops, transitRoutes, blockGroupData, parcelData, parcelColorMode, tractData, amenityPoints, poiPoints, floodData, nycPermitData, permitHeatPoints, permitTypeFilter, agentPermitFilter, mapZoom, momentumScores, effectiveLayers, colorScale, primaryMetricValue, effectiveMetric, zip, setTooltipStable, uploadedMarkers, shortlistSites, analysisSites])
+  }, [visiblePrimaryBoundary, visibleNeighborBoundaries, visibleCityBoundaries, boroughBoundary, transitStops, transitRoutes, parcelData, parcelColorMode, tractData, amenityPoints, poiPoints, floodData, nycPermitData, texasRawPermitData, texasPermitActivity, permitHeatPoints, permitTypeFilter, texasRawPermitCategoryFilter, agentPermitFilter, mapZoom, momentumScores, effectiveLayers, colorScale, primaryMetricValue, effectiveMetric, zip, setTooltipStable, uploadedMarkers, shortlistSites, analysisSites, nycFeatureAvailable, texasPermitAvailable, usingTexasRawPermits, onUploadedMarkerSelect])
 
   const handleToggle = useCallback((key: keyof LayerState) => {
-    setLayers((prev) => ({ ...prev, [key]: !effectiveLayers[key] }))
+    const nextKey =
+      layerStateResync && layerStateResync.id.toString() !== layerStateSnapshot.key
+        ? layerStateResync.id.toString()
+        : layerStateSnapshot.key
+    const nextBase =
+      layerStateResync && layerStateResync.id.toString() !== layerStateSnapshot.key
+        ? layerStateResync.state
+        : layerStateSnapshot.value
+    setLayerStateSnapshot({
+      key: nextKey,
+      value: { ...nextBase, [key]: !effectiveLayers[key] },
+    })
     onClearAgentOverride?.(key)
-  }, [effectiveLayers, onClearAgentOverride])
+  }, [effectiveLayers, layerStateResync, layerStateSnapshot, onClearAgentOverride])
 
-  if (typeof window !== 'undefined' && perfDebug) {
-    commandMapRenderCounter += 1
-    console.log('[perf] CommandMap render #', commandMapRenderCounter)
-  }
+  useEffect(() => {
+    if (typeof window === 'undefined' || !perfDebug) return
+    renderCounterRef.current += 1
+    console.log('[perf] CommandMap render #', renderCounterRef.current)
+  })
 
   return (
     <div className="relative isolate h-full min-h-0 min-w-0 w-full">
@@ -1600,7 +1994,7 @@ function CommandMap({
           gestureHandling="greedy"
           style={{ width: '100%', height: '100%' }}
         >
-          <MapFitter boundary={primaryBoundary ?? (cityBoundaries[0]?.geojson ?? null)} zip={zip ?? cityZips?.[0]?.zip ?? null} />
+          <MapFitter boundary={visiblePrimaryBoundary ?? (visibleCityBoundaries[0]?.geojson ?? null)} zip={zip ?? cityZips?.[0]?.zip ?? null} />
           <UploadedMarkersFitter markers={uploadedMarkers ?? null} active={fitClientMarkersOnly} />
           <TiltController tilt={mapTilt} heading={mapHeading} />
           <ZoomTracker onZoomChange={handleZoomChange} />
@@ -1621,7 +2015,7 @@ function CommandMap({
       )}
 
       {/* Permit detail panel */}
-      {selectedPermit && (
+      {nycFeatureAvailable && effectiveLayers.nycPermits && selectedPermit && (
         <div className="absolute bottom-4 left-4 z-40 w-72 rounded-xl overflow-hidden shadow-2xl"
           style={{ background: 'rgba(6,6,6,0.88)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.08)' }}>
           <div className="flex items-start justify-between px-4 pt-3 pb-2" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
@@ -1675,6 +2069,172 @@ function CommandMap({
             {selectedPermit.owner_business && (
               <p className="text-zinc-500 text-[10px] pt-1">{selectedPermit.owner_business}</p>
             )}
+          </div>
+        </div>
+      )}
+
+      {!nycFeatureAvailable &&
+        texasPermitAvailable &&
+        usingTexasRawPermits &&
+        effectiveLayers.nycPermits &&
+        selectedTexasRawPermit && (
+        <div
+          className="absolute bottom-4 left-4 z-40 w-72 rounded-xl overflow-hidden shadow-2xl"
+          style={{ background: 'rgba(6,6,6,0.88)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.08)' }}
+        >
+          <div className="flex items-start justify-between px-4 pt-3 pb-2" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+            <div>
+              <p className="text-white text-sm font-semibold leading-tight">
+                {selectedTexasRawPermit.address ?? `${selectedTexasRawPermit.source_city}, TX`}
+              </p>
+              <p className="text-zinc-500 text-[10px] mt-0.5">
+                {selectedTexasRawPermit.zip_code ?? 'Austin, TX'} · {selectedTexasRawPermit.source_name}
+              </p>
+            </div>
+            <button onClick={() => setSelectedTexasRawPermit(null)} className="text-zinc-600 hover:text-white ml-2 flex-shrink-0">×</button>
+          </div>
+          <div className="px-4 py-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <span
+                className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                style={{
+                  background:
+                    selectedTexasRawPermit.category === 'new_construction'
+                      ? 'rgba(215,107,61,0.2)'
+                      : selectedTexasRawPermit.category === 'demolition'
+                        ? 'rgba(220,80,80,0.2)'
+                        : 'rgba(100,180,255,0.2)',
+                  color:
+                    selectedTexasRawPermit.category === 'new_construction'
+                      ? '#D76B3D'
+                      : selectedTexasRawPermit.category === 'demolition'
+                        ? '#f87171'
+                        : '#60a5fa',
+                  border: `1px solid ${
+                    selectedTexasRawPermit.category === 'new_construction'
+                      ? 'rgba(215,107,61,0.3)'
+                      : selectedTexasRawPermit.category === 'demolition'
+                        ? 'rgba(220,80,80,0.3)'
+                        : 'rgba(100,180,255,0.3)'
+                  }`,
+                }}
+              >
+                {selectedTexasRawPermit.category_label}
+              </span>
+              <span className="text-zinc-500 text-[10px]">
+                {formatPermitDate(selectedTexasRawPermit.issue_date) ?? 'Recent'}
+              </span>
+            </div>
+            {selectedTexasRawPermit.description && (
+              <p className="text-zinc-300 text-[11px] leading-relaxed">
+                {selectedTexasRawPermit.description.slice(0, 220)}
+                {selectedTexasRawPermit.description.length > 220 ? '...' : ''}
+              </p>
+            )}
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              {selectedTexasRawPermit.valuation != null && selectedTexasRawPermit.valuation > 0 && (
+                <div>
+                  <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Valuation</p>
+                  <p className="text-white text-xs font-medium">${selectedTexasRawPermit.valuation.toLocaleString()}</p>
+                </div>
+              )}
+              {selectedTexasRawPermit.square_feet != null && selectedTexasRawPermit.square_feet > 0 && (
+                <div>
+                  <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Sq Ft</p>
+                  <p className="text-white text-xs font-medium">{selectedTexasRawPermit.square_feet.toLocaleString()}</p>
+                </div>
+              )}
+              {selectedTexasRawPermit.housing_units != null && selectedTexasRawPermit.housing_units > 0 && (
+                <div>
+                  <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Units</p>
+                  <p className="text-white text-xs font-medium">{selectedTexasRawPermit.housing_units.toLocaleString()}</p>
+                </div>
+              )}
+              {selectedTexasRawPermit.work_class && (
+                <div>
+                  <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Work Class</p>
+                  <p className="text-white text-xs font-medium">{selectedTexasRawPermit.work_class}</p>
+                </div>
+              )}
+            </div>
+            <div className="flex items-center justify-between pt-1">
+              {selectedTexasRawPermit.permit_number ? (
+                <p className="text-zinc-500 text-[10px]">{selectedTexasRawPermit.permit_number}</p>
+              ) : (
+                <span />
+              )}
+              {selectedTexasRawPermit.source_url && (
+                <a
+                  href={selectedTexasRawPermit.source_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[10px] font-medium text-[#D76B3D] hover:text-[#f3b18d]"
+                >
+                  View source
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!nycFeatureAvailable &&
+        texasPermitAvailable &&
+        !usingTexasRawPermits &&
+        effectiveLayers.nycPermits &&
+        selectedTexasPermit && (
+        <div
+          className="absolute bottom-4 left-4 z-40 w-72 rounded-xl overflow-hidden shadow-2xl"
+          style={{ background: 'rgba(6,6,6,0.88)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.08)' }}
+        >
+          <div className="flex items-start justify-between px-4 pt-3 pb-2" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+            <div>
+              <p className="text-white text-sm font-semibold leading-tight">{selectedTexasPermit.place_name}</p>
+              <p className="text-zinc-500 text-[10px] mt-0.5">
+                {selectedTexasPermit.county_name ?? 'Texas'}{selectedTexasPermit.metro_name ? ` · ${selectedTexasPermit.metro_name}` : ''}
+              </p>
+            </div>
+            <button onClick={() => setSelectedTexasPermit(null)} className="text-zinc-600 hover:text-white ml-2 flex-shrink-0">×</button>
+          </div>
+          <div className="px-4 py-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <span
+                className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                style={{
+                  background: 'rgba(215,107,61,0.2)',
+                  color: '#D76B3D',
+                  border: '1px solid rgba(215,107,61,0.3)',
+                }}
+              >
+                Residential Permit Activity
+              </span>
+              <span className="text-zinc-500 text-[10px]">{selectedTexasPermit.latest_month ?? 'Recent'}</span>
+            </div>
+            <p className="text-zinc-400 text-[10px] leading-relaxed">
+              Aggregated from the last 12 months of official Texas place-level permit activity; columns sit on place centroids, not parcel-level filings.
+            </p>
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <div>
+                <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Units</p>
+                <p className="text-white text-xs font-medium">{selectedTexasPermit.total_units.toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Buildings</p>
+                <p className="text-white text-xs font-medium">{selectedTexasPermit.total_buildings.toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Single-Family</p>
+                <p className="text-white text-xs font-medium">{selectedTexasPermit.single_family_units.toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Multi-Family</p>
+                <p className="text-white text-xs font-medium">{selectedTexasPermit.multi_family_units.toLocaleString()}</p>
+              </div>
+              <div className="col-span-2">
+                <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Construction Value</p>
+                <p className="text-white text-xs font-medium">${selectedTexasPermit.total_value.toLocaleString()}</p>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -1768,17 +2328,22 @@ function CommandMap({
                 color: '#a78bfa',
                 title: 'Color ZIP polygons by rent (ZORI) or home value (ZHVI) from Zillow. Turn on, then choose Fill metric below.',
               },
-              { key: 'parcels' as const, label: 'Parcels', color: '#fbbf24', zipOnly: true },
+              { key: 'parcels' as const, label: 'Parcels (NYC)', color: '#fbbf24', nycOnly: true },
               { key: 'tracts' as const, label: 'Tracts', color: '#2dd4bf' },
               { key: 'amenityHeatmap' as const, label: 'Amenity', color: '#facc15' },
               { key: 'floodRisk' as const, label: 'Flood', color: '#f87171' },
-              { key: 'nycPermits' as const, label: 'Permits', color: '#D76B3D' },
+              {
+                key: 'nycPermits' as const,
+                label: nycFeatureAvailable || usingTexasRawPermits ? 'Permits' : 'Permit activity',
+                color: '#D76B3D',
+                showWhen: permitFeatureAvailable,
+              },
               { key: 'pois' as const, label: 'POIs', color: '#f59e0b' },
               { key: 'momentum' as const, label: 'Momentum', color: '#a78bfa' },
               { key: 'clientData' as const, label: 'Client', color: '#D76B3D', showWhen: !!uploadedMarkers?.length },
-            ]).filter(({ zipOnly, showWhen }) => {
+            ]).filter(({ nycOnly, showWhen }) => {
               if (showWhen === false) return false
-              if (zipOnly) return (!cityZips?.length) || parcelData !== null
+              if (nycOnly) return nycFeatureAvailable
               return true
             }).map(({ key, label, color, title }) => {
               const active = effectiveLayers[key] ?? false
@@ -1806,7 +2371,7 @@ function CommandMap({
         <div className="mx-3 h-px bg-border/70" />
 
         {/* Parcel color mode - only shown when parcels layer is on */}
-        {effectiveLayers.parcels && parcelData && (
+        {effectiveLayers.parcels && nycFeatureAvailable && parcelData && (
           <>
             <div className="px-3 py-2">
               <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-500 mb-1.5">Parcel Color</p>
@@ -1837,7 +2402,7 @@ function CommandMap({
         )}
 
         {/* Permit type filter - only shown when permits layer is on */}
-        {effectiveLayers.nycPermits && (
+        {effectiveLayers.nycPermits && nycFeatureAvailable && (
           <>
             <div className="px-3 py-2">
               <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-500 mb-1.5">Permit Type</p>
@@ -1890,6 +2455,77 @@ function CommandMap({
           </>
         )}
 
+        {effectiveLayers.nycPermits && !nycFeatureAvailable && texasPermitAvailable && usingTexasRawPermits && (
+          <>
+            <div className="px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-500 mb-1.5">Permit Type</p>
+              <div className="flex flex-wrap gap-1">
+                {TEXAS_RAW_PERMIT_FILTER_META.map(({ key, label, color }) => {
+                  const active =
+                    texasRawPermitCategoryFilter.size === 0 || texasRawPermitCategoryFilter.has(key)
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => {
+                        setTexasRawPermitCategoryFilter((prev) => {
+                          const next = new Set(prev)
+                          if (next.size === 0) {
+                            next.add('new_construction')
+                            next.add('major_renovation')
+                            next.add('demolition')
+                            next.delete(key)
+                          } else if (next.has(key)) {
+                            next.delete(key)
+                            if (next.size === 0) return new Set()
+                          } else {
+                            next.add(key)
+                            if (next.size === TEXAS_RAW_PERMIT_FILTER_META.length) return new Set()
+                          }
+                          return next
+                        })
+                      }}
+                      className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all"
+                      style={{
+                        background: active ? `${color}20` : 'rgba(255,255,255,0.03)',
+                        border: `1px solid ${active ? color : 'rgba(255,255,255,0.07)'}`,
+                        color: active ? '#fff' : '#52525b',
+                      }}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: active ? color : '#3f3f46' }} />
+                      {label}
+                    </button>
+                  )
+                })}
+              </div>
+              <p className="text-[10px] leading-relaxed text-zinc-400 mt-1.5">
+                Austin raw building permits are filtered to new construction, demolition, and major renovation only.
+              </p>
+              <p className="text-[9px] text-zinc-600 mt-1.5">
+                {texasRawPermitData.length.toLocaleString()} permits loaded · {mapZoom < 13 ? `Heatmap · zoom ${Math.round(mapZoom)}` : `3D · zoom ${Math.round(mapZoom)}`}
+                {mapZoom < 13 && <span className="text-zinc-700"> (zoom in for 3D)</span>}
+              </p>
+            </div>
+            <div className="mx-3 h-px bg-border/70" />
+          </>
+        )}
+
+        {effectiveLayers.nycPermits && !nycFeatureAvailable && texasPermitAvailable && !usingTexasRawPermits && (
+          <>
+            <div className="px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-500 mb-1.5">Permit Activity</p>
+              <p className="text-[10px] leading-relaxed text-zinc-400">
+                Texas uses official place-level residential permit activity for the last 12 months. Heatmap below zoom 11, 3D columns above.
+              </p>
+              <p className="text-[9px] text-zinc-600 mt-1.5">
+                {texasPermitActivity.length > 0
+                  ? `${texasPermitActivity.length.toLocaleString()} places loaded`
+                  : 'No place activity loaded for this scope'}
+              </p>
+            </div>
+            <div className="mx-3 h-px bg-border/70" />
+          </>
+        )}
+
         {/* ZORI vs ZHVI - only applies when rent/value fill choropleth is on */}
         {effectiveLayers.rentChoropleth && (
           <>
@@ -1917,9 +2553,9 @@ function CommandMap({
           </>
         )}
 
-        {neighborBoundaries.length > 0 && (
+        {visibleNeighborBoundaries.length > 0 && (
           <div className="px-3 pb-2">
-            <p className="text-[10px] text-zinc-600">{neighborBoundaries.length} nearby ZIPs</p>
+            <p className="text-[10px] text-zinc-600">{visibleNeighborBoundaries.length} nearby ZIPs</p>
           </div>
         )}
           </div>

@@ -2,6 +2,24 @@ export type UploadCellValue = string | number | boolean | null
 
 export type UploadRawRow = Record<string, UploadCellValue>
 
+export type UploadFileFormat = 'csv' | 'txt' | 'xlsx'
+
+export interface UploadFileMetadata {
+  fileName: string
+  format: UploadFileFormat
+  byteSize: number
+  columnCount: number
+  rowCount: number
+  sampleRowCount: number
+  emptyRowCount: number
+}
+
+export interface UploadParseSummary {
+  file: UploadFileMetadata
+  headers: string[]
+  sampleRows: UploadRawRow[]
+}
+
 export type ProcessingStatus = 'pending' | 'ok' | 'failed'
 
 export interface NormalizedLocation {
@@ -80,6 +98,8 @@ export interface UploadParseResult {
   columns: string[]
   rows: UploadRawRow[]
   hints: UploadLocationHints
+  file: UploadFileMetadata
+  sampleRows: UploadRawRow[]
 }
 
 export interface UploadWorkflowState {

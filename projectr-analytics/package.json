@@ -8,6 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "ingest:zillow": "tsx scripts/ingest-zillow.ts",
+    "ingest:texas:housing": "tsx scripts/ingest-texas-housing-activity.ts",
+    "ingest:texas:permits": "tsx scripts/ingest-texas-building-permits.ts",
+    "ingest:texas:demographics": "tsx scripts/ingest-texas-demographics.ts",
     "populate:centroids": "tsx scripts/populate-centroids.ts",
     "ingest:permits": "tsx scripts/ingest-permits.ts",
     "warm:demo": "tsx scripts/warm-demo-zips.ts"

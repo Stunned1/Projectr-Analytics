@@ -30,6 +30,113 @@ export interface AgentAction {
   site?: AnalysisSite
 }
 
+export type EdaTaskType =
+  | 'summarize_dataset'
+  | 'describe_distribution'
+  | 'detect_outliers'
+  | 'compare_segments'
+  | 'compare_geographies'
+  | 'compare_periods'
+  | 'spot_trends'
+  | 'check_data_quality'
+  | 'explain_metric'
+
+export interface EdaEvidenceStat {
+  label: string
+  value: string
+  note?: string | null
+}
+
+export interface EdaDistributionSummary {
+  column: string
+  count: number
+  nullCount: number
+  mean: number | null
+  median: number | null
+  min: number | null
+  max: number | null
+  stddev: number | null
+  p25: number | null
+  p75: number | null
+}
+
+export interface EdaOutlierSummary {
+  label: string
+  value: number
+  reason: string
+}
+
+export interface EdaTrendSummary {
+  dateColumn: string
+  valueColumn: string
+  pointCount: number
+  startLabel: string
+  endLabel: string
+  startValue: number
+  endValue: number
+  delta: number
+  pctChange: number | null
+  direction: 'up' | 'down' | 'flat'
+  volatility: number | null
+}
+
+export interface EdaDataQualitySummary {
+  duplicateRows: number
+  sparseColumns: string[]
+  inconsistentDateColumns: string[]
+  invalidGeographyRows: number
+  warnings: string[]
+}
+
+export interface UploadedDatasetEdaProfile {
+  fileName: string | null
+  datasetType: string
+  mapabilityClassification: string
+  visualizationMode: 'map' | 'chart' | 'table'
+  rowCount: number
+  sampleRowCount: number
+  columnCount: number
+  headers: string[]
+  focusMetric: string | null
+  geoField: string | null
+  dateField: string | null
+  categoryField: string | null
+  summaryStats: EdaEvidenceStat[]
+  primaryDistribution?: EdaDistributionSummary | null
+  outliers?: EdaOutlierSummary[]
+  topCategories?: EdaEvidenceStat[]
+  trend?: EdaTrendSummary | null
+  dataQuality: EdaDataQualitySummary
+  explanation: string
+  warnings: string[]
+}
+
+export interface MarketMetricEdaProfile {
+  key: string
+  label: string
+  value: number | null
+  formattedValue: string
+  note?: string | null
+  source?: string | null
+}
+
+export interface MarketSnapshotEdaProfile {
+  label: string | null
+  metrics: MarketMetricEdaProfile[]
+  notableFlags: string[]
+}
+
+export interface WorkspaceEdaContext {
+  focus: 'uploaded_dataset' | 'market' | 'mixed' | 'empty'
+  market: MarketSnapshotEdaProfile | null
+  uploadedDatasets: UploadedDatasetEdaProfile[]
+  uploadedDatasetCount: number
+  geographyLabel: string | null
+  activeMetric: string | null
+  activeLayerKeys: string[]
+  notes: string[]
+}
+
 export interface AnalysisSite {
   address: string
   lat: number
@@ -61,13 +168,18 @@ export type AgentTraceToolRow = {
 }
 
 /**
- * Planning / eval / execution log from `/api/agent`, shown in the right sidebar via **Show thinking**.
+ * Analyst-facing notes from `/api/agent`, shown in the right sidebar via **Show analysis notes**.
  */
 export interface AgentTrace {
   summary: string
+  taskType?: EdaTaskType | null
+  methodology?: string | null
+  keyFindings?: string[]
+  evidence?: string[]
+  caveats?: string[]
+  nextQuestions?: string[]
   /**
-   * Long-form English reasoning (separate model pass before JSON actions).
-   * Shown like Cursor’s expanded thinking — headings and paragraphs, not just bullets.
+   * Legacy long-form prose field retained for compatibility; new EDA responses prefer `methodology`.
    */
   thinking?: string | null
   detail?: string | null
@@ -103,6 +215,8 @@ export interface MapContextClientCsv {
   mapPinCount: number
   mapEligible: boolean
   ingestedAt: string
+  datasets?: UploadedDatasetEdaProfile[]
+  notes?: string[]
 }
 
 export interface MapContext {
@@ -122,4 +236,5 @@ export interface MapContext {
   population?: number | null
   /** Present after a Client CSV normalize on this session */
   clientCsv?: MapContextClientCsv | null
+  eda?: WorkspaceEdaContext | null
 }

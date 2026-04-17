@@ -24,7 +24,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   },
   {
     command: 'go',
-    summary: '`/go <zip | city | borough>` — same as sidebar search / agent navigate',
+    summary: '`/go <zip | city | county | metro>` — same as sidebar search / agent navigate',
   },
   {
     command: 'save',
@@ -94,7 +94,7 @@ export function tiltSlashUsageLines(): string {
 export function clearSlashUsageLines(): string {
   return [
     'Usage: `/clear:<target>` — no spaces around the colon.',
-    '• `/clear:layers` — turns **off** every map layer and clears the NYC permit-type filter (map view unchanged).',
+    '• `/clear:layers` — turns **off** every map layer and clears any active permit-type filter (map view unchanged).',
     '• `/clear:terminal` — **clean canvas**: only the default greeting remains (the command is not echoed); case-brief bundle unchanged.',
     '• `/clear:memory` or `/clear:mem` — **clean canvas**: default greeting only; clears the case-brief bundle; **does not** reload, change market, or clear Client CSV.',
     '• `/clear:workspace` — **Clear local test data**: confirm, then wipe session keys (upload, pins, chat, pending nav) and **reload** the tab.',
@@ -105,7 +105,7 @@ export function clearSlashUsageLines(): string {
 
 export function goSlashUsageLines(): string {
   return [
-    'Usage: `/go <query>` — one line of text (ZIP, city, borough, or `City, ST`).',
+    'Usage: `/go <query>` — one line of text (ZIP, city, county, metro, or `City, ST`).',
     '• Runs the same navigation as the sidebar search (Enter).',
     '• Empty query after `/go` is rejected.',
     '• Extra leading/trailing spaces are trimmed.',
@@ -116,7 +116,7 @@ export function layersSlashUsageLines(): string {
   return [
     'Usage: `/layers:name1,name2,...` — **colon required**; comma-separated names; turns **on** those layers (others unchanged).',
     `• ${layerSlashValidNamesHint()}`,
-    '• Aliases: e.g. `rent` → rent/value fill, `permits` → NYC permits, `client` → Client markers.',
+    '• Aliases: e.g. `rent` → rent/value fill, `client` → Client markers, `permits` → NYC permits (only when the active market is in New York City).',
     '• Empty list or unknown names → error listing bad tokens.',
     '• Duplicates are ignored once.',
   ].join('\n')
@@ -168,7 +168,8 @@ export function buildSlashHelpMessage(): string {
     'Roadmap (not wired yet — tell us what you want first):',
     ...SLASH_COMMAND_IDEAS.map((s) => `  ${s}`),
     '',
-    'Anything without a leading slash (or after a space) is sent to the Gemini agent with live map context — **except** plain **y** / **n** right after a `/restart` prompt (those only confirm or cancel the local wipe).',
+    'Anything starting with `/` is treated as a slash command. Unknown slash commands return a local error and are never sent to the Gemini agent.',
+    'Natural-language prompts without `/` are sent to the Gemini agent only when they look related to Scout real estate, map, market, or uploaded-data work.',
   ]
   return lines.join('\n')
 }
@@ -216,7 +217,7 @@ export function parseTiltSlashCommand(trimmed: string): ParsedTiltSlash | null {
     }
   }
 
-  let token = tokens[0].replace(/%+$/i, '').trim()
+  const token = tokens[0].replace(/%+$/i, '').trim()
   if (token === '') {
     return { kind: 'bad_arg', message: 'Missing a number after `/tilt`. Example: `/tilt 50` (0–100% of max tilt).' }
   }
@@ -354,7 +355,7 @@ export function parseGoSlashCommand(trimmed: string): ParsedGoSlash | null {
   const query = (m[1] ?? '').trim().replace(/\s+/g, ' ')
   if (!query) return { kind: 'usage' }
   if (query.length > 500) {
-    return { kind: 'bad_arg', message: 'Search text is too long (max 500 characters). Try a shorter city, ZIP, or borough.' }
+    return { kind: 'bad_arg', message: 'Search text is too long (max 500 characters). Try a shorter city, county, metro, or ZIP.' }
   }
   return { kind: 'run', query }
 }
@@ -367,7 +368,7 @@ export function saveSlashUsageLines(): string {
   return [
     'Usage: `/save` or `/save <name>` — adds a row to **Saved** (same Supabase flow as the data panel).',
     '• **ZIP loaded** — saves that market (optional name replaces the default place label).',
-    '• **City / borough loaded** — saves the area (optional name; reopen uses your sidebar search text when set).',
+    '• **County / metro / city loaded** — saves the area (optional name; reopen uses your sidebar search text when set). NYC boroughs also work when relevant.',
     '• **Otherwise** — saves the **current map center** as a bookmark (optional name; default label uses rounded coordinates).',
     '• Requires Auth (enable **Anonymous** sign-ins in Supabase if you see a sign-in error).',
   ].join('\n')
@@ -465,5 +466,5 @@ export function isSlashCommandHandled(trimmed: string): boolean {
 }
 
 export function isUnknownSlashOnly(trimmed: string): boolean {
-  return /^\/\S+$/.test(trimmed) && !isSlashCommandHandled(trimmed)
+  return trimmed.startsWith('/') && !isSlashCommandHandled(trimmed)
 }

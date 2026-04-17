@@ -17,6 +17,9 @@ export interface ForwardGeocodeResult {
   postalCode?: string
 }
 
+const resolvedCache = new Map<string, ForwardGeocodeResult | null>()
+const inflight = new Map<string, Promise<ForwardGeocodeResult | null>>()
+
 /** Prefers ROOFTOP / RANGE_INTERPOLATED when multiple results exist. */
 export async function geocodeAddressForward(address: string): Promise<ForwardGeocodeResult | null> {
   const key = getGoogleForwardGeocodeKey()
@@ -24,9 +27,17 @@ export async function geocodeAddressForward(address: string): Promise<ForwardGeo
 
   const trimmed = address.trim()
   if (trimmed.length < 3) return null
+  const cacheKey = trimmed.toLowerCase()
+
+  if (resolvedCache.has(cacheKey)) {
+    return resolvedCache.get(cacheKey) ?? null
+  }
+  const existing = inflight.get(cacheKey)
+  if (existing) return existing
 
   const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(trimmed)}&key=${encodeURIComponent(key)}`
-  try {
+  const request = (async () => {
+    try {
     const response = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(12000) })
     if (!response.ok) return null
     const data = (await response.json()) as {
@@ -57,7 +68,14 @@ export async function geocodeAddressForward(address: string): Promise<ForwardGeo
     const postalCode =
       zipComponent && typeof zipComponent.long_name === 'string' ? zipComponent.long_name : undefined
     return { lat: loc.lat, lng: loc.lng, formattedAddress, postalCode }
-  } catch {
-    return null
-  }
+    } catch {
+      return null
+    }
+  })()
+
+  inflight.set(cacheKey, request)
+  const result = await request
+  inflight.delete(cacheKey)
+  resolvedCache.set(cacheKey, result)
+  return result
 }
