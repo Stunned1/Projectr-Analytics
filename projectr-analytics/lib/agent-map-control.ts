@@ -4,6 +4,8 @@ import {
   hasExplicitMapControlIntent,
   looksAnalyticalPrompt,
 } from '@/lib/agent-intent'
+import { looksLikeCountyQuery } from '@/lib/area-keys'
+import { splitTrailingUsState } from '@/lib/us-state-abbr'
 
 type LayerAlias = {
   key: string
@@ -42,6 +44,31 @@ export function humanizeLayerKey(key: string): string {
     .replace(/\bpois\b/i, 'POIs')
     .replace(/\bzip\b/i, 'ZIP')
     .toLowerCase()
+}
+
+function titleCaseWords(value: string): string {
+  return value
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => {
+      if (/^[A-Z]{2,}$/.test(word)) return word
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+    })
+    .join(' ')
+}
+
+export function normalizeMapSearchQuery(raw: string): string {
+  const cleaned = raw.trim().replace(/\s+/g, ' ')
+  if (!cleaned) return ''
+  if (/^\d{5}(?:-\d{4})?$/.test(cleaned)) return cleaned
+
+  const parsed = splitTrailingUsState(cleaned)
+  const baseName = (parsed.name || cleaned).trim()
+  const normalizedPlace = looksLikeCountyQuery(baseName)
+    ? titleCaseWords(baseName.replace(/\s+county$/i, '')) + ' County'
+    : titleCaseWords(baseName)
+
+  return parsed.stateAbbr ? `${normalizedPlace}, ${parsed.stateAbbr}` : normalizedPlace
 }
 
 function buildControlTrace(summary: string, evidence: string): AgentTrace {
@@ -148,7 +175,7 @@ function viewControlResponse(prompt: string): { message: string; action: AgentAc
 }
 
 function searchControlResponse(prompt: string, context: MapContext | null | undefined): { message: string; action: AgentAction; trace: AgentTrace } | null {
-  const query = extractSearchQuery(prompt)
+  const query = normalizeMapSearchQuery(extractSearchQuery(prompt) ?? '')
   if (!query || looksAnalyticalPrompt(query)) return null
 
   const activeLabel = context?.label?.trim().toLowerCase() ?? ''

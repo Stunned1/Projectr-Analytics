@@ -12,6 +12,7 @@ import {
   inferDirectMapControl,
   inferNavigationTarget,
   MAP_CONTROL_LAYER_KEYS,
+  normalizeMapSearchQuery,
 } from '@/lib/agent-map-control'
 import { buildEdaContextString, buildFallbackEdaResponse, inferEdaTaskType } from '@/lib/eda-assistant'
 import { evaluateAgentRequestPolicy } from '@/lib/agent-request-policy'
@@ -234,7 +235,9 @@ function buildMapControlResponseFromFallback(
   if (confidence != null && confidence < 0.6) return null
 
   if (actionType === 'search') {
-    const query = typeof parsed.searchQuery === 'string' ? parsed.searchQuery.trim().replace(/[.,;:!?]+$/g, '') : ''
+    const query = typeof parsed.searchQuery === 'string'
+      ? normalizeMapSearchQuery(parsed.searchQuery.trim().replace(/[.,;:!?]+$/g, ''))
+      : ''
     if (!query || looksAnalyticalPrompt(query)) return null
 
     const activeLabel = context?.label?.trim().toLowerCase() ?? ''

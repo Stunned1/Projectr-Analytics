@@ -214,6 +214,8 @@ _04.17.2026_
 - Hybrid terminal navigation prompts now strip connector words and punctuation before the search query, so requests like `take me to Harris County Texas, and then explain rent and vacancy` no longer search for `harris county texas, and`.
 - Hybrid map-control parsing now recognizes broader analytical follow-ups such as `walk me through` and `tell me about`, keeping navigation-plus-analysis prompts on the intended direct-search flow.
 - `/api/agent` now uses a bounded Gemini fallback parser only when the deterministic direct-control parser cannot confidently resolve a map action, which keeps normal search/layer commands fast while rescuing messier terminal phrasing.
+- The shared market search parser now recognizes trailing state names or USPS codes even without commas, so agent-driven searches like `harris county texas` route into the same county / metro / city resolution path as `Harris County, TX` instead of falling through to the city-only error path.
+- Agent-driven search actions now canonicalize resolved geographies before dispatch, so the terminal emits queries like `Harris County, TX` and `Houston, TX` instead of lowercased raw prompt fragments that still need downstream cleanup.
 
 **Map & Visualization**
 

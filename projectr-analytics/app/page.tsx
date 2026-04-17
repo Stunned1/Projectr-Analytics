@@ -40,7 +40,7 @@ import {
 import { ALL_LAYERS_OFF } from '@/lib/slash-layer-keys'
 import { normalizeHeadingDegrees } from '@/lib/slash-commands'
 import { looksLikeCountyQuery, looksLikeMetroQuery } from '@/lib/area-keys'
-import { normalizeUsStateToAbbr } from '@/lib/us-state-abbr'
+import { normalizeUsStateToAbbr, splitTrailingUsState } from '@/lib/us-state-abbr'
 import { MAP_VIEW_SAVE_ZIP } from '@/lib/saved-viewport'
 import { isNycBoroughName } from '@/lib/geography'
 import { fetchMomentumScores, getMomentumScore, normalizeMomentumZipList } from '@/lib/momentum-client'
@@ -357,6 +357,31 @@ async function loadAggregateData(zips: string[], label: string, areaKey?: string
     },
     cacheKey: buildAggregateRequestCacheKey(zips, label, areaKey),
   })
+}
+
+function parseAggregateSearchInput(raw: string): {
+  place: string
+  stateRaw: string | null
+  stateForApi: string | null
+} {
+  const trimmed = raw.trim()
+  const parts = trimmed.split(',').map((s) => s.trim()).filter(Boolean)
+  if (parts.length > 1) {
+    const place = parts[0] ?? ''
+    const stateRaw = parts.slice(1).join(', ').trim() || null
+    return {
+      place,
+      stateRaw,
+      stateForApi: stateRaw ? normalizeUsStateToAbbr(stateRaw) : null,
+    }
+  }
+
+  const parsed = splitTrailingUsState(trimmed)
+  return {
+    place: parsed.name,
+    stateRaw: parsed.stateRaw,
+    stateForApi: parsed.stateAbbr,
+  }
 }
 
 function fmtNum(n: number | null | undefined, suffix = '') {
@@ -1202,10 +1227,7 @@ export default function Home() {
           setError('Failed to fetch borough data')
         }
       } else {
-        const parts = trimmed.split(',').map((s) => s.trim()).filter(Boolean)
-        const cityName = parts[0]
-        const stateRaw = parts.slice(1).join(', ').trim()
-        const stateForApi = stateRaw ? normalizeUsStateToAbbr(stateRaw) : null
+        const { place: cityName, stateRaw, stateForApi } = parseAggregateSearchInput(trimmed)
         if (stateRaw && !stateForApi) {
           setError(`Could not parse state "${stateRaw}". Try a full name (e.g. New Jersey) or USPS code (NJ).`)
           return
