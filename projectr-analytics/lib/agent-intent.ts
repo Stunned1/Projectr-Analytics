@@ -28,8 +28,10 @@ const SCOUT_PRODUCT_CONTEXT_PATTERN =
 const EDA_INTENT_PATTERN =
   /\b(compare|analy[sz]e|find|summari[sz]e|explain|describe|inspect|review|check|spot|detect|outlier|anomal|trend|quality|missing|top|bottom|what is|why|what matters|stands out|overview|takeaway|walk me through)\b/i
 
-const ANALYTICAL_PROMPT_PATTERN =
-  /\b(trend|trends|distribution|outlier|outliers|anomal(?:y|ies)|quality|compare|comparison|versus|vs\.?|top|bottom|rank|ranking|summary|summarize|average|mean|median|percentile|change|changed|delta|growth|decline|increase|decrease|over time|explain|missing|duplicate|null|why|what matters|stands out|overview|takeaway|walk me through)\b/i
+export const ANALYTICAL_PROMPT_PATTERN_SOURCE =
+  'trend|trends|distribution|outlier|outliers|anomal(?:y|ies)|quality|compare|comparison|versus|vs\\.?|top|bottom|rank|ranking|summary|summarize|average|mean|median|percentile|change|changed|delta|growth|decline|increase|decrease|over time|explain|missing|duplicate|null|why|what matters|stands out|overview|takeaway|walk me through|tell(?: me)?(?: about)?'
+
+const ANALYTICAL_PROMPT_PATTERN = new RegExp(`\\b(?:${ANALYTICAL_PROMPT_PATTERN_SOURCE})\\b`, 'i')
 
 const STRONG_LAYER_CONTROL_PATTERN = /\b(turn on|turn off|hide|disable|enable)\b/i
 const WEAK_LAYER_CONTROL_PATTERN = /\b(show|display|open)\b/i

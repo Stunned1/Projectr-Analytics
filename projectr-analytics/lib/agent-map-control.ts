@@ -1,5 +1,9 @@
 import type { AgentAction, AgentTrace, MapContext } from '@/lib/agent-types'
-import { hasExplicitMapControlIntent, looksAnalyticalPrompt } from '@/lib/agent-intent'
+import {
+  ANALYTICAL_PROMPT_PATTERN_SOURCE,
+  hasExplicitMapControlIntent,
+  looksAnalyticalPrompt,
+} from '@/lib/agent-intent'
 
 type LayerAlias = {
   key: string
@@ -22,12 +26,17 @@ const LAYER_ALIASES: LayerAlias[] = [
   { key: 'zipBoundary', patterns: [/\bboundary\b/i, /\bzip boundary\b/i] },
 ]
 
+export const MAP_CONTROL_LAYER_KEYS = [...new Set(LAYER_ALIASES.map((alias) => alias.key))]
+
 const STRONG_LAYER_CONTROL_PATTERN = /\b(turn on|turn off|hide|disable|enable)\b/i
 const WEAK_LAYER_CONTROL_PATTERN = /\b(show|display|open)\b/i
-const SEARCH_CONTROL_PATTERN =
-  /\b(?:take me to|go to|load|search(?: for)?|navigate to|fly to|zoom to|center on)\s+(.+?)(?=\s+(?:and|then)\s+\b(?:explain|summari[sz]e|describe|compare|tell|show|find|check|analy[sz]e|why|what)\b|$)/i
+const SEARCH_CONTROL_PATTERN = new RegExp(
+  String.raw`\b(?:take me to|go to|load|search(?: for)?|navigate to|fly to|zoom to|center on)\s+(.+?)(?=(?:\s*[,;:!?-]?\s*(?:and\s+then|then|and)\s+|\s*[,;:!?-]\s*|\s+)(?:${ANALYTICAL_PROMPT_PATTERN_SOURCE})\b|$)`,
+  'i'
+)
+const TRAILING_SEARCH_CONNECTOR_PATTERN = /(?:\s*[,;:!?-]?\s*(?:and\s+then|then|and))$/i
 
-function humanizeLayerKey(key: string): string {
+export function humanizeLayerKey(key: string): string {
   return key
     .replace(/([a-z])([A-Z])/g, '$1 $2')
     .replace(/\bpois\b/i, 'POIs')
@@ -54,7 +63,11 @@ function actionWithMetric(action: AgentAction, metric?: 'zori' | 'zhvi'): AgentA
 function extractSearchQuery(prompt: string): string | null {
   const match = prompt.match(SEARCH_CONTROL_PATTERN)
   if (!match) return null
-  const query = (match[1] ?? '').trim().replace(/[.,;:!?]+$/g, '')
+  const query = (match[1] ?? '')
+    .trim()
+    .replace(TRAILING_SEARCH_CONNECTOR_PATTERN, '')
+    .replace(/[.,;:!?]+$/g, '')
+    .trim()
   return query || null
 }
 

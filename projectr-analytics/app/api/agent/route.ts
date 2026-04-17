@@ -7,7 +7,12 @@ import { GoogleGenerativeAI } from '@google/generative-ai'
 import { normalizeAgentTrace } from '@/lib/agent-trace'
 import type { AgentTrace, MapContext } from '@/lib/agent-types'
 import { classifyAgentRequestIntent, looksAnalyticalPrompt } from '@/lib/agent-intent'
-import { inferDirectMapControl, inferNavigationTarget } from '@/lib/agent-map-control'
+import {
+  humanizeLayerKey,
+  inferDirectMapControl,
+  inferNavigationTarget,
+  MAP_CONTROL_LAYER_KEYS,
+} from '@/lib/agent-map-control'
 import { buildEdaContextString, buildFallbackEdaResponse, inferEdaTaskType } from '@/lib/eda-assistant'
 import { evaluateAgentRequestPolicy } from '@/lib/agent-request-policy'
 import { GEMINI_NO_EM_DASH_RULE } from '@/lib/gemini-text-rules'
@@ -52,9 +57,54 @@ STYLE RULES:
 
 ${GEMINI_NO_EM_DASH_RULE}`
 
+const MAP_CONTROL_FALLBACK_SYSTEM_PROMPT = `You are Scout's fallback parser for direct map-control requests.
+
+Your job is to extract one structured UI control action from a prompt that Scout already classified as direct map control, but which its deterministic parser could not confidently resolve.
+
+SUPPORTED ACTIONS:
+- search
+- toggle_layers
+- set_tilt
+- focus_data_panel
+- generate_memo
+- none
+
+SUPPORTED LAYER KEYS:
+- ${MAP_CONTROL_LAYER_KEYS.join('\n- ')}
+
+RULES:
+- Prefer "search" when the user is clearly asking to navigate to a geography or market.
+- If the prompt combines navigation and analysis, extract only the direct map-control action and ignore the analysis clause.
+- Do not invent geography names, layers, or parameters.
+- Use "none" if confidence is below 0.6 or the prompt is too ambiguous.
+- For toggle_layers, return a JSON object whose keys are layer keys and whose values are booleans.
+- For set_tilt, return a tilt from 0 to 60.
+
+OUTPUT CONTRACT:
+Return valid JSON only:
+{
+  "actionType": "search|toggle_layers|set_tilt|focus_data_panel|generate_memo|none",
+  "searchQuery": "string or null",
+  "layers": { "transitStops": true },
+  "tilt": 45,
+  "confidence": 0.0,
+  "reason": "short explanation"
+}
+
+${GEMINI_NO_EM_DASH_RULE}`
+
 type AgentJsonResponse = {
   message: string
   trace?: unknown
+}
+
+type MapControlFallbackJson = {
+  actionType?: unknown
+  searchQuery?: unknown
+  layers?: unknown
+  tilt?: unknown
+  confidence?: unknown
+  reason?: unknown
 }
 
 function parseGeminiAgentJson(raw: string): AgentJsonResponse {
@@ -71,6 +121,30 @@ function parseGeminiAgentJson(raw: string): AgentJsonResponse {
   }
 
   return { message: raw.trim() || 'Unable to interpret the current workspace context.' }
+}
+
+function parseMapControlFallbackJson(raw: string): MapControlFallbackJson {
+  try {
+    const cleaned = raw.replace(/^```json\s*/i, '').replace(/\s*```$/i, '').trim()
+    return JSON.parse(cleaned) as MapControlFallbackJson
+  } catch {
+    try {
+      const match = raw.match(/\{[\s\S]*\}/)
+      if (match) return JSON.parse(match[0]) as MapControlFallbackJson
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return {}
+}
+
+function getGeminiJsonModel(systemInstruction: string) {
+  return new GoogleGenerativeAI(process.env.GEMINI_API_KEY!).getGenerativeModel({
+    model: 'gemini-2.5-flash',
+    systemInstruction,
+    generationConfig: { responseMimeType: 'application/json' },
+  })
 }
 
 function mergeTrace(primary: AgentTrace, fallback: AgentTrace): AgentTrace {
@@ -91,6 +165,27 @@ function mergeTrace(primary: AgentTrace, fallback: AgentTrace): AgentTrace {
   }
 }
 
+function buildMapControlFallbackTrace(
+  summary: string,
+  reason: string | null,
+  confidence: number | null
+): AgentTrace {
+  const normalizedReason = reason?.replace(/[.?!\s]+$/g, '') ?? null
+
+  return {
+    summary,
+    methodology:
+      'Scout’s deterministic map-control parser could not confidently resolve the prompt, so a bounded JSON-only Gemini fallback parser extracted a single UI control action.',
+    keyFindings: [summary],
+    evidence: [
+      confidence != null ? `Fallback parser confidence: ${confidence.toFixed(2)}.` : 'Fallback parser returned a structured action.',
+      normalizedReason ? `Fallback reason: ${normalizedReason}.` : 'The fallback parser extracted the action from the original prompt.',
+    ],
+    caveats: ['This fallback only runs when the deterministic map-control parser fails or returns no confident action.'],
+    nextQuestions: ['Ask for EDA on the loaded market or imported dataset if you want interpretation after the UI action runs.'],
+  }
+}
+
 function buildHybridMapAnalysisTrace(summary: string, findings: string[], caveats: string[], nextQuestions: string[]): AgentTrace {
   return {
     summary,
@@ -103,10 +198,160 @@ function buildHybridMapAnalysisTrace(summary: string, findings: string[], caveat
   }
 }
 
+function normalizeLayerRecord(value: unknown): Record<string, boolean> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key, enabled]) => MAP_CONTROL_LAYER_KEYS.includes(key) && typeof enabled === 'boolean')
+  )
+}
+
+function shouldTryMapControlFallback(
+  prompt: string,
+  deterministic: ReturnType<typeof inferDirectMapControl>
+): boolean {
+  if (!deterministic) return true
+  if (deterministic.action.type !== 'search') return false
+
+  const query = deterministic.action.query?.trim().toLowerCase() ?? ''
+  if (!query) return true
+  if (query.split(/\s+/).length > 8) return true
+  if (/\b(?:and|then)\b/i.test(query)) return true
+  if (/[?]/.test(query)) return true
+
+  return looksAnalyticalPrompt(prompt) && looksAnalyticalPrompt(query)
+}
+
+function buildMapControlResponseFromFallback(
+  parsed: MapControlFallbackJson,
+  context: MapContext | null | undefined
+) {
+  const actionType = typeof parsed.actionType === 'string' ? parsed.actionType : 'none'
+  const confidence = typeof parsed.confidence === 'number' && Number.isFinite(parsed.confidence) ? parsed.confidence : null
+  const reason = typeof parsed.reason === 'string' ? parsed.reason.trim() : null
+
+  if (confidence != null && confidence < 0.6) return null
+
+  if (actionType === 'search') {
+    const query = typeof parsed.searchQuery === 'string' ? parsed.searchQuery.trim().replace(/[.,;:!?]+$/g, '') : ''
+    if (!query || looksAnalyticalPrompt(query)) return null
+
+    const activeLabel = context?.label?.trim().toLowerCase() ?? ''
+    if (activeLabel && activeLabel === query.toLowerCase()) {
+      return {
+        message: `${query} is already the active market.`,
+        action: { type: 'none' as const },
+        trace: buildMapControlFallbackTrace('Active market already loaded', reason, confidence),
+      }
+    }
+
+    return {
+      message: `Navigating to ${query}.`,
+      action: { type: 'search' as const, query },
+      trace: buildMapControlFallbackTrace(`Navigate to ${query}`, reason, confidence),
+    }
+  }
+
+  if (actionType === 'toggle_layers') {
+    const layers = normalizeLayerRecord(parsed.layers)
+    const layerKeys = Object.keys(layers)
+    if (layerKeys.length === 0) return null
+
+    const allOff = layerKeys.every((key) => layers[key] === false)
+    const humanLayerNames = layerKeys.map((key) => humanizeLayerKey(key)).join(', ')
+
+    return {
+      message: `${allOff ? 'Turning off' : 'Turning on'} ${humanLayerNames}.`,
+      action: { type: 'toggle_layers' as const, layers },
+      trace: buildMapControlFallbackTrace(`${allOff ? 'Hide' : 'Show'} ${humanLayerNames}`, reason, confidence),
+    }
+  }
+
+  if (actionType === 'set_tilt') {
+    const tilt = typeof parsed.tilt === 'number' && Number.isFinite(parsed.tilt)
+      ? Math.max(0, Math.min(60, Math.round(parsed.tilt)))
+      : null
+    if (tilt == null) return null
+
+    return {
+      message: tilt === 0 ? 'Flattening the map to 2D.' : `Setting map tilt to ${tilt}°.`,
+      action: { type: 'set_tilt' as const, tilt },
+      trace: buildMapControlFallbackTrace(tilt === 0 ? 'Switch to 2D view' : 'Set map tilt', reason, confidence),
+    }
+  }
+
+  if (actionType === 'focus_data_panel') {
+    return {
+      message: 'Opening the data panel.',
+      action: { type: 'focus_data_panel' as const },
+      trace: buildMapControlFallbackTrace('Open data panel', reason, confidence),
+    }
+  }
+
+  if (actionType === 'generate_memo') {
+    return {
+      message: 'Opening the analysis panel.',
+      action: { type: 'generate_memo' as const },
+      trace: buildMapControlFallbackTrace('Open analysis panel', reason, confidence),
+    }
+  }
+
+  return null
+}
+
+async function inferMapControlWithFallback(
+  prompt: string,
+  context: MapContext | null | undefined
+) {
+  const deterministic = inferDirectMapControl(prompt, context)
+  if (deterministic && !shouldTryMapControlFallback(prompt, deterministic)) return deterministic
+
+  if (!process.env.GEMINI_API_KEY) return deterministic
+
+  try {
+    const model = getGeminiJsonModel(MAP_CONTROL_FALLBACK_SYSTEM_PROMPT)
+    const result = await model.generateContent(
+      [
+        `USER REQUEST: ${prompt}`,
+        `ACTIVE MARKET LABEL: ${context?.label ?? 'none'}`,
+        `ACTIVE LAYERS: ${
+          Object.entries(context?.layers ?? {})
+            .filter(([, enabled]) => enabled)
+            .map(([key]) => key)
+            .join(', ') || 'none'
+        }`,
+      ].join('\n')
+    )
+
+    const fallback = buildMapControlResponseFromFallback(parseMapControlFallbackJson(result.response.text().trim()), context)
+    return fallback ?? deterministic
+  } catch {
+    return deterministic
+  }
+}
+
+function unresolvedMapControlPayload() {
+  return {
+    message:
+      'I could not confidently parse that map-control request. Try a direct prompt like "take me to Harris County, TX" or "turn on transit," then ask the follow-up analysis.',
+    action: { type: 'none' as const },
+    trace: {
+      summary: 'Map-control request could not be parsed',
+      methodology:
+        'Scout checked the deterministic map-control parser and, when available, the bounded Gemini fallback parser, but neither produced a confident control action.',
+      keyFindings: ['No map-control action was executed.'],
+      evidence: ['The request was classified as direct map control, but no confident structured action could be extracted.'],
+      caveats: ['Retry with a slightly more direct command if you want navigation or a UI control change first.'],
+      nextQuestions: ['Try "take me to Harris County, TX."', 'Try "turn on transit."', 'After the action runs, ask the analysis question again.'],
+    },
+  }
+}
+
 async function runAgentPipeline(context: MapContext | null, userMessage: string) {
   const intent = classifyAgentRequestIntent(userMessage, context)
   if (intent.lane === 'direct_map_control') {
-    const mapControl = inferDirectMapControl(userMessage, context)
+    const mapControl = await inferMapControlWithFallback(userMessage, context)
     if (mapControl) {
       if (looksAnalyticalPrompt(userMessage)) {
         const fallback = buildFallbackEdaResponse(userMessage, context)
@@ -162,6 +407,8 @@ async function runAgentPipeline(context: MapContext | null, userMessage: string)
         trace: mapControl.trace,
       }
     }
+
+    return unresolvedMapControlPayload()
   }
 
   const fallback = buildFallbackEdaResponse(userMessage, context)
@@ -175,11 +422,7 @@ async function runAgentPipeline(context: MapContext | null, userMessage: string)
     }
   }
 
-  const model = new GoogleGenerativeAI(process.env.GEMINI_API_KEY).getGenerativeModel({
-    model: 'gemini-2.5-flash',
-    systemInstruction: SYSTEM_PROMPT,
-    generationConfig: { responseMimeType: 'application/json' },
-  })
+  const model = getGeminiJsonModel(SYSTEM_PROMPT)
 
   try {
     const contextStr = buildEdaContextString(userMessage, context)
