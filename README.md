@@ -91,6 +91,12 @@ Copy `.env.local` and fill in:
 ```
 FRED_API_KEY
 CENSUS_API_KEY
+BIGQUERY_PROJECT_ID             # optional; overrides GOOGLE_CLOUD_PROJECT for server-side market-data router reads, but ADC-backed environments may omit it
+BIGQUERY_DATASET_ID             # optional until the market-data router is wired to live reads
+BIGQUERY_TABLE_ID               # optional until the market-data router is wired to live reads
+BIGQUERY_LOCATION               # optional; defaults to US
+MARKET_DATA_WARM_RETENTION_MONTHS # optional; defaults to 12 months
+GOOGLE_APPLICATION_CREDENTIALS  # optional standard GCP service-account JSON path for server-side BigQuery auth; ADC also works
 NEXT_PUBLIC_SUPABASE_URL
 NEXT_PUBLIC_SUPABASE_ANON_KEY
 SUPABASE_SERVICE_ROLE_KEY        # optional but recommended for ingest scripts that backfill new rows into `projectr_master_data`
@@ -102,6 +108,8 @@ GOOGLE_MAPS_STATIC_KEY           # optional; unused by current PDF exports (rese
 HUD_API_TOKEN                    # optional, falls back to Census ACS rent data
 TRANSITLAND_API_KEY=             # free at transit.land/sign-up (Developer API, 10k queries/month)
 ```
+
+BigQuery router reads use standard Google Cloud server credentials. If you want to exercise the helper locally, authenticate with Application Default Credentials or point `GOOGLE_APPLICATION_CREDENTIALS` at a service-account JSON before calling it.
 
 ### First-time data setup
 1. Download Zillow CSVs (see section below) into `zillow-csv's/` at repo root
@@ -164,6 +172,11 @@ _4.12.2026_
 
 _04.16.2026_
 - Added shared geography gating and Texas MVP source / architecture / performance notes so Texas becomes the default product framing without deleting NYC-specific workflows.
+
+_04.17.2026_
+- Fixed the market-data router scaffolding so `lib/data/types.ts` now exposes the router read row shape plus `normalizeBigQueryDateLike` and `warmMonthsRetention`, while `lib/data/bigquery.ts` is an explicit `server-only` BigQuery helper backed by `@google-cloud/bigquery` and the targeted Node test temporarily shims the module loader so it can import that helper safely.
+- `normalizeBigQueryDateLike` now accepts BigQuery-style datetime strings with space separators and short UTC offsets such as `2026-04-17 15:30:00+00`.
+- `normalizeBigQueryDateLike` now preserves the leading calendar date for BigQuery `DATE` and `DATETIME`-style strings without timezone drift, and BigQuery config now treats dataset/table plus ADC credentials as a valid configured state even when no explicit project env is set.
 - Added `/api/county`, `/api/metro`, and `/api/area-metrics`, and wired aggregate search to fall through from city lookups to county / metro lookups for Texas-friendly county / ZIP / metro workflows.
 - Texas-first demo warmups, slash help, and export/search messaging now use ZIP / county / metro wording instead of assuming city-or-borough-only flows.
 - `/api/agent` now includes a shared county / metro Texas-style case-study example alongside the NYC-only parcel-model example so non-NYC briefs stay on the shared workflow instead of drifting toward borough logic.
