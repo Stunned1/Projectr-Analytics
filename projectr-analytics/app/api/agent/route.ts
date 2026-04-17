@@ -5,12 +5,11 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { normalizeAgentTrace } from '@/lib/agent-trace'
-import type { AgentTrace, MapContext } from '@/lib/agent-types'
+import type { AgentAction, AgentStep, AgentTrace, MapContext } from '@/lib/agent-types'
 import { classifyAgentRequestIntent, looksAnalyticalPrompt } from '@/lib/agent-intent'
 import {
   humanizeLayerKey,
   inferDirectMapControl,
-  inferNavigationTarget,
   MAP_CONTROL_LAYER_KEYS,
   normalizeMapSearchQuery,
 } from '@/lib/agent-map-control'
@@ -58,9 +57,9 @@ STYLE RULES:
 
 ${GEMINI_NO_EM_DASH_RULE}`
 
-const MAP_CONTROL_FALLBACK_SYSTEM_PROMPT = `You are Scout's fallback parser for direct map-control requests.
+const MAP_CONTROL_SYSTEM_PROMPT = `You are Scout's direct map-control interpreter for natural-language Scout terminal prompts.
 
-Your job is to extract one structured UI control action from a prompt that Scout already classified as direct map control, but which its deterministic parser could not confidently resolve.
+Your job is to extract the intended UI control plan from a prompt that Scout already classified as direct map control.
 
 SUPPORTED ACTIONS:
 - search
@@ -74,20 +73,37 @@ SUPPORTED LAYER KEYS:
 - ${MAP_CONTROL_LAYER_KEYS.join('\n- ')}
 
 RULES:
+- Interpret natural-language phrasing semantically. Ignore filler such as "please", "can you", or "let's".
+- You may return either one direct action or an ordered "steps" array with up to 3 actions.
 - Prefer "search" when the user is clearly asking to navigate to a geography or market.
-- If the prompt combines navigation and analysis, extract only the direct map-control action and ignore the analysis clause.
+- If the prompt combines navigation with another direct map action, return both steps in order. Search should come first.
+- If the prompt combines map control and analysis, extract only the direct map-control action(s) and ignore the analysis clause.
 - Do not invent geography names, layers, or parameters.
 - Use "none" if confidence is below 0.6 or the prompt is too ambiguous.
 - For toggle_layers, return a JSON object whose keys are layer keys and whose values are booleans.
 - For set_tilt, return a tilt from 0 to 60.
+- Keep step messages short and user-facing.
 
 OUTPUT CONTRACT:
 Return valid JSON only:
 {
+  "message": "short user-facing summary",
   "actionType": "search|toggle_layers|set_tilt|focus_data_panel|generate_memo|none",
   "searchQuery": "string or null",
   "layers": { "transitStops": true },
   "tilt": 45,
+  "steps": [
+    {
+      "message": "Navigating to Dallas, TX.",
+      "actionType": "search",
+      "searchQuery": "Dallas, TX"
+    },
+    {
+      "message": "Turning on permits.",
+      "actionType": "toggle_layers",
+      "layers": { "permits": true }
+    }
+  ],
   "confidence": 0.0,
   "reason": "short explanation"
 }
@@ -99,11 +115,16 @@ type AgentJsonResponse = {
   trace?: unknown
 }
 
-type MapControlFallbackJson = {
+type MapControlActionJson = {
   actionType?: unknown
   searchQuery?: unknown
   layers?: unknown
   tilt?: unknown
+  message?: unknown
+}
+
+type MapControlPlanJson = MapControlActionJson & {
+  steps?: unknown
   confidence?: unknown
   reason?: unknown
 }
@@ -124,14 +145,14 @@ function parseGeminiAgentJson(raw: string): AgentJsonResponse {
   return { message: raw.trim() || 'Unable to interpret the current workspace context.' }
 }
 
-function parseMapControlFallbackJson(raw: string): MapControlFallbackJson {
+function parseMapControlPlanJson(raw: string): MapControlPlanJson {
   try {
     const cleaned = raw.replace(/^```json\s*/i, '').replace(/\s*```$/i, '').trim()
-    return JSON.parse(cleaned) as MapControlFallbackJson
+    return JSON.parse(cleaned) as MapControlPlanJson
   } catch {
     try {
       const match = raw.match(/\{[\s\S]*\}/)
-      if (match) return JSON.parse(match[0]) as MapControlFallbackJson
+      if (match) return JSON.parse(match[0]) as MapControlPlanJson
     } catch {
       /* ignore */
     }
@@ -166,27 +187,6 @@ function mergeTrace(primary: AgentTrace, fallback: AgentTrace): AgentTrace {
   }
 }
 
-function buildMapControlFallbackTrace(
-  summary: string,
-  reason: string | null,
-  confidence: number | null
-): AgentTrace {
-  const normalizedReason = reason?.replace(/[.?!\s]+$/g, '') ?? null
-
-  return {
-    summary,
-    methodology:
-      'Scout’s deterministic map-control parser could not confidently resolve the prompt, so a bounded JSON-only Gemini fallback parser extracted a single UI control action.',
-    keyFindings: [summary],
-    evidence: [
-      confidence != null ? `Fallback parser confidence: ${confidence.toFixed(2)}.` : 'Fallback parser returned a structured action.',
-      normalizedReason ? `Fallback reason: ${normalizedReason}.` : 'The fallback parser extracted the action from the original prompt.',
-    ],
-    caveats: ['This fallback only runs when the deterministic map-control parser fails or returns no confident action.'],
-    nextQuestions: ['Ask for EDA on the loaded market or imported dataset if you want interpretation after the UI action runs.'],
-  }
-}
-
 function buildHybridMapAnalysisTrace(summary: string, findings: string[], caveats: string[], nextQuestions: string[]): AgentTrace {
   return {
     summary,
@@ -208,31 +208,39 @@ function normalizeLayerRecord(value: unknown): Record<string, boolean> {
   )
 }
 
-function shouldTryMapControlFallback(
-  prompt: string,
-  deterministic: ReturnType<typeof inferDirectMapControl>
-): boolean {
-  if (!deterministic) return true
-  if (deterministic.action.type !== 'search') return false
-
-  const query = deterministic.action.query?.trim().toLowerCase() ?? ''
-  if (!query) return true
-  if (query.split(/\s+/).length > 8) return true
-  if (/\b(?:and|then)\b/i.test(query)) return true
-  if (/[?]/.test(query)) return true
-
-  return looksAnalyticalPrompt(prompt) && looksAnalyticalPrompt(query)
+type NormalizedMapControlStep = {
+  message: string
+  action: AgentAction
+  summary: string
 }
 
-function buildMapControlResponseFromFallback(
-  parsed: MapControlFallbackJson,
-  context: MapContext | null | undefined
-) {
-  const actionType = typeof parsed.actionType === 'string' ? parsed.actionType : 'none'
-  const confidence = typeof parsed.confidence === 'number' && Number.isFinite(parsed.confidence) ? parsed.confidence : null
-  const reason = typeof parsed.reason === 'string' ? parsed.reason.trim() : null
+type AgentPipelineResult = {
+  message: string
+  action?: AgentAction
+  steps?: AgentStep[]
+  trace: AgentTrace
+}
 
-  if (confidence != null && confidence < 0.6) return null
+function buildDefaultMapControlMessage(action: AgentAction): string {
+  if (action.type === 'search') return `Navigating to ${action.query}.`
+  if (action.type === 'toggle_layers') {
+    const layerKeys = Object.keys(action.layers ?? {})
+    const allOff = layerKeys.every((key) => action.layers?.[key] === false)
+    const humanLayerNames = layerKeys.map((key) => humanizeLayerKey(key)).join(', ')
+    return `${allOff ? 'Turning off' : 'Turning on'} ${humanLayerNames}.`
+  }
+  if (action.type === 'set_tilt') return action.tilt === 0 ? 'Flattening the map to 2D.' : `Setting map tilt to ${action.tilt}°.`
+  if (action.type === 'focus_data_panel') return 'Opening the data panel.'
+  if (action.type === 'generate_memo') return 'Opening the analysis panel.'
+  return 'Updating the map.'
+}
+
+function normalizeMapControlAction(
+  parsed: MapControlActionJson,
+  context: MapContext | null | undefined
+): NormalizedMapControlStep | null {
+  const actionType = typeof parsed.actionType === 'string' ? parsed.actionType : 'none'
+  const explicitMessage = typeof parsed.message === 'string' ? parsed.message.trim() : ''
 
   if (actionType === 'search') {
     const query = typeof parsed.searchQuery === 'string'
@@ -243,16 +251,16 @@ function buildMapControlResponseFromFallback(
     const activeLabel = context?.label?.trim().toLowerCase() ?? ''
     if (activeLabel && activeLabel === query.toLowerCase()) {
       return {
-        message: `${query} is already the active market.`,
-        action: { type: 'none' as const },
-        trace: buildMapControlFallbackTrace('Active market already loaded', reason, confidence),
+        message: explicitMessage || `${query} is already the active market.`,
+        action: { type: 'none' },
+        summary: 'Active market already loaded',
       }
     }
 
     return {
-      message: `Navigating to ${query}.`,
-      action: { type: 'search' as const, query },
-      trace: buildMapControlFallbackTrace(`Navigate to ${query}`, reason, confidence),
+      message: explicitMessage || `Navigating to ${query}.`,
+      action: { type: 'search', query },
+      summary: `Navigate to ${query}`,
     }
   }
 
@@ -261,13 +269,13 @@ function buildMapControlResponseFromFallback(
     const layerKeys = Object.keys(layers)
     if (layerKeys.length === 0) return null
 
-    const allOff = layerKeys.every((key) => layers[key] === false)
+    const action: AgentAction = { type: 'toggle_layers', layers }
     const humanLayerNames = layerKeys.map((key) => humanizeLayerKey(key)).join(', ')
-
+    const allOff = layerKeys.every((key) => layers[key] === false)
     return {
-      message: `${allOff ? 'Turning off' : 'Turning on'} ${humanLayerNames}.`,
-      action: { type: 'toggle_layers' as const, layers },
-      trace: buildMapControlFallbackTrace(`${allOff ? 'Hide' : 'Show'} ${humanLayerNames}`, reason, confidence),
+      message: explicitMessage || buildDefaultMapControlMessage(action),
+      action,
+      summary: `${allOff ? 'Hide' : 'Show'} ${humanLayerNames}`,
     }
   }
 
@@ -277,43 +285,143 @@ function buildMapControlResponseFromFallback(
       : null
     if (tilt == null) return null
 
+    const action: AgentAction = { type: 'set_tilt', tilt }
     return {
-      message: tilt === 0 ? 'Flattening the map to 2D.' : `Setting map tilt to ${tilt}°.`,
-      action: { type: 'set_tilt' as const, tilt },
-      trace: buildMapControlFallbackTrace(tilt === 0 ? 'Switch to 2D view' : 'Set map tilt', reason, confidence),
+      message: explicitMessage || buildDefaultMapControlMessage(action),
+      action,
+      summary: tilt === 0 ? 'Switch to 2D view' : 'Set map tilt',
     }
   }
 
   if (actionType === 'focus_data_panel') {
+    const action: AgentAction = { type: 'focus_data_panel' }
     return {
-      message: 'Opening the data panel.',
-      action: { type: 'focus_data_panel' as const },
-      trace: buildMapControlFallbackTrace('Open data panel', reason, confidence),
+      message: explicitMessage || buildDefaultMapControlMessage(action),
+      action,
+      summary: 'Open data panel',
     }
   }
 
   if (actionType === 'generate_memo') {
+    const action: AgentAction = { type: 'generate_memo' }
     return {
-      message: 'Opening the analysis panel.',
-      action: { type: 'generate_memo' as const },
-      trace: buildMapControlFallbackTrace('Open analysis panel', reason, confidence),
+      message: explicitMessage || buildDefaultMapControlMessage(action),
+      action,
+      summary: 'Open analysis panel',
     }
   }
 
   return null
 }
 
-async function inferMapControlWithFallback(
+function normalizeMapControlSteps(
+  value: unknown,
+  context: MapContext | null | undefined
+): NormalizedMapControlStep[] {
+  if (!Array.isArray(value)) return []
+
+  return value.flatMap((step) => {
+    if (!step || typeof step !== 'object' || Array.isArray(step)) return []
+    const normalized = normalizeMapControlAction(step as MapControlActionJson, context)
+    return normalized ? [normalized] : []
+  })
+}
+
+function buildGeminiMapControlTrace(
+  summary: string,
+  reason: string | null,
+  confidence: number | null,
+  steps: NormalizedMapControlStep[]
+): AgentTrace {
+  const normalizedReason = reason?.replace(/[.?!\s]+$/g, '') ?? null
+
+  return {
+    summary,
+    methodology:
+      'Scout used a bounded Gemini parser to interpret the natural-language map-control request into explicit UI actions, then normalized the result into canonical search, layer, and view commands.',
+    keyFindings: [
+      summary,
+      steps.length > 1 ? `${steps.length} ordered map actions were extracted from one prompt.` : 'A direct map action was extracted from the prompt.',
+    ],
+    evidence: [
+      confidence != null ? `Parser confidence: ${confidence.toFixed(2)}.` : 'The parser returned a structured action plan.',
+      normalizedReason ? `Parser reason: ${normalizedReason}.` : 'The parser used the natural-language request plus current map state to derive the action plan.',
+    ],
+    caveats: ['Slash-prefixed terminal commands still stay on the local deterministic path; this NLP parser is only for natural-language agent prompts.'],
+    nextQuestions: ['After the action runs, ask for EDA on the active market or imported dataset if you want interpretation.'],
+    executionSteps: steps.map((step) => ({
+      message: step.message,
+      actionType: step.action.type,
+    })),
+  }
+}
+
+function buildAgentSteps(steps: NormalizedMapControlStep[]): AgentStep[] {
+  return steps.map((step, index) => ({
+    delay: index * 900,
+    message: step.message,
+    action: step.action,
+  }))
+}
+
+function normalizeMapControlPlan(
+  parsed: MapControlPlanJson,
+  context: MapContext | null | undefined
+): AgentPipelineResult | null {
+  const confidence = typeof parsed.confidence === 'number' && Number.isFinite(parsed.confidence) ? parsed.confidence : null
+  const reason = typeof parsed.reason === 'string' ? parsed.reason.trim() : null
+  if (confidence != null && confidence < 0.6) return null
+
+  const explicitMessage = typeof parsed.message === 'string' ? parsed.message.trim() : ''
+  const normalizedSteps = normalizeMapControlSteps(parsed.steps, context)
+
+  if (normalizedSteps.length > 0) {
+    const summary = normalizedSteps.length > 1
+      ? `Execute ${normalizedSteps.length}-step map-control sequence`
+      : normalizedSteps[0]?.summary ?? 'Execute map-control action'
+
+    return {
+      message: explicitMessage || normalizedSteps.map((step) => step.message).join(' '),
+      steps: buildAgentSteps(normalizedSteps),
+      trace: buildGeminiMapControlTrace(summary, reason, confidence, normalizedSteps),
+    }
+  }
+
+  const singleAction = normalizeMapControlAction(parsed, context)
+  if (!singleAction) return null
+
+  return {
+    message: explicitMessage || singleAction.message,
+    action: singleAction.action,
+    trace: buildGeminiMapControlTrace(singleAction.summary, reason, confidence, [singleAction]),
+  }
+}
+
+function getPrimarySearchTarget(plan: AgentPipelineResult): string | null {
+  if (plan.action?.type === 'search') return plan.action.query ?? null
+  return plan.steps?.find((step) => step.action.type === 'search')?.action.query ?? null
+}
+
+function normalizeDeterministicMapControl(
+  deterministic: ReturnType<typeof inferDirectMapControl>
+): AgentPipelineResult | null {
+  if (!deterministic) return null
+  return {
+    message: deterministic.message,
+    action: deterministic.action,
+    trace: deterministic.trace,
+  }
+}
+
+async function inferMapControlWithModel(
   prompt: string,
   context: MapContext | null | undefined
-) {
+): Promise<AgentPipelineResult | null> {
   const deterministic = inferDirectMapControl(prompt, context)
-  if (deterministic && !shouldTryMapControlFallback(prompt, deterministic)) return deterministic
-
-  if (!process.env.GEMINI_API_KEY) return deterministic
+  if (!process.env.GEMINI_API_KEY) return normalizeDeterministicMapControl(deterministic)
 
   try {
-    const model = getGeminiJsonModel(MAP_CONTROL_FALLBACK_SYSTEM_PROMPT)
+    const model = getGeminiJsonModel(MAP_CONTROL_SYSTEM_PROMPT)
     const result = await model.generateContent(
       [
         `USER REQUEST: ${prompt}`,
@@ -327,10 +435,10 @@ async function inferMapControlWithFallback(
       ].join('\n')
     )
 
-    const fallback = buildMapControlResponseFromFallback(parseMapControlFallbackJson(result.response.text().trim()), context)
-    return fallback ?? deterministic
+    const parsed = normalizeMapControlPlan(parseMapControlPlanJson(result.response.text().trim()), context)
+    return parsed ?? normalizeDeterministicMapControl(deterministic)
   } catch {
-    return deterministic
+    return normalizeDeterministicMapControl(deterministic)
   }
 }
 
@@ -342,7 +450,7 @@ function unresolvedMapControlPayload() {
     trace: {
       summary: 'Map-control request could not be parsed',
       methodology:
-        'Scout checked the deterministic map-control parser and, when available, the bounded Gemini fallback parser, but neither produced a confident control action.',
+        'Scout checked the bounded Gemini map-control parser and the deterministic backup parser, but neither produced a confident control action.',
       keyFindings: ['No map-control action was executed.'],
       evidence: ['The request was classified as direct map control, but no confident structured action could be extracted.'],
       caveats: ['Retry with a slightly more direct command if you want navigation or a UI control change first.'],
@@ -351,24 +459,27 @@ function unresolvedMapControlPayload() {
   }
 }
 
-async function runAgentPipeline(context: MapContext | null, userMessage: string) {
+async function runAgentPipeline(context: MapContext | null, userMessage: string): Promise<AgentPipelineResult> {
   const intent = classifyAgentRequestIntent(userMessage, context)
   if (intent.lane === 'direct_map_control') {
-    const mapControl = await inferMapControlWithFallback(userMessage, context)
+    const mapControl = await inferMapControlWithModel(userMessage, context)
     if (mapControl) {
       if (looksAnalyticalPrompt(userMessage)) {
         const fallback = buildFallbackEdaResponse(userMessage, context)
+        const target = getPrimarySearchTarget(mapControl)
 
-        if (mapControl.action.type === 'search') {
-          const target = mapControl.action.query ?? inferNavigationTarget(userMessage) ?? 'the requested market'
+        if (target) {
           return {
             message: `Navigating to ${target}. Once that market loads, ask again and I’ll explain the requested snapshot using the active market data.`,
             action: mapControl.action,
+            steps: mapControl.steps,
             trace: buildHybridMapAnalysisTrace(
               `Navigate to ${target} for follow-up analysis`,
               [
                 `Matched an explicit navigation request for ${target}.`,
-                'The analytical part of the prompt refers to a market that is not yet the active workspace.',
+                mapControl.steps?.length
+                  ? 'The direct prompt also included additional map actions, which will run after the navigation step.'
+                  : 'The analytical part of the prompt refers to a market that is not yet the active workspace.',
               ],
               [
                 `I did not answer the analysis part yet because that would have used the current workspace instead of ${target}.`,
@@ -381,6 +492,7 @@ async function runAgentPipeline(context: MapContext | null, userMessage: string)
         return {
           message: `${mapControl.message} ${fallback.message}`.trim(),
           action: mapControl.action,
+          steps: mapControl.steps,
           trace: mergeTrace(
             {
               summary: `${mapControl.trace.summary} + ${fallback.trace.summary}`,
@@ -407,6 +519,7 @@ async function runAgentPipeline(context: MapContext | null, userMessage: string)
       return {
         message: mapControl.message,
         action: mapControl.action,
+        steps: mapControl.steps,
         trace: mapControl.trace,
       }
     }
@@ -555,6 +668,7 @@ export async function POST(request: NextRequest) {
               type: 'done',
               message: out.message,
               action: out.action,
+              steps: out.steps,
               trace: out.trace,
             })
           } catch (err) {

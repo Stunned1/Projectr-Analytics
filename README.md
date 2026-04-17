@@ -216,6 +216,7 @@ _04.17.2026_
 - `/api/agent` now uses a bounded Gemini fallback parser only when the deterministic direct-control parser cannot confidently resolve a map action, which keeps normal search/layer commands fast while rescuing messier terminal phrasing.
 - The shared market search parser now recognizes trailing state names or USPS codes even without commas, so agent-driven searches like `harris county texas` route into the same county / metro / city resolution path as `Harris County, TX` instead of falling through to the city-only error path.
 - Agent-driven search actions now canonicalize resolved geographies before dispatch, so the terminal emits queries like `Harris County, TX` and `Houston, TX` instead of lowercased raw prompt fragments that still need downstream cleanup.
+- Natural-language terminal map controls now run through a bounded Gemini interpreter that can emit ordered actions like `search -> permits ON`, while slash-prefixed commands stay on the local deterministic fast path and filler like `please` no longer pollutes geography searches.
 
 **Map & Visualization**
 

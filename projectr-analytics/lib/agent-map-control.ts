@@ -37,6 +37,8 @@ const SEARCH_CONTROL_PATTERN = new RegExp(
   'i'
 )
 const TRAILING_SEARCH_CONNECTOR_PATTERN = /(?:\s*[,;:!?-]?\s*(?:and\s+then|then|and))$/i
+const LEADING_SEARCH_NOISE_PATTERN = /^(?:please\s+|pls\s+|can you\s+|could you\s+|would you\s+|let's\s+|lets\s+)/i
+const TRAILING_SEARCH_NOISE_PATTERN = /(?:\s+(?:please|pls|thanks|thank you|for me|if you can|when you can|right now))+$/
 
 export function humanizeLayerKey(key: string): string {
   return key
@@ -58,12 +60,18 @@ function titleCaseWords(value: string): string {
 }
 
 export function normalizeMapSearchQuery(raw: string): string {
-  const cleaned = raw.trim().replace(/\s+/g, ' ')
+  const cleaned = raw
+    .trim()
+    .replace(/[.,;:!?]+$/g, '')
+    .replace(LEADING_SEARCH_NOISE_PATTERN, '')
+    .replace(TRAILING_SEARCH_NOISE_PATTERN, '')
+    .trim()
+    .replace(/\s+/g, ' ')
   if (!cleaned) return ''
   if (/^\d{5}(?:-\d{4})?$/.test(cleaned)) return cleaned
 
   const parsed = splitTrailingUsState(cleaned)
-  const baseName = (parsed.name || cleaned).trim()
+  const baseName = (parsed.name || cleaned).trim().replace(/[,\s]+$/g, '')
   const normalizedPlace = looksLikeCountyQuery(baseName)
     ? titleCaseWords(baseName.replace(/\s+county$/i, '')) + ' County'
     : titleCaseWords(baseName)
@@ -93,6 +101,7 @@ function extractSearchQuery(prompt: string): string | null {
   const query = (match[1] ?? '')
     .trim()
     .replace(TRAILING_SEARCH_CONNECTOR_PATTERN, '')
+    .replace(TRAILING_SEARCH_NOISE_PATTERN, '')
     .replace(/[.,;:!?]+$/g, '')
     .trim()
   return query || null
