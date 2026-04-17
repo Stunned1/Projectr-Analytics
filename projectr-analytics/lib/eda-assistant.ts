@@ -32,7 +32,7 @@ const TASK_KEYWORDS: Array<{ taskType: EdaTaskType; patterns: RegExp[] }> = [
   },
   {
     taskType: 'compare_geographies',
-    patterns: [/\bcompare\b/i, /\bvs\b/i, /\bversus\b/i, /\bcounty\b/i, /\bmetro\b/i, /\bzip\b/i],
+    patterns: [/\bcompare\b/i, /\bvs\b/i, /\bversus\b/i],
   },
   {
     taskType: 'compare_periods',
@@ -40,9 +40,19 @@ const TASK_KEYWORDS: Array<{ taskType: EdaTaskType; patterns: RegExp[] }> = [
   },
   {
     taskType: 'explain_metric',
-    patterns: [/\bwhat is\b/i, /\bexplain\b/i, /\bhow is\b/i, /\bmetric\b/i],
+    patterns: [/\bwhat is\b/i, /\bhow is\b/i, /\bmetric\b/i, /\bdefine\b/i],
   },
 ]
+
+const DATASET_FOCUS_PATTERN =
+  /\b(upload|uploaded|import|imported|dataset|csv|file|rows?|raw table|table|chart|sidebar|mapp?able|pins?|client data)\b/i
+
+const MARKET_FOCUS_PATTERN =
+  /\b(market|county|metro|zip|geography|area|rent|rents|zori|zhvi|vacancy|inventory|price cuts?|transit|population|snapshot|loaded market)\b/i
+
+const MAP_UPLOAD_PATTERN = /\b(map|mapped|pins?|client layer|on the map)\b/i
+const CHART_PATTERN = /\b(chart|trend|trends|time series|over time|month|quarter|year)\b/i
+const TABLE_PATTERN = /\b(table|rows?|raw|sidebar)\b/i
 
 function trimLines(lines: Array<string | null | undefined>, max = 4): string[] {
   return lines
@@ -65,13 +75,145 @@ function safeContext(context: MapContext | null | undefined): WorkspaceEdaContex
       market: null,
       uploadedDatasets: [],
       uploadedDatasetCount: 0,
+      geographyLabel: context?.label ?? null,
+      activeMetric: context?.activeMetric ?? null,
+      activeLayerKeys: Object.entries(context?.layers ?? {})
+        .filter(([, enabled]) => enabled)
+        .map(([key]) => key),
       notes: [],
     }
   )
 }
 
-function primaryDataset(workspace: WorkspaceEdaContext): UploadedDatasetEdaProfile | null {
-  return workspace.uploadedDatasets[0] ?? null
+function datasetNameTokens(fileName: string | null): string[] {
+  return (fileName ?? '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token.length >= 3 && !['csv', 'txt', 'data', 'upload', 'imported'].includes(token))
+}
+
+function datasetFieldTokens(dataset: UploadedDatasetEdaProfile): string[] {
+  return [
+    dataset.focusMetric,
+    dataset.geoField,
+    dataset.dateField,
+    dataset.categoryField,
+    ...dataset.headers.slice(0, 24),
+  ]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .map((value) => value.toLowerCase())
+}
+
+function marketMetricTokens(market: MarketSnapshotEdaProfile): string[] {
+  const aliasMap: Partial<Record<string, string[]>> = {
+    zori: ['rent', 'rents'],
+    zhvi: ['home value', 'home values', 'value layer'],
+    vacancy: ['vacancy'],
+    inventory: ['inventory'],
+    transit: ['transit'],
+    population: ['population'],
+    priceCuts: ['price cut', 'price cuts'],
+    dozPending: ['days on zillow', 'doz'],
+  }
+
+  return [...new Set(
+    market.metrics.flatMap((metric) => [
+      metric.key.toLowerCase(),
+      metric.label.toLowerCase(),
+      ...(aliasMap[metric.key] ?? []),
+    ])
+  )]
+}
+
+function promptMentionsDatasetField(prompt: string, dataset: UploadedDatasetEdaProfile): boolean {
+  const normalized = prompt.toLowerCase()
+  return datasetFieldTokens(dataset).some((token) => token.length >= 3 && normalized.includes(token))
+}
+
+function promptMentionsMarketOnlyMetric(
+  prompt: string,
+  market: MarketSnapshotEdaProfile,
+  dataset: UploadedDatasetEdaProfile
+): boolean {
+  const normalized = prompt.toLowerCase()
+  const datasetTokens = new Set(datasetFieldTokens(dataset))
+
+  return marketMetricTokens(market).some((token) => token.length >= 3 && normalized.includes(token) && !datasetTokens.has(token))
+}
+
+function scoreDatasetForPrompt(prompt: string, dataset: UploadedDatasetEdaProfile): number {
+  let score = 0
+  const normalized = prompt.toLowerCase()
+  const nameTokens = datasetNameTokens(dataset.fileName)
+
+  if (nameTokens.some((token) => normalized.includes(token))) score += 6
+  if (DATASET_FOCUS_PATTERN.test(normalized)) score += 1
+  if (MAP_UPLOAD_PATTERN.test(normalized) && dataset.visualizationMode === 'map') score += 4
+  if (CHART_PATTERN.test(normalized) && (dataset.visualizationMode === 'chart' || dataset.trend)) score += 4
+  if (TABLE_PATTERN.test(normalized) && dataset.visualizationMode !== 'map') score += 3
+  if (normalized.includes('not map') || normalized.includes("isn't on the map") || normalized.includes('why not map')) {
+    if (dataset.visualizationMode !== 'map') score += 4
+  }
+
+  if (promptMentionsDatasetField(prompt, dataset)) score += 2
+
+  return score
+}
+
+function selectRelevantDataset(
+  prompt: string,
+  workspace: WorkspaceEdaContext
+): UploadedDatasetEdaProfile | null {
+  if (workspace.uploadedDatasets.length === 0) return null
+  if (workspace.uploadedDatasets.length === 1) return workspace.uploadedDatasets[0]
+
+  let best: UploadedDatasetEdaProfile | null = workspace.uploadedDatasets[0] ?? null
+  let bestScore = Number.NEGATIVE_INFINITY
+
+  for (const dataset of workspace.uploadedDatasets) {
+    const score = scoreDatasetForPrompt(prompt, dataset)
+    if (score > bestScore) {
+      bestScore = score
+      best = dataset
+    }
+  }
+
+  return best
+}
+
+function chooseAnalysisSubject(prompt: string, context: MapContext | null | undefined): {
+  workspace: WorkspaceEdaContext
+  dataset: UploadedDatasetEdaProfile | null
+  market: MarketSnapshotEdaProfile | null
+} {
+  const workspace = safeContext(context)
+  const dataset = selectRelevantDataset(prompt, workspace)
+  const market = workspace.market
+
+  if (!dataset || !market) {
+    return { workspace, dataset, market }
+  }
+
+  const normalized = prompt.toLowerCase()
+  const datasetFocus = DATASET_FOCUS_PATTERN.test(normalized) || scoreDatasetForPrompt(prompt, dataset) >= 4
+  const marketFocus = MARKET_FOCUS_PATTERN.test(normalized)
+  const metricKey = inferMetricKey(prompt, market)
+  const datasetFieldMatch = promptMentionsDatasetField(prompt, dataset)
+  const marketOnlyMetricMatch = promptMentionsMarketOnlyMetric(prompt, market, dataset)
+
+  if (marketOnlyMetricMatch) {
+    return { workspace, dataset: null, market }
+  }
+
+  if (datasetFocus && !marketFocus) {
+    return { workspace, dataset, market: null }
+  }
+
+  if ((marketFocus || metricKey) && (!datasetFocus || !datasetFieldMatch)) {
+    return { workspace, dataset: null, market }
+  }
+
+  return { workspace, dataset, market: null }
 }
 
 function inferMetricKey(prompt: string, market: MarketSnapshotEdaProfile | null): MetricKey | null {
@@ -93,16 +235,32 @@ export function inferEdaTaskType(prompt: string, context: MapContext | null | un
   if (!normalized) return 'summarize_dataset'
 
   for (const task of TASK_KEYWORDS) {
-    if (task.patterns.some((pattern) => pattern.test(normalized))) return task.taskType
+      if (task.patterns.some((pattern) => pattern.test(normalized))) return task.taskType
   }
 
   const workspace = safeContext(context)
-  if (workspace.uploadedDatasetCount > 0) return 'summarize_dataset'
+  const metricKey = inferMetricKey(prompt, workspace.market)
+  if (
+    /\bexplain\b/i.test(normalized) &&
+    metricKey &&
+    !/\b(snapshot|market|dataset|upload|uploaded|csv|trend|trends|change|changed|compare|summary|summari[sz]e)\b/i.test(normalized)
+  ) {
+    return 'explain_metric'
+  }
+  if (workspace.uploadedDatasetCount > 0 || workspace.market) return 'summarize_dataset'
   return 'explain_metric'
 }
 
-function datasetEvidence(dataset: UploadedDatasetEdaProfile): string[] {
+function datasetEvidence(dataset: UploadedDatasetEdaProfile, workspace: WorkspaceEdaContext): string[] {
   const evidence = dataset.summaryStats.map((stat) => `${stat.label}: ${stat.value}${stat.note ? ` (${stat.note})` : ''}`)
+
+  if (workspace.geographyLabel) {
+    evidence.push(`Active geography: ${workspace.geographyLabel}.`)
+  }
+
+  if (workspace.activeLayerKeys.length > 0) {
+    evidence.push(`Visible layers: ${workspace.activeLayerKeys.join(', ')}.`)
+  }
 
   if (dataset.primaryDistribution) {
     evidence.push(
@@ -128,8 +286,27 @@ function datasetEvidence(dataset: UploadedDatasetEdaProfile): string[] {
   return evidence.slice(0, 6)
 }
 
-function datasetFindings(taskType: EdaTaskType, dataset: UploadedDatasetEdaProfile): string[] {
+function datasetFindings(
+  prompt: string,
+  taskType: EdaTaskType,
+  dataset: UploadedDatasetEdaProfile
+): string[] {
   const findings: string[] = []
+  const normalized = prompt.toLowerCase()
+  const asksAboutMapability = /\bwhy\b/i.test(normalized) && MAP_UPLOAD_PATTERN.test(normalized)
+  const normalizedMapExplanation = dataset.explanation.trim().replace(/[.?!]+$/, '')
+
+  if (asksAboutMapability) {
+    if (dataset.visualizationMode === 'map') {
+      findings.push(
+        `${dataset.fileName ?? 'This dataset'} can render on the map because Scout has usable geography for its active rows.`
+      )
+    } else {
+      findings.push(
+        `${dataset.fileName ?? 'This dataset'} stays in ${dataset.visualizationMode} view because ${normalizedMapExplanation || 'the current import session does not have reliable row-level geography for direct map placement'}.`
+      )
+    }
+  }
 
   findings.push(
     `${dataset.fileName ?? 'Imported dataset'} has ${dataset.rowCount.toLocaleString()} rows across ${dataset.columnCount.toLocaleString()} columns and currently routes to ${dataset.visualizationMode} view.`
@@ -165,8 +342,23 @@ function datasetFindings(taskType: EdaTaskType, dataset: UploadedDatasetEdaProfi
   return trimLines(findings, 4)
 }
 
-function datasetCaveats(dataset: UploadedDatasetEdaProfile, workspace: WorkspaceEdaContext): string[] {
+function datasetCaveats(
+  dataset: UploadedDatasetEdaProfile,
+  workspace: WorkspaceEdaContext,
+  context: MapContext | null | undefined
+): string[] {
+  const clientLayerActive = context?.layers?.clientData === true
   const lines = [
+    dataset.visualizationMode === 'map'
+      ? clientLayerActive
+        ? `${dataset.fileName ?? 'This dataset'} currently has mapped rows available through the Client layer.`
+        : `${dataset.fileName ?? 'This dataset'} can render on the map, but the Client layer is currently off.`
+      : dataset.visualizationMode === 'chart'
+        ? `${dataset.fileName ?? 'This dataset'} is being analyzed in chart/sidebar mode rather than direct map mode.`
+        : `${dataset.fileName ?? 'This dataset'} is being analyzed in table/sidebar mode because direct row placement is not the active rendering path.`,
+    dataset.mapabilityClassification === 'map_normalizable' && dataset.visualizationMode !== 'map'
+      ? 'This dataset may become mappable after geography normalization or resolution.'
+      : null,
     dataset.sampleRowCount < dataset.rowCount
       ? `${dataset.fileName ?? 'This dataset'} is being analyzed from ${dataset.sampleRowCount.toLocaleString()} sampled rows in the current workspace, not the full imported row set.`
       : null,
@@ -179,7 +371,11 @@ function datasetCaveats(dataset: UploadedDatasetEdaProfile, workspace: Workspace
   return trimLines([...new Set(lines.filter(Boolean) as string[])], 5)
 }
 
-function marketFindings(taskType: EdaTaskType, market: MarketSnapshotEdaProfile): string[] {
+function marketFindings(
+  taskType: EdaTaskType,
+  market: MarketSnapshotEdaProfile,
+  workspace: WorkspaceEdaContext
+): string[] {
   const findings: string[] = []
   const rent = market.metrics.find((metric) => metric.key === 'zori')
   const value = market.metrics.find((metric) => metric.key === 'zhvi')
@@ -195,15 +391,21 @@ function marketFindings(taskType: EdaTaskType, market: MarketSnapshotEdaProfile)
     findings.push(`${vacancy.label} is ${vacancy.formattedValue}.`)
   }
 
+  if (workspace.activeMetric) findings.push(`The active map metric is ${workspace.activeMetric.toUpperCase()}.`)
   if (market.notableFlags.length > 0) findings.push(market.notableFlags[0])
 
   return trimLines(findings, 4)
 }
 
-function marketEvidence(market: MarketSnapshotEdaProfile): string[] {
-  return market.metrics
+function marketEvidence(market: MarketSnapshotEdaProfile, workspace: WorkspaceEdaContext): string[] {
+  const evidence = market.metrics
     .slice(0, 6)
     .map((metric) => `${metric.label}: ${metric.formattedValue}${metric.note ? ` (${metric.note})` : ''}`)
+
+  if (workspace.geographyLabel) evidence.push(`Active geography: ${workspace.geographyLabel}.`)
+  if (workspace.activeLayerKeys.length > 0) evidence.push(`Visible layers: ${workspace.activeLayerKeys.join(', ')}.`)
+
+  return evidence
 }
 
 function explainMetricTrace(metricKey: MetricKey): AgentTrace {
@@ -229,10 +431,8 @@ export function buildFallbackEdaResponse(prompt: string, context: MapContext | n
   message: string
   trace: AgentTrace
 } {
-  const workspace = safeContext(context)
+  const { workspace, dataset, market } = chooseAnalysisSubject(prompt, context)
   const taskType = inferEdaTaskType(prompt, context)
-  const dataset = primaryDataset(workspace)
-  const market = workspace.market
   const metricKey = inferMetricKey(prompt, market)
 
   if (taskType === 'explain_metric' && metricKey) {
@@ -244,19 +444,22 @@ export function buildFallbackEdaResponse(prompt: string, context: MapContext | n
   }
 
   if (dataset) {
-    const findings = datasetFindings(taskType, dataset)
-    const evidence = datasetEvidence(dataset)
-    const caveats = datasetCaveats(dataset, workspace)
+    const summaryLabel = taskType === 'summarize_dataset' ? 'summarize uploaded dataset' : taskType.replace(/_/g, ' ')
+    const findings = datasetFindings(prompt, taskType, dataset)
+    const evidence = datasetEvidence(dataset, workspace)
+    const caveats = datasetCaveats(dataset, workspace, context)
     const nextQuestions = trimLines([
       `Compare the top and bottom ${dataset.focusMetric ?? 'records'}.`,
       dataset.trend ? `Explain what changed around ${dataset.trend.endLabel}.` : null,
+      dataset.visualizationMode === 'map' ? 'Explain what the mapped rows suggest relative to the loaded market.' : null,
+      dataset.visualizationMode !== 'map' ? 'Explain why this dataset is using a sidebar fallback instead of the map.' : null,
       dataset.dataQuality.sparseColumns.length > 0 ? 'Inspect the sparsest columns before drawing a hard conclusion.' : null,
     ], 3)
 
     return {
       message: findings.slice(0, 2).join(' '),
       trace: {
-        summary: `${taskType.replace(/_/g, ' ')} · ${dataset.fileName ?? 'imported dataset'}`,
+        summary: `${summaryLabel} · ${dataset.fileName ?? 'imported dataset'}`,
         taskType,
         methodology: 'Used deterministic upload summaries, distribution stats, outlier checks, and data-quality checks already computed from the active imported dataset.',
         keyFindings: findings,
@@ -268,11 +471,15 @@ export function buildFallbackEdaResponse(prompt: string, context: MapContext | n
   }
 
   if (market) {
-    const findings = marketFindings(taskType, market)
-    const evidence = marketEvidence(market)
+    const summaryLabel = taskType === 'summarize_dataset' ? 'summarize market snapshot' : taskType.replace(/_/g, ' ')
+    const findings = marketFindings(taskType, market, workspace)
+    const evidence = marketEvidence(market, workspace)
     const caveats = trimLines([
       taskType === 'compare_geographies'
         ? 'Only one geography is loaded in the current workspace, so this comparison is limited to the active market snapshot.'
+        : null,
+      workspace.uploadedDatasetCount > 0
+        ? 'An imported dataset is also active, but this answer stayed on the loaded market because the request referenced market metrics or geography.'
         : null,
       'Current market context is a snapshot of loaded metrics, not a full cross-market benchmark set.',
       ...workspace.notes,
@@ -281,7 +488,7 @@ export function buildFallbackEdaResponse(prompt: string, context: MapContext | n
     return {
       message: findings.slice(0, 2).join(' '),
       trace: {
-        summary: `${taskType.replace(/_/g, ' ')} · ${market.label ?? 'market snapshot'}`,
+        summary: `${summaryLabel} · ${market.label ?? 'market snapshot'}`,
         taskType,
         methodology: 'Used the deterministic market snapshot already loaded into the workspace and limited the response to visible metrics.',
         keyFindings: findings,
@@ -348,15 +555,22 @@ function renderDatasetContext(dataset: UploadedDatasetEdaProfile): string {
 }
 
 export function buildEdaContextString(prompt: string, context: MapContext | null | undefined): string {
-  const workspace = safeContext(context)
+  const { workspace, dataset, market } = chooseAnalysisSubject(prompt, context)
   const taskType = inferEdaTaskType(prompt, context)
-  const market = workspace.market
-  const dataset = primaryDataset(workspace)
   const metricKey = inferMetricKey(prompt, market)
+  const datasetCatalog =
+    workspace.uploadedDatasets.length > 1
+      ? workspace.uploadedDatasets
+          .map((row) => `${row.fileName ?? 'dataset'} [${row.visualizationMode}/${row.mapabilityClassification}]`)
+          .join(' | ')
+      : null
 
   return [
     `EDA TASK TYPE: ${taskType}`,
     `WORKSPACE FOCUS: ${workspace.focus}`,
+    `ACTIVE GEOGRAPHY: ${workspace.geographyLabel ?? 'none'}`,
+    `ACTIVE METRIC: ${workspace.activeMetric ?? 'none'}`,
+    `ACTIVE LAYERS: ${workspace.activeLayerKeys.length > 0 ? workspace.activeLayerKeys.join(', ') : 'none'}`,
     market
       ? [
           'ACTIVE MARKET SNAPSHOT:',
@@ -365,7 +579,8 @@ export function buildEdaContextString(prompt: string, context: MapContext | null
           ...(market.notableFlags.length > 0 ? [`- Notable flags: ${market.notableFlags.join(' | ')}`] : []),
         ].join('\n')
       : 'ACTIVE MARKET SNAPSHOT: none',
-    dataset ? ['ACTIVE IMPORTED DATASET:', renderDatasetContext(dataset)].join('\n') : 'ACTIVE IMPORTED DATASET: none',
+    dataset ? ['SELECTED IMPORTED DATASET:', renderDatasetContext(dataset)].join('\n') : 'SELECTED IMPORTED DATASET: none',
+    datasetCatalog ? `IMPORTED DATASET CATALOG: ${datasetCatalog}` : 'IMPORTED DATASET CATALOG: none',
     metricKey ? `METRIC EXPLANATION TARGET: ${METRIC_DEFINITIONS[metricKey].label}` : 'METRIC EXPLANATION TARGET: none',
     workspace.notes.length > 0 ? `WORKSPACE NOTES: ${workspace.notes.join(' | ')}` : 'WORKSPACE NOTES: none',
   ].join('\n\n')

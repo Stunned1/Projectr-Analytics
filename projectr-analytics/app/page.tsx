@@ -33,7 +33,6 @@ import { metricKeyFromDataRow, sparklineMetricKey } from '@/lib/metric-definitio
 import { cn } from '@/lib/utils'
 import type { LayerState, MapViewportSnapshot } from '@/components/CommandMap'
 import {
-  denormalizeAgentLayersForContext,
   normalizeAgentLayerKey,
   normalizeAgentLayersRecord,
   patchTurnsEveryLayerOff,
@@ -952,6 +951,21 @@ export default function Home() {
         result?.data.find((r) => r.metric_name === 'Total_Population')?.metric_value ??
         aggregateData?.total_population
       const uploadedDatasets = clientUploadAgg?.sources.map((source) => buildUploadedDatasetEdaProfile(source)) ?? []
+      const contextLayers = {
+        zipBoundary: mapLayersSnapshot.zipBoundary,
+        transitStops: mapLayersSnapshot.transitStops,
+        rentChoropleth: mapLayersSnapshot.rentChoropleth,
+        blockGroups: mapLayersSnapshot.blockGroups,
+        parcels: mapLayersSnapshot.parcels,
+        tracts: mapLayersSnapshot.tracts,
+        amenityHeatmap: mapLayersSnapshot.amenityHeatmap,
+        floodRisk: mapLayersSnapshot.floodRisk,
+        permits: mapLayersSnapshot.nycPermits,
+        clientData: mapLayersSnapshot.clientData,
+      }
+      const activeLayerKeys = Object.entries(contextLayers)
+        .filter(([, enabled]) => enabled)
+        .map(([key]) => key)
       const market = buildMarketSnapshotEdaProfile({
         label,
         zori,
@@ -993,9 +1007,12 @@ export default function Home() {
         eda: buildWorkspaceEdaContext({
           market,
           uploadedDatasets,
+          geographyLabel: label ?? null,
+          activeMetric: mapLayersSnapshot.choroplethMetric,
+          activeLayerKeys,
         }),
-        layers: denormalizeAgentLayersForContext(agentLayerOverrides),
-        activeMetric: agentMetric ?? 'zori',
+        layers: contextLayers,
+        activeMetric: mapLayersSnapshot.choroplethMetric,
         zori,
         zhvi,
         zoriGrowth,
@@ -1008,7 +1025,7 @@ export default function Home() {
         population,
       }
     },
-    [result, aggregateData, analysisSites.length, clientUploadAgg, agentLayerOverrides, agentMetric, transit]
+    [result, aggregateData, analysisSites.length, clientUploadAgg, mapLayersSnapshot, transit]
   )
 
   /** Normalize `/api/trends` JSON into panel + PDF state (always sets `trends` so analysts see errors). */

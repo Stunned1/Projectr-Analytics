@@ -24,7 +24,7 @@ export const Documentation_ONBOARDING_SEARCH_TEXT = `
 FOR NEW USERS new users onboarding orientation quick command center product features metrics UI
 Load a market sidebar ZIP county metro city state Houston Austin Dallas Harris County Dallas-Fort Worth Texas NYC borough Enter map data panel Analysis Data tabs
 cycle momentum PDF brief tables trends exports Layers map layer control top-left choropleth
-transit tracts permits Intelligence terminal bottom agent natural language shortcuts
+transit tracts permits EDA assistant bottom terminal natural language shortcuts imported datasets upload chart table map fallback
 Saved tab sidebar saved sites comparison Market Report PDF exported
 `.trim()
 
@@ -58,15 +58,15 @@ Save Site and area actions, and the full metrics table where exposed. Open the s
     id: 'feature-terminal',
     title: 'EDA assistant',
     body: `Docked at the bottom of the map: ask for dataset summaries, outliers, trend changes, metric explanations,
-and data-quality checks. Direct map controls still work for explicit prompts like search, layer toggles, or panel changes.`,
-    searchAliases: 'EDA assistant AI chat command layers search data quality outliers trends',
+and data-quality checks. When an uploaded dataset is active, Scout prioritizes that workspace automatically unless you ask explicitly about market metrics. Direct map controls still work for explicit prompts like search, layer toggles, or panel changes.`,
+    searchAliases: 'EDA assistant AI chat command layers search data quality outliers trends imported dataset market metrics',
   },
   {
     id: 'feature-client-csv',
-    title: 'Client CSV (deferred)',
-    body: `Client CSV upload and normalize are still supported at /upload for this session, but the sidebar entry is
-removed while the workflow is relocated. See README Deferred.`,
-    searchAliases: 'normalize upload spreadsheet lat lng coordinates pins client upload',
+    title: 'Client CSV',
+    body: `Use /upload or the sidebar Upload entry to import analyst CSVs. Map-ready files can render as client pins on
+the map, while non-mappable files stay usable in summary, chart, and raw-table fallbacks in the imported-data workspace.`,
+    searchAliases: 'normalize upload spreadsheet lat lng coordinates pins client upload chart table fallback imported data',
   },
   {
     id: 'feature-shortlist-pdf',

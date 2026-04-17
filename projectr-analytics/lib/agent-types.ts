@@ -131,6 +131,9 @@ export interface WorkspaceEdaContext {
   market: MarketSnapshotEdaProfile | null
   uploadedDatasets: UploadedDatasetEdaProfile[]
   uploadedDatasetCount: number
+  geographyLabel: string | null
+  activeMetric: string | null
+  activeLayerKeys: string[]
   notes: string[]
 }
 

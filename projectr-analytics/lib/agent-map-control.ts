@@ -1,4 +1,5 @@
 import type { AgentAction, AgentTrace, MapContext } from '@/lib/agent-types'
+import { hasExplicitMapControlIntent, looksAnalyticalPrompt } from '@/lib/agent-intent'
 
 type LayerAlias = {
   key: string
@@ -20,6 +21,9 @@ const LAYER_ALIASES: LayerAlias[] = [
   { key: 'clientData', patterns: [/\bclient data\b/i, /\bimported data\b/i, /\buploaded data\b/i, /\bcsv\b/i] },
   { key: 'zipBoundary', patterns: [/\bboundary\b/i, /\bzip boundary\b/i] },
 ]
+
+const STRONG_LAYER_CONTROL_PATTERN = /\b(turn on|turn off|hide|disable|enable)\b/i
+const WEAK_LAYER_CONTROL_PATTERN = /\b(show|display|open)\b/i
 
 function humanizeLayerKey(key: string): string {
   return key
@@ -46,13 +50,15 @@ function actionWithMetric(action: AgentAction, metric?: 'zori' | 'zhvi'): AgentA
 }
 
 function layerControlResponse(prompt: string): { message: string; action: AgentAction; trace: AgentTrace } | null {
-  const normalized = prompt.toLowerCase()
-  const turnOff = /\b(turn off|hide|disable|remove)\b/i.test(normalized)
-  const turnOn = /\b(turn on|show|enable|display|open)\b/i.test(normalized)
+  const turnOff = /\b(turn off|hide|disable|remove)\b/i.test(prompt)
+  const turnOn = /\b(turn on|show|enable|display|open)\b/i.test(prompt)
   if (!turnOff && !turnOn) return null
 
   const matches = LAYER_ALIASES.filter((alias) => alias.patterns.some((pattern) => pattern.test(prompt)))
   if (matches.length === 0) return null
+  const hasStrongControlVerb = STRONG_LAYER_CONTROL_PATTERN.test(prompt)
+  if (!hasStrongControlVerb && looksAnalyticalPrompt(prompt)) return null
+  if (!hasStrongControlVerb && !WEAK_LAYER_CONTROL_PATTERN.test(prompt)) return null
 
   const layers = Object.fromEntries(matches.map((alias) => [alias.key, turnOff ? false : true]))
   const metric = matches.find((alias) => alias.metric)?.metric
@@ -120,11 +126,11 @@ function viewControlResponse(prompt: string): { message: string; action: AgentAc
 }
 
 function searchControlResponse(prompt: string, context: MapContext | null | undefined): { message: string; action: AgentAction; trace: AgentTrace } | null {
-  const match = prompt.match(/\b(?:go to|load|search|navigate to|fly to|show)\s+(.{2,140})$/i)
+  const match = prompt.match(/\b(?:go to|load|search(?: for)?|navigate to|fly to|zoom to|center on)\s+(.{2,140})$/i)
   if (!match) return null
 
   const query = (match[1] ?? '').trim()
-  if (!query || /\b(outlier|trend|distribution|quality|dataset)\b/i.test(query)) return null
+  if (!query || looksAnalyticalPrompt(query)) return null
 
   const activeLabel = context?.label?.trim().toLowerCase() ?? ''
   if (activeLabel && activeLabel === query.toLowerCase()) {
@@ -146,6 +152,8 @@ export function inferDirectMapControl(
   prompt: string,
   context: MapContext | null | undefined
 ): { message: string; action: AgentAction; trace: AgentTrace } | null {
+  if (!hasExplicitMapControlIntent(prompt)) return null
+
   return (
     panelControlResponse(prompt) ??
     viewControlResponse(prompt) ??

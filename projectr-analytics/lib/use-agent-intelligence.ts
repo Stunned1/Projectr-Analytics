@@ -118,7 +118,7 @@ export function useAgentIntelligence(
     onNotifyWhileClosed?: () => void
     /** `/save` — persist ZIP, aggregate, or map camera to Saved (map page). */
     onSlashSave?: (customLabel: string | null) => Promise<{ ok: boolean; message: string }>
-    /** Live Thinking panel: streaming reasoning, JSON phase, then final trace (`done`). */
+    /** Live Notes panel: streamed notes updates, JSON phase, then final trace (`done`). */
     onAgentThinkingUpdate?: (u: { trace: AgentTrace; phase: AgentThinkingStreamPhase }) => void
     /** Always called when the agent request finishes (success, error, or abort) so UI can clear a “streaming” state. */
     onAgentThinkingStreamFinished?: () => void
@@ -745,7 +745,7 @@ export function useAgentIntelligence(
 
       if (loading || isRunningSequence) return
 
-      const policy = evaluateAgentRequestPolicy(userPrompt)
+      const policy = evaluateAgentRequestPolicy(userPrompt, mapContext)
       if (!policy.allowed) {
         setInput('')
         setMessages((prev) => [
@@ -859,7 +859,7 @@ export function useAgentIntelligence(
         const msg =
           e instanceof Error
             ? e.message === 'Agent stream ended without a result'
-              ? 'Stream ended before map actions finished—often an idle timeout while the second model runs. Retry the same prompt; Thinking may still show streamed reasoning.'
+              ? 'Stream ended before the EDA response completed. Retry the same prompt; partial notes may already be visible in the right panel.'
               : e.message === 'Failed to fetch' || e.name === 'TypeError'
                 ? 'Network error—check connection and retry.'
                 : e.message

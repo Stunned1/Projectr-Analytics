@@ -21,7 +21,7 @@ A geospatial data engine, bounded EDA assistant, and automated reporting platfor
 ## EDA Assistant Boundary
 
 - **Default job:** descriptive statistics, outlier detection, comparisons, trend spotting, data-quality observations, metric explanations, and plain-language summaries of the currently loaded market or imported dataset.
-- **Evidence sources:** active market snapshot, imported CSV session summaries, uploaded-table/chart context, and the shared metric glossary.
+- **Evidence sources:** active market snapshot, imported CSV session summaries, uploaded table/chart/map context, active geography/layer/metric state, and the shared metric glossary.
 - **Map control:** still supported, but only for explicit direct requests such as loading a market, toggling layers, changing tilt, or opening a panel.
 - **Non-goals:** speculative investment advice, open-ended market theses, uncontrolled tool orchestration, or vague reasoning detached from visible data.
 - **Evidence rule:** if the assistant cannot ground an answer in the current workspace, it must say so instead of improvising.
@@ -30,7 +30,7 @@ A geospatial data engine, bounded EDA assistant, and automated reporting platfor
 
 | Surface | Disposition |
 |---|---|
-| `/api/agent` prompt + routing | Narrowed to a one-pass EDA contract with deterministic fallback summaries; explicit map controls remain available as a separate direct-action lane. |
+| `/api/agent` prompt + routing | Narrowed to a one-pass EDA contract with deterministic fallback summaries, a shared request-lane classifier, and context-aware upload-vs-market subject selection; explicit map controls remain available as a separate direct-action lane. |
 | Multi-step `steps` / `run_analysis` defaults | Removed from the default assistant path; legacy NYC analysis tooling stays available elsewhere and remains geography-gated. |
 | Starter prompts / placeholders / chips | Rewritten to emphasize summaries, outliers, trends, metric explanations, and explicit map controls instead of open-ended reasoning. |
 | Right-panel “Thinking” UI | Reframed as **Notes** with methodology, key findings, evidence, caveats, and next questions. |
@@ -173,6 +173,7 @@ _04.16.2026_
 - Added a deterministic shared upload parser that now emits canonical headers, raw parsed rows, file metadata, sample rows, and early malformed-file rejection, and wired `/api/normalize` to consume that parser instead of reparsing uploads inline.
 - `/api/normalize` now finalizes Gemini import triage against deterministic parser evidence, falls back to structural heuristics when Gemini is unavailable, and only geo-resolves uploads that actually expose mappable location fields.
 - `/api/agent` is now a bounded EDA assistant with deterministic market/upload summaries, metric explanations, and a direct map-control lane for explicit search, layer, tilt, and panel requests instead of the old default multi-step reasoning flow.
+- `/api/agent` now routes prompts through a shared intent classifier before choosing either the bounded EDA lane or the explicit map-control lane, keeping blocked/off-topic prompts, direct map commands, and analysis requests on one contract.
 
 **Bug Fixes**
 
@@ -202,6 +203,10 @@ _04.16.2026_
 - Client CSV imports now commit the reviewed Gemini interpretation through import, preserve full parsed rows for sidebar/chart/normalize-for-map flows instead of truncating to the raw-table preview sample, and keep `map_normalizable` datasets marked as map-eligible even before markers resolve.
 - Client CSV full-row datasets now persist outside `sessionStorage` in browser IndexedDB, imported row tables render in paged batches instead of mounting the full dataset at once, and reload fallback warnings stay explicit when durable row storage is unavailable.
 - The default assistant path no longer runs the extra reasoning-stream pass or multi-step map-planning flow, which cuts duplicate Gemini work and removes high-frequency “thinking” updates from the main EDA workflow.
+- Uploaded-dataset EDA profiles now cap live-row sampling before building workspace summaries, so large in-tab CSV sessions stop rescanning full imported row sets on every market-page render.
+- The direct map-control lane now ignores analytical prompts such as trends, distributions, and top/bottom comparisons, so EDA requests stay in the analysis flow while explicit search and layer commands still work.
+- Mixed market-plus-upload prompts now stay on the market snapshot when the request references market-only metrics like vacancy, while upload-focused prompts still stay on the imported dataset lane.
+- “Why is this dataset not on the map?” style prompts now answer with the import’s actual fallback reason first instead of burying the mapability explanation behind a generic dataset summary.
 
 **Map & Visualization**
 
@@ -290,7 +295,7 @@ _04.16.2026_
 - **Where it lives** — The **last normalize** triage + preview live in `sessionStorage` (`projectr-client-upload-session`); pin coordinates live in `projectr-client-upload-markers`. You can **ingest multiple CSVs in one drop** (up to 8); markers are **merged and deduped** by lat/lng/label, previews concatenated (capped), and each file still runs `POST /api/normalize` sequentially (separate Gemini triage + Supabase upserts per file). Rows only **upsert into Supabase** `projectr_master_data` when normalize can identify a real geography key or metric value, and `submarket_id` now comes from the row’s own resolved geography rather than the currently loaded market ZIP. The EDA assistant reads the combined snapshot via `mapContext.clientCsv` plus compact deterministic workspace summaries on every `/api/agent` call. **Pins:** explicit lat/lng columns, **5-digit ZIP** (Zippopotam/Census), then **address / place text** via Google Geocoding when a key is configured (`lib/google-forward-geocode.ts`, wired in `POST /api/normalize`).
 
 - **No market loaded** — You can upload first, then chat with the EDA assistant: context still includes the CSV block; pins render when the **Client** layer is on (default **on**). If the CSV has mappable rows, the map auto-fits to those pins until you load a ZIP or city.
-- **EDA + CSV** — Upload CSV(s) **before** asking for summaries, outliers, trends, or data-quality checks so `mapContext.clientCsv` and the workspace EDA summaries are populated; map-ready imports can still be surfaced on the Client layer, while non-map datasets stay in table/chart analysis mode.
+- **EDA + CSV** — Upload CSV(s) **before** asking for summaries, outliers, trends, or data-quality checks so `mapContext.clientCsv` and the workspace EDA summaries are populated; map-ready imports can still be surfaced on the Client layer, while non-map datasets stay in table/chart analysis mode. When both an upload and a market snapshot are active, the assistant now chooses between them from the prompt itself instead of always defaulting to the upload.
 - **Clear local test data** — On the map, run **`/clear:workspace`** in the EDA assistant (confirm + reload) to remove session keys (`projectr-client-upload-session`, `projectr-client-upload-markers`, `projectr-agent-chat-v1`, `projectr_pending_nav`); does not delete Supabase rows or shortlist.
 
 - **After you load a new location** — Session pins and the assistant CSV context **stay** until you upload another file or clear pins; they are **not** tied to the searched ZIP. Supabase ingested rows are keyed by **row geography + metric + period**, not by whatever ZIP is on screen—so changing markets does not delete prior uploads, but the **Data** tab metrics view is still filtered to the **current** market unless you query elsewhere.

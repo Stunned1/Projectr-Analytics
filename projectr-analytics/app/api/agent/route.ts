@@ -6,6 +6,7 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { normalizeAgentTrace } from '@/lib/agent-trace'
 import type { AgentTrace, MapContext } from '@/lib/agent-types'
+import { classifyAgentRequestIntent } from '@/lib/agent-intent'
 import { inferDirectMapControl } from '@/lib/agent-map-control'
 import { buildEdaContextString, buildFallbackEdaResponse, inferEdaTaskType } from '@/lib/eda-assistant'
 import { evaluateAgentRequestPolicy } from '@/lib/agent-request-policy'
@@ -91,12 +92,15 @@ function mergeTrace(primary: AgentTrace, fallback: AgentTrace): AgentTrace {
 }
 
 async function runAgentPipeline(context: MapContext | null, userMessage: string) {
-  const mapControl = inferDirectMapControl(userMessage, context)
-  if (mapControl) {
-    return {
-      message: mapControl.message,
-      action: mapControl.action,
-      trace: mapControl.trace,
+  const intent = classifyAgentRequestIntent(userMessage, context)
+  if (intent.lane === 'direct_map_control') {
+    const mapControl = inferDirectMapControl(userMessage, context)
+    if (mapControl) {
+      return {
+        message: mapControl.message,
+        action: mapControl.action,
+        trace: mapControl.trace,
+      }
     }
   }
 
@@ -223,7 +227,7 @@ export async function POST(request: NextRequest) {
     const context = body.context ?? null
     const stream = body.stream === true
 
-    const policy = evaluateAgentRequestPolicy(userMessage)
+    const policy = evaluateAgentRequestPolicy(userMessage, context)
     if (!policy.allowed) {
       const payload = blockedAgentPayload(policy)
       if (stream) return blockedAgentStreamResponse(payload)

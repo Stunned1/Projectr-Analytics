@@ -14,6 +14,8 @@ import { METRIC_DEFINITIONS } from '@/lib/metric-definitions'
 import type { ClientUploadSourcePart } from '@/lib/client-upload-session-store'
 import type { UploadCellValue, UploadRawRow } from '@/lib/upload/types'
 
+const MAX_EDA_SAMPLE_ROWS = 250
+
 type MarketSnapshotInput = {
   label?: string | null
   zori?: number | null
@@ -89,9 +91,15 @@ function stddev(values: number[]): number | null {
 }
 
 function getSourceRows(source: ClientUploadSourcePart): UploadRawRow[] {
-  if ((source.workingRows?.length ?? 0) > 0) return source.workingRows ?? []
-  if (source.rawTable?.rows?.length) return source.rawTable.rows
-  if (source.parseSummary?.sampleRows?.length) return source.parseSummary.sampleRows
+  if ((source.workingRows?.length ?? 0) > 0) {
+    return source.workingRows?.slice(0, MAX_EDA_SAMPLE_ROWS) ?? []
+  }
+  if (source.rawTable?.rows?.length) {
+    return source.rawTable.rows.slice(0, MAX_EDA_SAMPLE_ROWS)
+  }
+  if (source.parseSummary?.sampleRows?.length) {
+    return source.parseSummary.sampleRows.slice(0, MAX_EDA_SAMPLE_ROWS)
+  }
   return []
 }
 
@@ -182,7 +190,7 @@ function getOutliers(
   }
 
   if (distribution.p25 != null && distribution.p75 != null) {
-  const iqr = distribution.p75 - distribution.p25
+    const iqr = distribution.p75 - distribution.p25
     if (Number.isFinite(iqr) && iqr > 0) {
       const lowerFence = distribution.p25 - iqr * 1.5
       const upperFence = distribution.p75 + iqr * 1.5
@@ -504,6 +512,9 @@ export function buildMarketSnapshotEdaProfile(input: MarketSnapshotInput): Marke
 export function buildWorkspaceEdaContext(params: {
   market: MarketSnapshotEdaProfile | null
   uploadedDatasets: UploadedDatasetEdaProfile[]
+  geographyLabel?: string | null
+  activeMetric?: string | null
+  activeLayerKeys?: string[]
 }): WorkspaceEdaContext {
   const notes: string[] = []
 
@@ -525,6 +536,9 @@ export function buildWorkspaceEdaContext(params: {
     market: params.market,
     uploadedDatasets: params.uploadedDatasets,
     uploadedDatasetCount: params.uploadedDatasets.length,
+    geographyLabel: params.geographyLabel ?? params.market?.label ?? null,
+    activeMetric: params.activeMetric ?? null,
+    activeLayerKeys: params.activeLayerKeys ?? [],
     notes,
   }
 }

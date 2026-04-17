@@ -146,9 +146,9 @@ interface AgentTerminalProps {
   bottomOffsetClass?: string
   /** Map page: `/save` persists ZIP, aggregate, or camera to Saved. */
   onSlashSave?: (customLabel: string | null) => Promise<{ ok: boolean; message: string }>
-  /** Open right sidebar with plan / eval / execution trace from `/api/agent`. */
+  /** Open right sidebar with analysis notes from `/api/agent`. */
   onShowThinking?: (trace: AgentTrace) => void
-  /** Live updates while `/api/agent` streams reasoning (Thinking tab opens automatically). */
+  /** Live updates while `/api/agent` streams notes progress (Notes tab opens automatically). */
   onAgentThinkingUpdate?: (u: { trace: AgentTrace; phase: 'thinking' | 'json' | 'done' }) => void
   onAgentThinkingStreamFinished?: () => void
 }
@@ -381,7 +381,7 @@ export default function AgentTerminal({
         return line.length > 72 ? `${line.slice(0, 69)}…` : line
       }
     }
-    return 'Idle — type a command to run the engine.'
+    return 'Idle — ask about the loaded market, imported dataset, or map.'
   }, [visibleTerminalMessages])
 
   function renderSiteTable(sites: AnalysisSite[]) {
