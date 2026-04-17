@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { GoogleGenerativeAI } from '@google/generative-ai'
-import { supabase } from '@/lib/supabase'
+import { upsertMarketDataRows } from '@/lib/data/market-data-router'
 import { geocodeZip } from '@/lib/geocoder'
 import { geocodeAddressForward, getGoogleForwardGeocodeKey } from '@/lib/google-forward-geocode'
 import {
@@ -299,11 +299,7 @@ export async function POST(request: NextRequest) {
     let persistenceWarning: string | null = null
     if (mode === 'import' && dbRows.length > 0) {
       try {
-        const { error } = await supabase.from('projectr_master_data').upsert(dbRows as never[], {
-          onConflict: 'submarket_id,metric_name,time_period,data_source',
-          ignoreDuplicates: true,
-        })
-        if (error) throw new Error(error.message)
+        await upsertMarketDataRows(dbRows, { conflictMode: 'ignore' })
       } catch (error) {
         committed = false
         persistenceWarning =

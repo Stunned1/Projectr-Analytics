@@ -8,6 +8,7 @@ import { normalizeBigQueryDateLike, warmMonthsRetention } from '@/lib/data/types
 type BigQueryModuleExports = typeof import('@/lib/data/bigquery');
 type BigQueryMasterDataModuleExports = typeof import('@/lib/data/bigquery-master-data');
 type PostgresMasterDataModuleExports = typeof import('@/lib/data/postgres-master-data');
+type MarketDataRouterModuleExports = typeof import('@/lib/data/market-data-router');
 
 const require = createRequire(import.meta.url);
 const NodeModule = require('node:module') as {
@@ -18,6 +19,7 @@ const originalModuleLoad = NodeModule._load;
 let bigQueryModulePromise: Promise<BigQueryModuleExports> | null = null;
 let bigQueryMasterDataModulePromise: Promise<BigQueryMasterDataModuleExports> | null = null;
 let postgresMasterDataModulePromise: Promise<PostgresMasterDataModuleExports> | null = null;
+let marketDataRouterModulePromise: Promise<MarketDataRouterModuleExports> | null = null;
 
 async function loadBigQueryModule(): Promise<BigQueryModuleExports> {
   if (!bigQueryModulePromise) {
@@ -80,6 +82,35 @@ async function loadPostgresMasterDataModule(): Promise<PostgresMasterDataModuleE
   }
 
   return postgresMasterDataModulePromise;
+}
+
+async function loadMarketDataRouterModule(): Promise<MarketDataRouterModuleExports> {
+  if (!marketDataRouterModulePromise) {
+    const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const originalAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    process.env.NEXT_PUBLIC_SUPABASE_URL ??= 'https://example.supabase.co';
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??=
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV4YW1wbGUiLCJyb2xlIjoiYW5vbiIsImlhdCI6MCwiZXhwIjoyNTMyOTk5OTk5fQ.signature';
+
+    NodeModule._load = function patchedModuleLoad(request: string, parent: unknown, isMain: boolean) {
+      if (request === 'server-only') {
+        return {};
+      }
+
+      return originalModuleLoad.call(this, request, parent, isMain);
+    };
+    marketDataRouterModulePromise = import('@/lib/data/market-data-router')
+      .finally(() => {
+        NodeModule._load = originalModuleLoad;
+        if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+        else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+
+        if (originalAnonKey === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+        else process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = originalAnonKey;
+      });
+  }
+
+  return marketDataRouterModulePromise;
 }
 
 test('market data router test harness is wired', () => {
@@ -441,4 +472,209 @@ test('fetchLatestRowsForSubmarkets reads BigQuery per submarket instead of apply
     if (originalTableId === undefined) delete process.env.BIGQUERY_TABLE_ID;
     else process.env.BIGQUERY_TABLE_ID = originalTableId;
   }
+});
+
+test('fetchRowsForSubmarkets does not impose a synthetic global cap when no limit is provided', async () => {
+  const { fetchRowsForSubmarkets } = await loadPostgresMasterDataModule();
+  let seenLimit: number | null = null;
+
+  const result = Promise.resolve({ data: [], error: null });
+  const query = {
+    in() {
+      return query;
+    },
+    order() {
+      return query;
+    },
+    limit(limitValue: number) {
+      seenLimit = limitValue;
+      return result;
+    },
+    then: result.then.bind(result),
+  };
+
+  const client = {
+    from() {
+      return {
+        select() {
+          return query;
+        },
+      };
+    },
+  };
+
+  await fetchRowsForSubmarkets(['77002', '77003'], {
+    client: client as never,
+    dataSource: ['Census ACS', 'HUD', 'Census BPS'],
+    metricName: ['Total_Population', 'Permit_Units'],
+  });
+
+  assert.strictEqual(seenLimit, null);
+});
+
+test('routes series older than the warm window to BigQuery', async () => {
+  const { shouldReadSeriesFromBigQuery } = await loadMarketDataRouterModule();
+
+  assert.strictEqual(shouldReadSeriesFromBigQuery('2020-01-01', 24, new Date('2026-04-17')), true);
+  assert.strictEqual(shouldReadSeriesFromBigQuery('2025-01-01', 24, new Date('2026-04-17')), false);
+});
+
+test('merges and sorts warm and cold rows by time period', async () => {
+  const { mergeSeriesRows } = await loadMarketDataRouterModule();
+
+  const rows = mergeSeriesRows(
+    [{
+      submarket_id: '77002',
+      metric_name: 'Unemployment_Rate',
+      metric_value: 4.3,
+      time_period: '2024-01-01',
+      data_source: 'FRED',
+      visual_bucket: 'TIME_SERIES',
+      created_at: '2026-04-17T00:00:00.000Z',
+    }],
+    [{
+      submarket_id: '77002',
+      metric_name: 'Unemployment_Rate',
+      metric_value: 5.1,
+      time_period: '2023-01-01',
+      data_source: 'FRED',
+      visual_bucket: 'TIME_SERIES',
+      created_at: '2026-04-16T00:00:00.000Z',
+    }]
+  )
+
+  assert.deepStrictEqual(rows.map((row) => row.time_period), ['2023-01-01', '2024-01-01']);
+});
+
+test('getMetricSeries reads BigQuery first when the request is outside the warm window', async () => {
+  const { getMetricSeries } = await loadMarketDataRouterModule();
+  const calls: string[] = [];
+
+  const rows = await getMetricSeries(
+    {
+      submarketId: '77002',
+      metricName: 'Unemployment_Rate',
+      startDate: '2020-01-01',
+    },
+    {
+      now: new Date('2026-04-17T00:00:00.000Z'),
+      warmMonths: 12,
+      fetchMetricSeriesFromPostgres: async () => {
+        calls.push('postgres');
+        return [];
+      },
+      fetchMetricSeriesFromBigQuery: async () => {
+        calls.push('bigquery');
+        return [{
+          submarket_id: '77002',
+          metric_name: 'Unemployment_Rate',
+          metric_value: 4.1,
+          time_period: '2020-01-01',
+          data_source: 'FRED',
+          visual_bucket: 'TIME_SERIES',
+          created_at: '2026-04-17T00:00:00.000Z',
+        }];
+      },
+    }
+  );
+
+  assert.deepStrictEqual(calls, ['bigquery', 'postgres']);
+  assert.strictEqual(rows.length, 1);
+  assert.strictEqual(rows[0]?.metric_value, 4.1);
+});
+
+test('getMetricSeries merges BigQuery history with warm Postgres rows when the request crosses the retention boundary', async () => {
+  const { getMetricSeries } = await loadMarketDataRouterModule();
+  const calls: Array<{ source: string; options?: Record<string, unknown> }> = [];
+
+  const rows = await getMetricSeries(
+    {
+      submarketId: '77002',
+      metricName: 'Unemployment_Rate',
+      startDate: '2024-01-01',
+    },
+    {
+      now: new Date('2026-04-17T00:00:00.000Z'),
+      warmMonths: 12,
+      fetchMetricSeriesFromPostgres: async (_submarketId, _metricName, options) => {
+        calls.push({ source: 'postgres', options: options as Record<string, unknown> | undefined });
+        return [{
+          submarket_id: '77002',
+          metric_name: 'Unemployment_Rate',
+          metric_value: 4.1,
+          time_period: '2025-05-01',
+          data_source: 'FRED',
+          visual_bucket: 'TIME_SERIES',
+          created_at: '2026-04-17T00:00:00.000Z',
+        }];
+      },
+      fetchMetricSeriesFromBigQuery: async (_submarketId, _metricName, options) => {
+        calls.push({ source: 'bigquery', options: options as Record<string, unknown> | undefined });
+        return [{
+          submarket_id: '77002',
+          metric_name: 'Unemployment_Rate',
+          metric_value: 4.8,
+          time_period: '2024-01-01',
+          data_source: 'FRED',
+          visual_bucket: 'TIME_SERIES',
+          created_at: '2026-04-16T00:00:00.000Z',
+        }];
+      },
+    }
+  );
+
+  assert.deepStrictEqual(calls.map((call) => call.source), ['bigquery', 'postgres']);
+  assert.deepStrictEqual(calls[0]?.options?.startDate, '2024-01-01');
+  assert.deepStrictEqual(calls[1]?.options?.startDate, '2025-04-01');
+  assert.deepStrictEqual(
+    rows.map((row) => row.time_period),
+    ['2024-01-01', '2025-05-01']
+  );
+});
+
+test('router exports all required read intents', async () => {
+  const router = await loadMarketDataRouterModule();
+
+  assert.strictEqual(typeof router.getLatestRowsForSubmarket, 'function');
+  assert.strictEqual(typeof router.getLatestRowsForSubmarkets, 'function');
+  assert.strictEqual(typeof router.getAreaRows, 'function');
+  assert.strictEqual(typeof router.getMetricSeries, 'function');
+  assert.strictEqual(typeof router.upsertOperationalRows, 'function');
+});
+
+test('upsertOperationalRows respects ignore conflict mode for client-upload style writes', async () => {
+  const { upsertOperationalRows } = await loadPostgresMasterDataModule();
+  const calls: Array<{ ignoreDuplicates: boolean; onConflict: string }> = [];
+
+  const client = {
+    from() {
+      return {
+        upsert(_values: Record<string, unknown>[], options: { onConflict: string; ignoreDuplicates: boolean }) {
+          calls.push(options);
+          return Promise.resolve({ data: [], error: null });
+        },
+      };
+    },
+  };
+
+  await upsertOperationalRows(
+    [{
+      submarket_id: '77002',
+      geometry: null,
+      metric_name: 'Imported_Metric',
+      metric_value: 10,
+      time_period: '2026-04-01',
+      data_source: 'Client Upload',
+      visual_bucket: 'TABULAR',
+    }],
+    {
+      client: client as never,
+      conflictMode: 'ignore',
+    }
+  );
+
+  assert.deepStrictEqual(calls, [{
+    onConflict: 'submarket_id,metric_name,time_period,data_source',
+    ignoreDuplicates: true,
+  }]);
 });

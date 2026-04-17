@@ -1,6 +1,5 @@
 import { type NextRequest, NextResponse } from 'next/server'
-import { expandAreaKeyCandidates } from '@/lib/area-keys'
-import { supabase } from '@/lib/supabase'
+import { getAreaRows } from '@/lib/data/market-data-router'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,30 +23,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const { data, error } = await supabase
-      .from('projectr_master_data')
-      .select('submarket_id, metric_name, metric_value, time_period, data_source, visual_bucket, created_at')
-      .eq('submarket_id', areaKey)
-      .order('time_period', { ascending: false, nullsFirst: false })
-      .limit(limit)
-
-    if (error) throw new Error(error.message)
-
-    let rows = (data ?? []) as AreaMetricRow[]
-    if (rows.length === 0) {
-      const aliasKeys = expandAreaKeyCandidates(areaKey).filter((candidate) => candidate !== areaKey)
-      if (aliasKeys.length > 0) {
-        const { data: aliasData, error: aliasError } = await supabase
-          .from('projectr_master_data')
-          .select('submarket_id, metric_name, metric_value, time_period, data_source, visual_bucket, created_at')
-          .in('submarket_id', aliasKeys)
-          .order('time_period', { ascending: false, nullsFirst: false })
-          .limit(limit)
-
-        if (aliasError) throw new Error(aliasError.message)
-        rows = (aliasData ?? []) as AreaMetricRow[]
-      }
-    }
+    const rows = (await getAreaRows(areaKey, { limit })) as AreaMetricRow[]
 
     const latestByMetric = new Map<string, AreaMetricRow>()
     for (const row of rows) {

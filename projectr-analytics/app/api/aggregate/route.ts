@@ -14,10 +14,10 @@
  */
 import { type NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import { getAreaRows, getRowsForSubmarkets } from '@/lib/data/market-data-router'
 import { geocodeZip } from '@/lib/geocoder'
 import { fetchFred } from '@/lib/fetchers'
 import { ensureAreaMasterDataCached } from '@/lib/ensure-zip-cache'
-import { expandAreaKeyCandidates } from '@/lib/area-keys'
 
 export const dynamic = 'force-dynamic'
 
@@ -131,28 +131,7 @@ export async function POST(request: NextRequest) {
 
     let directAreaRows: CachedRow[] = []
     if (areaKey) {
-      const { data, error } = await supabase
-        .from('projectr_master_data')
-        .select('submarket_id, metric_name, metric_value, data_source, time_period')
-        .eq('submarket_id', areaKey)
-        .order('time_period', { ascending: false, nullsFirst: false })
-
-      if (error) throw new Error(error.message)
-      directAreaRows = (data ?? []) as CachedRow[]
-
-      if (directAreaRows.length === 0) {
-        const aliasKeys = expandAreaKeyCandidates(areaKey).filter((candidate) => candidate !== areaKey)
-        if (aliasKeys.length > 0) {
-          const { data: aliasData, error: aliasError } = await supabase
-            .from('projectr_master_data')
-            .select('submarket_id, metric_name, metric_value, data_source, time_period')
-            .in('submarket_id', aliasKeys)
-            .order('time_period', { ascending: false, nullsFirst: false })
-
-          if (aliasError) throw new Error(aliasError.message)
-          directAreaRows = (aliasData ?? []) as CachedRow[]
-        }
-      }
+      directAreaRows = (await getAreaRows(areaKey, { limit: 800 })) as CachedRow[]
     }
 
     const usesDirectAreaMetrics = directAreaRows.some((row) => row.metric_value != null)
@@ -163,17 +142,15 @@ export async function POST(request: NextRequest) {
     }
 
     // Pull the shared ZIP inputs in parallel after any cold-fill step.
-    const [{ data: snapshots }, { data: cachedRows }, { data: lookup }] = await Promise.all([
+    const [{ data: snapshots }, cachedRows, { data: lookup }] = await Promise.all([
       supabase
         .from('zillow_zip_snapshot')
         .select('zip, zori_latest, zhvi_latest, zori_growth_12m, zhvi_growth_12m, zhvf_growth_1yr')
         .in('zip', zips),
-      supabase
-        .from('projectr_master_data')
-        .select('submarket_id, metric_name, metric_value, data_source, time_period')
-        .in('submarket_id', zips)
-        .in('data_source', ['Census ACS', 'HUD', 'Census BPS'])
-        .in('metric_name', [...ZIP_CACHE_METRICS]),
+      getRowsForSubmarkets(zips, {
+        dataSource: ['Census ACS', 'HUD', 'Census BPS'],
+        metricName: [...ZIP_CACHE_METRICS],
+      }),
       supabase
         .from('zip_metro_lookup')
         .select('metro_name_short')
@@ -181,7 +158,7 @@ export async function POST(request: NextRequest) {
         .single(),
     ])
 
-    const rows = (cachedRows ?? []) as CachedRow[]
+    const rows = cachedRows as CachedRow[]
 
     const latestAreaMetrics = latestMetricRows(directAreaRows).map((row) => ({
       metric_name: row.metric_name,

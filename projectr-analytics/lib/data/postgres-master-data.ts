@@ -15,22 +15,48 @@ type PostgresResultLike = {
   error: { message: string } | null
 }
 
+interface PostgresMasterDataQueryLike {
+  select: (columns: string) => PostgresMasterDataQueryLike
+  eq: (column: string, value: string) => PostgresMasterDataQueryLike
+  in: (column: string, values: readonly string[]) => PostgresMasterDataQueryLike
+  gte: (column: string, value: string) => PostgresMasterDataQueryLike
+  lt: (column: string, value: string) => PostgresMasterDataQueryLike
+  order: (column: string, options?: { ascending?: boolean; nullsFirst?: boolean }) => PostgresMasterDataQueryLike
+  limit: (count: number) => Promise<PostgresResultLike>
+  then?: PromiseLike<PostgresResultLike>['then']
+  upsert: (
+    values: Record<string, unknown>[],
+    options: { onConflict: string; ignoreDuplicates: boolean }
+  ) => Promise<PostgresResultLike>
+}
+
 export interface PostgresMasterDataClientLike {
-  from: (table: 'projectr_master_data') => any
+  from: (table: 'projectr_master_data') => PostgresMasterDataQueryLike
 }
 
 export interface PostgresReadOptions {
   client?: PostgresMasterDataClientLike
   limit?: number
+  dataSource?: string | readonly string[]
+  metricName?: string | readonly string[]
+  createdSince?: string
 }
 
 export interface PostgresMetricSeriesOptions extends PostgresReadOptions {
   dataSource?: string | readonly string[]
+  startDate?: string
+  endDate?: string
 }
 
 export interface PostgresMasterDataWriteRow extends Omit<MasterDataRow, 'created_at'> {
   created_at?: string
-  geometry?: null
+  geometry?: string | null
+}
+
+export interface PostgresWriteOptions {
+  client?: PostgresMasterDataClientLike
+  batchSize?: number
+  conflictMode?: 'update' | 'ignore'
 }
 
 function normalizeKey(value: string | null | undefined): string | null {
@@ -85,6 +111,38 @@ function masterDataTable(client?: PostgresMasterDataClientLike) {
   return getClient(client).from('projectr_master_data')
 }
 
+function toFilterValues(value?: string | readonly string[]): string[] {
+  if (Array.isArray(value)) {
+    return value.map((entry) => entry.trim()).filter(Boolean)
+  }
+
+  return normalizeKey(value) ? [value.trim()] : []
+}
+
+function applyQueryFilters(query: PostgresMasterDataQueryLike, options: PostgresReadOptions): PostgresMasterDataQueryLike {
+  const dataSources = toFilterValues(options.dataSource)
+  const metricNames = toFilterValues(options.metricName)
+
+  let filtered = query
+  if (dataSources.length === 1) {
+    filtered = filtered.eq('data_source', dataSources[0])
+  } else if (dataSources.length > 1) {
+    filtered = filtered.in('data_source', dataSources)
+  }
+
+  if (metricNames.length === 1) {
+    filtered = filtered.eq('metric_name', metricNames[0])
+  } else if (metricNames.length > 1) {
+    filtered = filtered.in('metric_name', metricNames)
+  }
+
+  if (options.createdSince) {
+    filtered = filtered.gte('created_at', options.createdSince)
+  }
+
+  return filtered
+}
+
 function sanitizeSubmarketIds(submarketIds: readonly string[]): string[] {
   return Array.from(new Set(submarketIds.map((value) => value.trim()).filter(Boolean)))
 }
@@ -94,12 +152,50 @@ async function readRowsForSubmarket(
   options: PostgresReadOptions = {}
 ): Promise<MasterDataRow[]> {
   const { limit = DEFAULT_LATEST_ROW_LIMIT } = options
-  const result = (await masterDataTable(options.client)
-    .select(MASTER_DATA_SELECT)
-    .eq('submarket_id', submarketId)
+  const query = applyQueryFilters(
+    masterDataTable(options.client)
+      .select(MASTER_DATA_SELECT)
+      .eq('submarket_id', submarketId),
+    options
+  )
+  const result = (await query
     .order('time_period', { ascending: false, nullsFirst: false })
     .order('created_at', { ascending: false })
     .limit(limit)) as PostgresResultLike
+
+  return assertSuccess(result)
+}
+
+export async function fetchRowsForSubmarket(
+  submarketId: string,
+  options: PostgresReadOptions = {}
+): Promise<MasterDataRow[]> {
+  const normalizedSubmarketId = normalizeKey(submarketId)
+  if (!normalizedSubmarketId) return []
+  return readRowsForSubmarket(normalizedSubmarketId, options)
+}
+
+export async function fetchRowsForSubmarkets(
+  submarketIds: readonly string[],
+  options: PostgresReadOptions = {}
+): Promise<MasterDataRow[]> {
+  const cleanSubmarketIds = sanitizeSubmarketIds(submarketIds)
+  if (cleanSubmarketIds.length === 0) return []
+
+  let query = masterDataTable(options.client)
+    .select(MASTER_DATA_SELECT)
+    .in('submarket_id', cleanSubmarketIds)
+
+  query = applyQueryFilters(query, options)
+
+  const orderedQuery = query
+    .order('submarket_id', { ascending: true })
+    .order('time_period', { ascending: false, nullsFirst: false })
+    .order('created_at', { ascending: false })
+
+  const result = (options.limit != null
+    ? await orderedQuery.limit(options.limit)
+    : await orderedQuery) as PostgresResultLike
 
   return assertSuccess(result)
 }
@@ -175,6 +271,14 @@ export async function fetchMetricSeriesFromPostgres(
     query = query.in('data_source', dataSources)
   }
 
+  if (options.startDate) {
+    query = query.gte('time_period', options.startDate)
+  }
+
+  if (options.endDate) {
+    query = query.lt('time_period', options.endDate)
+  }
+
   const result = (await query
     .order('time_period', { ascending: true, nullsFirst: false })
     .order('created_at', { ascending: true })
@@ -205,7 +309,7 @@ function toUpsertRow(row: PostgresMasterDataWriteRow): Record<string, unknown> {
 
 export async function upsertOperationalRows(
   rows: readonly PostgresMasterDataWriteRow[],
-  options: { client?: PostgresMasterDataClientLike; batchSize?: number } = {}
+  options: PostgresWriteOptions = {}
 ): Promise<number> {
   const payload = rows
     .filter((row) => row.metric_name.trim().length > 0 && row.data_source.trim().length > 0)
@@ -213,11 +317,12 @@ export async function upsertOperationalRows(
   if (payload.length === 0) return 0
 
   const batchSize = Math.max(1, options.batchSize ?? UPSERT_BATCH_SIZE)
+  const ignoreDuplicates = options.conflictMode === 'ignore'
   for (let index = 0; index < payload.length; index += batchSize) {
     const batch = payload.slice(index, index + batchSize)
     const result = await masterDataTable(options.client).upsert(batch, {
       onConflict: 'submarket_id,metric_name,time_period,data_source',
-      ignoreDuplicates: false,
+      ignoreDuplicates,
     })
     if (result.error) throw new Error(result.error.message)
   }
@@ -229,6 +334,8 @@ export const readPostgresLatestRowsForSubmarket = fetchLatestRowsForSubmarket
 export const readPostgresLatestRowsForSubmarkets = fetchLatestRowsForSubmarkets
 export const readPostgresAreaRows = fetchAreaRows
 export const readPostgresMetricSeries = fetchMetricSeriesFromPostgres
+export const readPostgresRowsForSubmarket = fetchRowsForSubmarket
+export const readPostgresRowsForSubmarkets = fetchRowsForSubmarkets
 export const upsertPostgresMasterDataRows = upsertOperationalRows
 
 export type { VisualBucket }

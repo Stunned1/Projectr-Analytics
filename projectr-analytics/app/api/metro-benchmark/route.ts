@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import { getLatestRowsForSubmarkets } from '@/lib/data/market-data-router'
 
 export const dynamic = 'force-dynamic'
 
@@ -68,17 +69,16 @@ export async function GET(request: NextRequest) {
     const avg_zhvi = zhvis.length ? Math.round(zhvis.reduce((a, b) => a + b, 0) / zhvis.length) : null
 
     const peerZips = zips.slice(0, MAX_PEER_ZIPS)
-    const { data: masterRows } = await supabase
-      .from('projectr_master_data')
-      .select('submarket_id, metric_name, metric_value, time_period, data_source')
-      .in('submarket_id', peerZips)
-      .in('metric_name', ['Vacancy_Rate', 'Moved_From_Different_State', 'Unemployment_Rate'])
+    const masterRows = await getLatestRowsForSubmarkets(peerZips, {
+      metricName: ['Vacancy_Rate', 'Moved_From_Different_State', 'Unemployment_Rate'],
+      limit: 8,
+    })
 
     const vacByZip = new Map<string, number>()
     const migByZip = new Map<string, number>()
     const unempByZip = new Map<string, { t: string; v: number }>()
 
-    for (const r of masterRows ?? []) {
+    for (const r of masterRows) {
       const sid = r.submarket_id
       if (r.metric_name === 'Vacancy_Rate' && r.data_source === 'Census ACS') {
         vacByZip.set(sid, r.metric_value)

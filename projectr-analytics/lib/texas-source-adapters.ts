@@ -3,6 +3,8 @@ import * as dotenv from 'dotenv'
 import { createClient } from '@supabase/supabase-js'
 import * as XLSX from 'xlsx'
 import { buildCountyAreaKey, buildMetroAreaKey, normalizeCountyDisplayName, normalizeMetroDisplayName } from './area-keys'
+import { upsertMarketDataRows } from './data/market-data-router'
+import type { PostgresMasterDataClientLike } from './data/postgres-master-data'
 import type { MasterDataRow, VisualBucket } from './supabase'
 
 dotenv.config({ path: '.env.local' })
@@ -240,17 +242,8 @@ export async function upsertTexasMasterData(rows: InsertableMasterRow[]) {
     return
   }
 
-  const supabase = createSupabaseAdminLikeClient()
-  for (let index = 0; index < rows.length; index += BATCH_SIZE) {
-    const batch = rows.slice(index, index + BATCH_SIZE)
-    const { error } = await supabase.from('projectr_master_data').upsert(batch as never[], {
-      onConflict: 'submarket_id,metric_name,time_period,data_source',
-      ignoreDuplicates: false,
-    })
-    if (error) {
-      throw new Error(error.message)
-    }
-  }
+  const supabase = createSupabaseAdminLikeClient() as unknown as PostgresMasterDataClientLike
+  await upsertMarketDataRows(rows, { client: supabase, batchSize: BATCH_SIZE })
 }
 
 export function parseCliFlags(argv: string[]) {

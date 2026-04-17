@@ -5,6 +5,7 @@
  */
 
 import { supabase } from '@/lib/supabase'
+import { upsertMarketDataRows } from '@/lib/data/market-data-router'
 import { geocodeZip } from '@/lib/geocoder'
 import { fetchFred, fetchHud, fetchCensus, fetchPermits } from '@/lib/fetchers'
 
@@ -35,7 +36,7 @@ export async function ensureZipMasterDataCached(zip: string): Promise<void> {
   ])
   const allRows = [...fredRows, ...hudRows, ...censusRows, ...permitRows]
   if (allRows.length > 0) {
-    await supabase.from('projectr_master_data').insert(allRows)
+    await upsertMarketDataRows(allRows)
   }
 }
 

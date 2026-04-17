@@ -11,6 +11,7 @@
  */
 import { type NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import { getLatestRowsForSubmarkets } from '@/lib/data/market-data-router'
 
 interface ZipScore {
   zip: string
@@ -36,12 +37,10 @@ export async function POST(request: NextRequest) {
     const w = { job: 0.25, rent: 0.35, permit: 0.25, pop: 0.15 }
 
     // 1. Pull Census/FRED metrics from master data
-    const { data: masterRows } = await supabase
-      .from('projectr_master_data')
-      .select('submarket_id, metric_name, metric_value, created_at')
-      .in('submarket_id', zips)
-      .in('metric_name', ['Unemployment_Rate', 'Population_Growth_3yr', ...PERMIT_METRICS])
-      .order('created_at', { ascending: false })
+    const masterRows = await getLatestRowsForSubmarkets(zips, {
+      metricName: ['Unemployment_Rate', 'Population_Growth_3yr', ...PERMIT_METRICS],
+      limit: 32,
+    })
 
     // 2. Pull Zillow ZORI growth
     const { data: zillowRows } = await supabase
@@ -53,7 +52,7 @@ export async function POST(request: NextRequest) {
 
     // Latest value per zip per metric
     const byZip: Record<string, Record<string, number>> = {}
-    for (const row of masterRows ?? []) {
+    for (const row of masterRows) {
       const z = row.submarket_id!
       if (!byZip[z]) byZip[z] = {}
       if (row.metric_value !== null && !(row.metric_name in byZip[z])) {

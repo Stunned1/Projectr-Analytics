@@ -22,6 +22,8 @@ export interface BigQueryMasterDataReadOptions {
 
 export interface BigQueryMetricSeriesOptions extends BigQueryMasterDataReadOptions {
   dataSource?: string | readonly string[]
+  startDate?: string
+  endDate?: string
 }
 
 function normalizeKey(value: string | null | undefined): string | null {
@@ -292,6 +294,8 @@ export async function fetchMetricSeriesFromBigQuery(
       : []
 
   const dataSourceClause = dataSources.length > 0 ? 'AND data_source IN UNNEST(@dataSources)' : ''
+  const startDateClause = options.startDate ? 'AND time_period >= @startDate' : ''
+  const endDateClause = options.endDate ? 'AND time_period < @endDate' : ''
   const rows = await runBigQueryQuery(
     `
       SELECT submarket_id, metric_name, metric_value, time_period, data_source, visual_bucket, created_at
@@ -300,6 +304,8 @@ export async function fetchMetricSeriesFromBigQuery(
         AND metric_name = @metricName
         AND time_period IS NOT NULL
         ${dataSourceClause}
+        ${startDateClause}
+        ${endDateClause}
       ORDER BY time_period ASC, created_at ASC
       LIMIT @rowLimit
     `,
@@ -307,6 +313,8 @@ export async function fetchMetricSeriesFromBigQuery(
       submarketId: normalizedSubmarketId,
       metricName: normalizedMetricName,
       dataSources,
+      startDate: options.startDate,
+      endDate: options.endDate,
       rowLimit: options.limit ?? DEFAULT_SERIES_LIMIT,
     },
     options
