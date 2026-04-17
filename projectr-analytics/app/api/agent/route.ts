@@ -6,8 +6,8 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { normalizeAgentTrace } from '@/lib/agent-trace'
 import type { AgentTrace, MapContext } from '@/lib/agent-types'
-import { classifyAgentRequestIntent } from '@/lib/agent-intent'
-import { inferDirectMapControl } from '@/lib/agent-map-control'
+import { classifyAgentRequestIntent, looksAnalyticalPrompt } from '@/lib/agent-intent'
+import { inferDirectMapControl, inferNavigationTarget } from '@/lib/agent-map-control'
 import { buildEdaContextString, buildFallbackEdaResponse, inferEdaTaskType } from '@/lib/eda-assistant'
 import { evaluateAgentRequestPolicy } from '@/lib/agent-request-policy'
 import { GEMINI_NO_EM_DASH_RULE } from '@/lib/gemini-text-rules'
@@ -91,11 +91,71 @@ function mergeTrace(primary: AgentTrace, fallback: AgentTrace): AgentTrace {
   }
 }
 
+function buildHybridMapAnalysisTrace(summary: string, findings: string[], caveats: string[], nextQuestions: string[]): AgentTrace {
+  return {
+    summary,
+    taskType: 'summarize_dataset',
+    methodology: 'Matched the prompt as a hybrid of explicit map control and workspace-grounded analysis, then sequenced the response without using open-ended planning.',
+    keyFindings: findings,
+    evidence: ['The prompt included an explicit navigation or map-control command plus an analytical follow-up request.'],
+    caveats,
+    nextQuestions,
+  }
+}
+
 async function runAgentPipeline(context: MapContext | null, userMessage: string) {
   const intent = classifyAgentRequestIntent(userMessage, context)
   if (intent.lane === 'direct_map_control') {
     const mapControl = inferDirectMapControl(userMessage, context)
     if (mapControl) {
+      if (looksAnalyticalPrompt(userMessage)) {
+        const fallback = buildFallbackEdaResponse(userMessage, context)
+
+        if (mapControl.action.type === 'search') {
+          const target = mapControl.action.query ?? inferNavigationTarget(userMessage) ?? 'the requested market'
+          return {
+            message: `Navigating to ${target}. Once that market loads, ask again and I’ll explain the requested snapshot using the active market data.`,
+            action: mapControl.action,
+            trace: buildHybridMapAnalysisTrace(
+              `Navigate to ${target} for follow-up analysis`,
+              [
+                `Matched an explicit navigation request for ${target}.`,
+                'The analytical part of the prompt refers to a market that is not yet the active workspace.',
+              ],
+              [
+                `I did not answer the analysis part yet because that would have used the current workspace instead of ${target}.`,
+              ],
+              [`After ${target} loads, ask the same question again to get the market explanation.`]
+            ),
+          }
+        }
+
+        return {
+          message: `${mapControl.message} ${fallback.message}`.trim(),
+          action: mapControl.action,
+          trace: mergeTrace(
+            {
+              summary: `${mapControl.trace.summary} + ${fallback.trace.summary}`,
+              methodology: 'Executed the explicit map-control request first, then answered the analytical part against the current workspace.',
+              keyFindings: [
+                ...(mapControl.trace.keyFindings ?? []),
+                ...(fallback.trace.keyFindings ?? []),
+              ].slice(0, 4),
+              evidence: [
+                ...(mapControl.trace.evidence ?? []),
+                ...(fallback.trace.evidence ?? []),
+              ].slice(0, 6),
+              caveats: [
+                ...(mapControl.trace.caveats ?? []),
+                ...(fallback.trace.caveats ?? []),
+              ].slice(0, 4),
+              nextQuestions: fallback.trace.nextQuestions ?? mapControl.trace.nextQuestions,
+            },
+            fallback.trace
+          ),
+        }
+      }
+
       return {
         message: mapControl.message,
         action: mapControl.action,

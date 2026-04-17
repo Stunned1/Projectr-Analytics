@@ -207,6 +207,8 @@ _04.16.2026_
 - The direct map-control lane now ignores analytical prompts such as trends, distributions, and top/bottom comparisons, so EDA requests stay in the analysis flow while explicit search and layer commands still work.
 - Mixed market-plus-upload prompts now stay on the market snapshot when the request references market-only metrics like vacancy, while upload-focused prompts still stay on the imported dataset lane.
 - “Why is this dataset not on the map?” style prompts now answer with the import’s actual fallback reason first instead of burying the mapability explanation behind a generic dataset summary.
+- The assistant now supports hybrid prompts like “take me to Harris County, TX and explain this rent and vacancy snapshot” by executing the explicit map navigation first and deferring the analysis until the requested market is actually loaded.
+- EDA fallback routing now normalizes partial workspace context instead of crashing on missing `uploadedDatasets`, `activeLayerKeys`, or market arrays, which keeps direct API calls and early UI states from failing with undefined `.length` errors.
 
 **Map & Visualization**
 
@@ -261,6 +263,10 @@ _04.16.2026_
 - **Google Trends invalid JSON** - `lib/fetchTrends.ts` uses the unofficial `google-trends-api` client and assumes the upstream response is JSON; when Google returns an HTML throttle / anti-bot page instead, `queryTrends()` throws `Google Trends response was not valid JSON` and the dashboard interest section shows an error.
 
 - **Transit lines missing but yellow circles remain** - When `TRANSITLAND_API_KEY` is absent or Transitland returns no drawable routes, `/api/transit` falls back to `lib/fetchGtfs.ts`; if that Overpass query fails and hits the smaller retry, the retry only requests stop nodes and no rail ways, so the map renders yellow subway entrance circles without PathLayer route lines.
+
+- **Hybrid map-control parsing misses some analytical follow-ups** - `lib/agent-intent.ts` now treats phrases like `walk me through`, `stands out`, `overview`, and `takeaway` as analytical prompts, but `lib/agent-map-control.ts` does not split hybrid navigation prompts on those same phrases yet, so requests like `take me to Harris County, TX and walk me through rent trends` can fail to navigate and fall back to empty-context EDA instead.
+
+- **EDA fallback still crashes on malformed profile entries** - `lib/eda-assistant.ts` now normalizes missing workspace arrays, but `/api/agent` can still throw if `uploadedDatasets` or `market.metrics` contain `null` entries; the fallback normalizer needs object-shape guards before it dereferences dataset and metric fields.
 
 ## Minor Gaps
 

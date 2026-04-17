@@ -24,6 +24,8 @@ const LAYER_ALIASES: LayerAlias[] = [
 
 const STRONG_LAYER_CONTROL_PATTERN = /\b(turn on|turn off|hide|disable|enable)\b/i
 const WEAK_LAYER_CONTROL_PATTERN = /\b(show|display|open)\b/i
+const SEARCH_CONTROL_PATTERN =
+  /\b(?:take me to|go to|load|search(?: for)?|navigate to|fly to|zoom to|center on)\s+(.+?)(?=\s+(?:and|then)\s+\b(?:explain|summari[sz]e|describe|compare|tell|show|find|check|analy[sz]e|why|what)\b|$)/i
 
 function humanizeLayerKey(key: string): string {
   return key
@@ -47,6 +49,13 @@ function buildControlTrace(summary: string, evidence: string): AgentTrace {
 function actionWithMetric(action: AgentAction, metric?: 'zori' | 'zhvi'): AgentAction {
   if (!metric) return action
   return { ...action, metric }
+}
+
+function extractSearchQuery(prompt: string): string | null {
+  const match = prompt.match(SEARCH_CONTROL_PATTERN)
+  if (!match) return null
+  const query = (match[1] ?? '').trim().replace(/[.,;:!?]+$/g, '')
+  return query || null
 }
 
 function layerControlResponse(prompt: string): { message: string; action: AgentAction; trace: AgentTrace } | null {
@@ -126,10 +135,7 @@ function viewControlResponse(prompt: string): { message: string; action: AgentAc
 }
 
 function searchControlResponse(prompt: string, context: MapContext | null | undefined): { message: string; action: AgentAction; trace: AgentTrace } | null {
-  const match = prompt.match(/\b(?:go to|load|search(?: for)?|navigate to|fly to|zoom to|center on)\s+(.{2,140})$/i)
-  if (!match) return null
-
-  const query = (match[1] ?? '').trim()
+  const query = extractSearchQuery(prompt)
   if (!query || looksAnalyticalPrompt(query)) return null
 
   const activeLabel = context?.label?.trim().toLowerCase() ?? ''
@@ -160,4 +166,8 @@ export function inferDirectMapControl(
     layerControlResponse(prompt) ??
     searchControlResponse(prompt, context)
   )
+}
+
+export function inferNavigationTarget(prompt: string): string | null {
+  return extractSearchQuery(prompt)
 }

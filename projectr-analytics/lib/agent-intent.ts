@@ -26,10 +26,10 @@ const SCOUT_PRODUCT_CONTEXT_PATTERN =
   /\b(current map|loaded market|loaded data|selected site|selected sites|uploaded|upload|uploads|csv|client data|imported data|map layer|map layers|layers|dashboard|shortlist|saved|data panel|analysis panel|brief|report|pdf|metrics|trend|trends|forecast|score|scoring|ranked sites?)\b/i
 
 const EDA_INTENT_PATTERN =
-  /\b(compare|analy[sz]e|find|summari[sz]e|explain|describe|inspect|review|check|spot|detect|outlier|anomal|trend|quality|missing|top|bottom|what is|why)\b/i
+  /\b(compare|analy[sz]e|find|summari[sz]e|explain|describe|inspect|review|check|spot|detect|outlier|anomal|trend|quality|missing|top|bottom|what is|why|what matters|stands out|overview|takeaway|walk me through)\b/i
 
 const ANALYTICAL_PROMPT_PATTERN =
-  /\b(trend|trends|distribution|outlier|outliers|anomal(?:y|ies)|quality|compare|comparison|versus|vs\.?|top|bottom|rank|ranking|summary|summarize|average|mean|median|percentile|change|changed|delta|growth|decline|increase|decrease|over time|explain|missing|duplicate|null|why)\b/i
+  /\b(trend|trends|distribution|outlier|outliers|anomal(?:y|ies)|quality|compare|comparison|versus|vs\.?|top|bottom|rank|ranking|summary|summarize|average|mean|median|percentile|change|changed|delta|growth|decline|increase|decrease|over time|explain|missing|duplicate|null|why|what matters|stands out|overview|takeaway|walk me through)\b/i
 
 const STRONG_LAYER_CONTROL_PATTERN = /\b(turn on|turn off|hide|disable|enable)\b/i
 const WEAK_LAYER_CONTROL_PATTERN = /\b(show|display|open)\b/i
@@ -37,10 +37,10 @@ const EXPLICIT_LAYER_OBJECT_PATTERN =
   /\b(layer|layers|overlay|overlays|parcels?|pluto|permits?|building permits?|transit|stops|tracts|demographics?|flood|flood risk|momentum|pois?|amenit(?:y|ies)|heatmap|client data|imported data|uploaded data|csv|boundary|zip boundary)\b/i
 const PANEL_CONTROL_PATTERN = /\b(open|focus)\s+(?:the\s+)?(?:data|analysis)\s+panel\b/i
 const VIEW_CONTROL_PATTERN = /\b(?:3d|2d|flat map|tilt(?:\s+\d{1,2})?|rotate(?:\s+\d{1,3})?)\b/i
-const SEARCH_CONTROL_PATTERN = /\b(?:go to|load|search(?: for)?|navigate to|fly to|zoom to|center on)\b/i
+const SEARCH_CONTROL_PATTERN = /\b(?:take me to|go to|load|search(?: for)?|navigate to|fly to|zoom to|center on)\b/i
 
 const CONTEXTUAL_REAL_ESTATE_TASK_PATTERN =
-  /\b(compare|analy[sz]e|summari[sz]e|find|explain|describe|inspect|check|spot|detect|outlier|anomal|trend|quality|missing|top|bottom|why)\b.*\b(this|these|those|current|loaded|selected|upload|uploaded|csv|markets?|areas?|locations?|zips?|layers?|data|dataset)\b/i
+  /\b(compare|analy[sz]e|summari[sz]e|find|explain|describe|inspect|check|spot|detect|outlier|anomal|trend|quality|missing|top|bottom|why|what matters|stands out|overview|takeaway|walk me through)\b.*\b(this|these|those|current|loaded|selected|upload|uploaded|csv|markets?|areas?|locations?|zips?|layers?|data|dataset|here)\b/i
 
 const REFERENTIAL_WORKSPACE_PATTERN =
   /\b(this|these|that|those|it|loaded|current|selected|active|uploaded|imported|dataset|csv|market|map)\b/i

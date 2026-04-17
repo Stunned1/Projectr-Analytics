@@ -68,21 +68,82 @@ function formatNumber(value: number | null | undefined): string {
   })
 }
 
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+}
+
+function normalizeMarketProfile(market: MarketSnapshotEdaProfile | null | undefined): MarketSnapshotEdaProfile | null {
+  if (!market) return null
+
+  return {
+    label: market.label ?? null,
+    metrics: Array.isArray(market.metrics) ? market.metrics : [],
+    notableFlags: asStringArray(market.notableFlags),
+  }
+}
+
+function normalizeDatasetProfile(dataset: UploadedDatasetEdaProfile): UploadedDatasetEdaProfile {
+  return {
+    fileName: dataset.fileName ?? null,
+    datasetType: dataset.datasetType ?? 'tabular',
+    mapabilityClassification: dataset.mapabilityClassification ?? 'non_map_visualizable',
+    visualizationMode: dataset.visualizationMode ?? 'table',
+    rowCount: dataset.rowCount ?? 0,
+    sampleRowCount: dataset.sampleRowCount ?? 0,
+    columnCount: dataset.columnCount ?? 0,
+    headers: asStringArray(dataset.headers),
+    focusMetric: dataset.focusMetric ?? null,
+    geoField: dataset.geoField ?? null,
+    dateField: dataset.dateField ?? null,
+    categoryField: dataset.categoryField ?? null,
+    summaryStats: Array.isArray(dataset.summaryStats) ? dataset.summaryStats : [],
+    primaryDistribution: dataset.primaryDistribution ?? null,
+    outliers: Array.isArray(dataset.outliers) ? dataset.outliers : [],
+    topCategories: Array.isArray(dataset.topCategories) ? dataset.topCategories : [],
+    trend: dataset.trend ?? null,
+    dataQuality: {
+      duplicateRows: dataset.dataQuality?.duplicateRows ?? 0,
+      sparseColumns: asStringArray(dataset.dataQuality?.sparseColumns),
+      inconsistentDateColumns: asStringArray(dataset.dataQuality?.inconsistentDateColumns),
+      invalidGeographyRows: dataset.dataQuality?.invalidGeographyRows ?? 0,
+      warnings: asStringArray(dataset.dataQuality?.warnings),
+    },
+    explanation: dataset.explanation ?? 'The current workspace context does not include enough reliable geography to place these rows on the map.',
+    warnings: asStringArray(dataset.warnings),
+  }
+}
+
 function safeContext(context: MapContext | null | undefined): WorkspaceEdaContext {
-  return (
-    context?.eda ?? {
-      focus: 'empty',
-      market: null,
-      uploadedDatasets: [],
-      uploadedDatasetCount: 0,
-      geographyLabel: context?.label ?? null,
-      activeMetric: context?.activeMetric ?? null,
-      activeLayerKeys: Object.entries(context?.layers ?? {})
-        .filter(([, enabled]) => enabled)
-        .map(([key]) => key),
-      notes: [],
-    }
-  )
+  const fallbackActiveLayerKeys = Object.entries(context?.layers ?? {})
+    .filter(([, enabled]) => enabled)
+    .map(([key]) => key)
+
+  const eda = context?.eda
+  const uploadedDatasets = Array.isArray(eda?.uploadedDatasets)
+    ? eda.uploadedDatasets.map((dataset) => normalizeDatasetProfile(dataset))
+    : []
+
+  const activeLayerKeys = Array.isArray(eda?.activeLayerKeys) ? asStringArray(eda?.activeLayerKeys) : fallbackActiveLayerKeys
+  const hasMarket = Boolean(eda?.market)
+  const inferredFocus =
+    uploadedDatasets.length > 0 && hasMarket
+      ? 'mixed'
+      : uploadedDatasets.length > 0
+        ? 'uploaded_dataset'
+        : hasMarket
+          ? 'market'
+          : 'empty'
+
+  return {
+    focus: eda?.focus ?? inferredFocus,
+    market: normalizeMarketProfile(eda?.market ?? null),
+    uploadedDatasets,
+    uploadedDatasetCount: eda?.uploadedDatasetCount ?? uploadedDatasets.length,
+    geographyLabel: eda?.geographyLabel ?? context?.label ?? null,
+    activeMetric: eda?.activeMetric ?? context?.activeMetric ?? null,
+    activeLayerKeys,
+    notes: asStringArray(eda?.notes),
+  }
 }
 
 function datasetNameTokens(fileName: string | null): string[] {
