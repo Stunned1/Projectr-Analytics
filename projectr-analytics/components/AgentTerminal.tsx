@@ -7,6 +7,7 @@ import { buildAgentInputPlaceholder, buildAgentStarterSuggestions } from '@/lib/
 import { useAgentIntelligence, formatActionLogLine } from '@/lib/use-agent-intelligence'
 import { getSlashPaletteState } from '@/lib/slash-commands'
 import { cn } from '@/lib/utils'
+import { ScoutChartCard } from '@/components/ScoutChartCard'
 
 const STREAM_MS = 72
 
@@ -583,6 +584,11 @@ export default function AgentTerminal({
                       ))}
                     </div>
                   )}
+                  {msg.chart ? (
+                    <div className="pl-[2ch]">
+                      <ScoutChartCard chart={msg.chart} />
+                    </div>
+                  ) : null}
                   {msg.trace && onShowThinking && !msg.isAnalyzing && (
                     <div className="mt-2 pl-[2ch]">
                       <button

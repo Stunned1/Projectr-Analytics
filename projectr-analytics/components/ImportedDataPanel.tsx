@@ -13,6 +13,7 @@ import {
   getImportedTableHeaders,
   getImportedTableRows,
   isImportedWorkingRowsHydrating,
+  toScoutChartOutputFromImportedChart,
 } from '@/lib/client-upload-presentation'
 import { useClientUploadSessionStore, type ClientUploadSession } from '@/lib/client-upload-session-store'
 import {
@@ -20,6 +21,7 @@ import {
   getSessionSources,
   updateSessionSourceAtIndex,
 } from '@/lib/client-upload-session-aggregate'
+import { ScoutChartCard } from '@/components/ScoutChartCard'
 
 type ImportedPanelView = 'recommended' | 'map' | 'chart' | 'table'
 
@@ -659,11 +661,16 @@ export function ImportedDataPanel({
             </p>
             <p className="text-xs text-zinc-300">{chartModel.title}</p>
           </div>
-          {chartModel.kind === 'line' ? (
-            <SimpleLineChart points={chartModel.points} />
-          ) : (
-            <SimpleBarChart points={chartModel.points} />
-          )}
+          {(() => {
+            const scoutChart = toScoutChartOutputFromImportedChart(chartModel)
+            if (scoutChart) return <ScoutChartCard chart={scoutChart} />
+
+            return chartModel.kind === 'line' ? (
+              <SimpleLineChart points={chartModel.points} />
+            ) : (
+              <SimpleBarChart points={chartModel.points} />
+            )
+          })()}
         </div>
       )}
 

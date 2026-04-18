@@ -16,6 +16,7 @@ import {
 import { buildEdaContextString, buildFallbackEdaResponse, inferEdaTaskType } from '@/lib/eda-assistant'
 import { evaluateAgentRequestPolicy } from '@/lib/agent-request-policy'
 import { GEMINI_NO_EM_DASH_RULE } from '@/lib/gemini-text-rules'
+import { normalizeScoutChartOutput, type ScoutChartOutput } from '@/lib/scout-chart-output'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -113,6 +114,7 @@ ${GEMINI_NO_EM_DASH_RULE}`
 type AgentJsonResponse = {
   message: string
   trace?: unknown
+  chart?: unknown
 }
 
 type MapControlActionJson = {
@@ -219,6 +221,67 @@ type AgentPipelineResult = {
   action?: AgentAction
   steps?: AgentStep[]
   trace: AgentTrace
+  chart?: ScoutChartOutput | null
+}
+
+function maybeBuildFallbackChart(userMessage: string, context: MapContext | null): ScoutChartOutput | null {
+  const prompt = userMessage.toLowerCase()
+  const wantsTrend = /\b(trend|over time|history|timeline)\b/.test(prompt)
+  if (!wantsTrend) return null
+
+  const label = context?.label ?? context?.eda?.geographyLabel ?? 'Current market'
+
+  return normalizeScoutChartOutput({
+    kind: 'line',
+    title: `${label} rent trend`,
+    subtitle: 'Phase 1 chart contract demo',
+    summary: 'Temporary chart payload used to validate the shared analytical rendering path.',
+    placeholder: true,
+    confidenceLabel: 'placeholder data',
+    xAxis: { key: 'period', label: 'Period' },
+    yAxis: { label: 'Indexed rent', valueFormat: 'index' },
+    series: [
+      {
+        key: 'rent_index',
+        label: 'Rent index',
+        color: '#D76B3D',
+        points: [
+          { x: 'Start', y: 100 },
+          { x: 'Mid', y: 104 },
+          { x: 'Latest', y: 108 },
+        ],
+      },
+    ],
+    citations: [
+      {
+        id: 'phase1-placeholder-series',
+        label: 'Phase 1 placeholder series',
+        sourceType: 'placeholder',
+        note: 'Replace with router-backed historical series during later convergence tasks.',
+        placeholder: true,
+      },
+    ],
+  })
+}
+
+function attachTraceCitations(trace: AgentTrace, chart: ScoutChartOutput | null): AgentTrace {
+  if (!chart || chart.citations.length === 0) return trace
+
+  return {
+    ...trace,
+    citations: chart.citations,
+  }
+}
+
+export function buildFallbackChartedResponseForTest(userMessage: string, context: MapContext | null) {
+  const fallback = buildFallbackEdaResponse(userMessage, context)
+  const chart = maybeBuildFallbackChart(userMessage, context)
+
+  return {
+    message: fallback.message,
+    trace: attachTraceCitations(fallback.trace, chart),
+    chart,
+  }
 }
 
 function buildDefaultMapControlMessage(action: AgentAction): string {
@@ -531,10 +594,12 @@ async function runAgentPipeline(context: MapContext | null, userMessage: string)
   const taskType = inferEdaTaskType(userMessage, context)
 
   if (!process.env.GEMINI_API_KEY) {
+    const chart = maybeBuildFallbackChart(userMessage, context)
     return {
       message: fallback.message,
       action: { type: 'none' as const },
-      trace: fallback.trace,
+      trace: attachTraceCitations(fallback.trace, chart),
+      chart,
     }
   }
 
@@ -542,6 +607,7 @@ async function runAgentPipeline(context: MapContext | null, userMessage: string)
 
   try {
     const contextStr = buildEdaContextString(userMessage, context)
+    const chart = maybeBuildFallbackChart(userMessage, context)
     const result = await model.generateContent(
       `${contextStr}\n\nDETERMINISTIC FALLBACK TRACE (use as the minimum evidence floor; you may rephrase but not contradict it):\n${JSON.stringify(
         {
@@ -566,13 +632,16 @@ async function runAgentPipeline(context: MapContext | null, userMessage: string)
     return {
       message: parsed.message?.trim() || fallback.message,
       action: { type: 'none' as const },
-      trace: mergeTrace(normalized, fallback.trace),
+      trace: attachTraceCitations(mergeTrace(normalized, fallback.trace), chart),
+      chart,
     }
   } catch {
+    const chart = maybeBuildFallbackChart(userMessage, context)
     return {
       message: fallback.message,
       action: { type: 'none' as const },
-      trace: fallback.trace,
+      trace: attachTraceCitations(fallback.trace, chart),
+      chart,
     }
   }
 }
@@ -670,6 +739,7 @@ export async function POST(request: NextRequest) {
               action: out.action,
               steps: out.steps,
               trace: out.trace,
+              chart: out.chart,
             })
           } catch (err) {
             const failure = classifyAgentError(err)

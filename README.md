@@ -195,6 +195,7 @@ _04.18.2026_
 - `/api/normalize` now finalizes Gemini import triage against deterministic parser evidence, falls back to structural heuristics when Gemini is unavailable, and only geo-resolves uploads that actually expose mappable location fields.
 - `/api/agent` is now a bounded EDA assistant with deterministic market/upload summaries, metric explanations, and a direct map-control lane for explicit search, layer, tilt, and panel requests instead of the old default multi-step reasoning flow.
 - `/api/agent` now routes prompts through a shared intent classifier before choosing either the bounded EDA lane or the explicit map-control lane, keeping blocked/off-topic prompts, direct map commands, and analysis requests on one contract.
+- Added the Phase 1 Scout chart and citation contract, extended `/api/agent` plus its NDJSON stream to return optional chart payloads with trace citations, and kept the response backward-compatible for text-only flows.
 
 **Bug Fixes**
 
@@ -280,6 +281,9 @@ _04.16.2026_
 - The CSV normalizer card now surfaces mapability status, fallback mode, confidence, and user-facing explanations so phase-2 import classification is visible without opening devtools.
 - The left sidebar now includes an explicit `Upload` navigation item so the Client CSV workflow is reachable from the visible app shell instead of only by direct route or embedded panel access.
 - The map-bottom assistant is now framed as an EDA assistant with Notes, evidence, caveats, and next-question UI instead of a generic “thinking” surface, while still honoring explicit map-control prompts.
+
+_04.18.2026_
+- Added a shared `recharts`-based Scout chart card with citation footer rendering in the live assistant terminal and bridged imported-data chart previews onto the same chart contract.
 
 ## Known Bugs
 

@@ -1,4 +1,5 @@
 import type { ClientUploadSourcePart } from '@/lib/client-upload-session-store'
+import { normalizeScoutChartOutput, type ScoutChartOutput } from '@/lib/scout-chart-output'
 import type { UploadCellValue, UploadRawRow } from '@/lib/upload/types'
 
 export type ImportedDatasetView = 'map' | 'chart' | 'table'
@@ -18,6 +19,34 @@ export interface ImportedChartModel {
   kind: 'line' | 'bar'
   title: string
   points: ImportedChartPoint[]
+}
+
+export function toScoutChartOutputFromImportedChart(model: ImportedChartModel | null): ScoutChartOutput | null {
+  if (!model) return null
+
+  return normalizeScoutChartOutput({
+    kind: model.kind,
+    title: model.title,
+    subtitle: 'Imported dataset preview',
+    summary: 'Converted from the imported-data fallback chart model.',
+    xAxis: { key: 'label', label: model.kind === 'line' ? 'Period' : 'Category' },
+    yAxis: { label: 'Value', valueFormat: 'number' },
+    series: [
+      {
+        key: 'primary',
+        label: model.title,
+        points: model.points.map((point) => ({ x: point.label, y: point.value })),
+      },
+    ],
+    citations: [
+      {
+        id: 'imported-dataset-session',
+        label: 'Imported dataset session',
+        sourceType: 'workspace_upload',
+        note: 'Derived from the active imported dataset preview in the current browser session.',
+      },
+    ],
+  })
 }
 
 export function getImportedSourceKey(source: ClientUploadSourcePart, index: number): string {

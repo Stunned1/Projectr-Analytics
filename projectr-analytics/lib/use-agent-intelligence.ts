@@ -27,6 +27,7 @@ import {
   rotateSlashUsageLines,
   tiltSlashUsageLines,
 } from '@/lib/slash-commands'
+import type { ScoutChartOutput } from '@/lib/scout-chart-output'
 
 const ACTION_LOG: Record<string, string> = {
   toggle_layer: 'Layer updated',
@@ -781,6 +782,7 @@ export function useAgentIntelligence(
           steps?: AgentStep[]
           insight?: string | null
           trace?: AgentTrace
+          chart?: ScoutChartOutput | null
           error?: string
         }
 
@@ -805,6 +807,7 @@ export function useAgentIntelligence(
             steps: out.steps as AgentStep[] | undefined,
             insight: out.insight ?? null,
             trace: out.trace,
+            chart: out.chart ?? null,
           }
           options?.onAgentThinkingUpdate?.({ trace: out.trace, phase: 'done' })
         } else {
@@ -826,7 +829,7 @@ export function useAgentIntelligence(
           })
           setMessages((prev) => [
             ...prev,
-            { role: 'agent', text: data.message, insight: data.insight, trace },
+            { role: 'agent', text: data.message, insight: data.insight, trace, chart: data.chart ?? undefined },
           ])
           maybeNotify()
           runSequence(data.steps, trace ?? null)
@@ -846,6 +849,7 @@ export function useAgentIntelligence(
             action: data.action?.type !== 'none' ? data.action : undefined,
             insight: data.insight,
             trace: data.trace as AgentTrace | undefined,
+            chart: data.chart ?? undefined,
           },
         ])
         maybeNotify()

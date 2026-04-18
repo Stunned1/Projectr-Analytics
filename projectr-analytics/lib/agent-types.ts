@@ -1,3 +1,5 @@
+import type { ScoutChartCitation, ScoutChartOutput } from '@/lib/scout-chart-output'
+
 export interface AgentAction {
   type:
     | 'toggle_layer'
@@ -178,6 +180,7 @@ export interface AgentTrace {
   evidence?: string[]
   caveats?: string[]
   nextQuestions?: string[]
+  citations?: ScoutChartCitation[]
   /**
    * Legacy long-form prose field retained for compatibility; new EDA responses prefer `methodology`.
    */
@@ -199,6 +202,7 @@ export interface AgentMessage {
   isAnalyzing?: boolean
   analysisSites?: AnalysisSite[]
   trace?: AgentTrace
+  chart?: ScoutChartOutput
 }
 
 /** Last client CSV ingest — agent uses for “show my upload / pins / sidebar” intents. */
