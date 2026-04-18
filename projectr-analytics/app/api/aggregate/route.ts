@@ -37,6 +37,19 @@ type FredPoint = {
   time_period: string | null
 }
 
+type ZillowSnapshotRow = {
+  zip: string
+  zori_latest: number | null
+  zhvi_latest: number | null
+  zori_growth_12m: number | null
+  zhvi_growth_12m: number | null
+  zhvf_growth_1yr: number | null
+}
+
+type ZipMetroLookupRow = {
+  metro_name_short: string | null
+}
+
 const ZIP_CACHE_METRICS = [
   'Total_Population',
   'Total_Housing_Units',
@@ -159,6 +172,7 @@ export async function POST(request: NextRequest) {
     ])
 
     const rows = cachedRows as CachedRow[]
+    const metroLookup = (lookup ?? null) as ZipMetroLookupRow | null
 
     const latestAreaMetrics = latestMetricRows(directAreaRows).map((row) => ({
       metric_name: row.metric_name,
@@ -223,7 +237,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 3. Aggregate Zillow data
-    const snaps = snapshots ?? []
+    const snaps: ZillowSnapshotRow[] = (snapshots ?? []) as ZillowSnapshotRow[]
     const populations = zips.map((zip) => metricsByZip[zip]?.['Total_Population'] ?? 0)
     const populationByZip = new Map(zips.map((zip, index) => [zip, populations[index] ?? 0]))
     const fallbackTotalPopulation = populations.reduce((sum, population) => sum + population, 0)
@@ -338,11 +352,11 @@ export async function POST(request: NextRequest) {
 
     // 5. Pull metro velocity for the first ZIP's metro
     let metroVelocity = null
-    if (lookup?.metro_name_short) {
+    if (metroLookup?.metro_name_short) {
       const { data: metroSnapshot } = await supabase
         .from('zillow_metro_snapshot')
         .select('region_name, doz_pending_latest, price_cut_pct_latest, inventory_latest, as_of_date')
-        .eq('region_name', lookup.metro_name_short)
+        .eq('region_name', metroLookup.metro_name_short)
         .single()
       metroVelocity = metroSnapshot
     }

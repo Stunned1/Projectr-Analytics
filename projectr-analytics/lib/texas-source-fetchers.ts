@@ -1,7 +1,5 @@
 import { buildCountyAreaKey, buildMetroAreaKey } from './area-keys'
-import type { MasterDataRow } from './supabase'
-
-type InsertableMasterRow = Omit<MasterDataRow, 'id' | 'created_at'>
+import type { InsertableMasterRow } from './texas-source-adapters'
 
 type TexasAreaKind = 'county' | 'metro'
 type TexasProjectionScenario = 'High' | 'Mid' | 'Low'

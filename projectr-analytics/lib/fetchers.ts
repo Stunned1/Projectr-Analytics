@@ -1,8 +1,16 @@
 import { transformFredData, transformHudData, transformCensusData } from './transformers'
 import type { GeoResult } from './geocoder'
-import type { MasterDataRow } from './supabase'
+import type { VisualBucket } from './supabase'
 
-type PartialRow = Omit<MasterDataRow, 'id' | 'created_at'>
+type PartialRow = {
+  submarket_id: string | null
+  geometry: string | null
+  metric_name: string
+  metric_value: number | null
+  time_period: string | null
+  data_source: string
+  visual_bucket: VisualBucket
+}
 
 // ── FRED helpers ──────────────────────────────────────────────────────────────
 async function fredSearch(query: string, key: string, filter: (s: { title: string; frequency_short: string }) => boolean) {

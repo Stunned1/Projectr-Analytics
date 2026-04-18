@@ -116,7 +116,7 @@ function toFilterValues(value?: string | readonly string[]): string[] {
     return value.map((entry) => entry.trim()).filter(Boolean)
   }
 
-  return normalizeKey(value) ? [value.trim()] : []
+  return typeof value === 'string' && normalizeKey(value) ? [value.trim()] : []
 }
 
 function applyQueryFilters(query: PostgresMasterDataQueryLike, options: PostgresReadOptions): PostgresMasterDataQueryLike {
@@ -193,9 +193,10 @@ export async function fetchRowsForSubmarkets(
     .order('time_period', { ascending: false, nullsFirst: false })
     .order('created_at', { ascending: false })
 
-  const result = (options.limit != null
-    ? await orderedQuery.limit(options.limit)
-    : await orderedQuery) as PostgresResultLike
+  const pendingResult = options.limit != null
+    ? orderedQuery.limit(options.limit)
+    : (orderedQuery as unknown as Promise<PostgresResultLike>)
+  const result = (await pendingResult) as PostgresResultLike
 
   return assertSuccess(result)
 }
@@ -256,7 +257,7 @@ export async function fetchMetricSeriesFromPostgres(
 
   const dataSources = Array.isArray(options.dataSource)
     ? options.dataSource.map((value) => value.trim()).filter(Boolean)
-    : normalizeKey(options.dataSource)
+    : typeof options.dataSource === 'string' && normalizeKey(options.dataSource)
       ? [options.dataSource.trim()]
       : []
 

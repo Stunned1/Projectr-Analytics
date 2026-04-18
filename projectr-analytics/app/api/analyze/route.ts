@@ -61,6 +61,17 @@ interface ScoredSite {
   momentum: number | null
 }
 
+type PermitPointRow = {
+  lat: number | null
+  lng: number | null
+  job_type: string | null
+}
+
+type ZillowGrowthRow = {
+  zip: string
+  zori_growth_12m: number | null
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
@@ -135,7 +146,9 @@ export async function POST(request: NextRequest) {
       .in('job_type', ['NB', 'A1'])
       .not('lat', 'is', null)
 
-    const permitPoints = (permits ?? []).map((p) => ({ lat: p.lat as number, lng: p.lng as number }))
+    const permitPoints = ((permits ?? []) as PermitPointRow[])
+      .filter((point): point is PermitPointRow & { lat: number; lng: number } => point.lat != null && point.lng != null)
+      .map((point) => ({ lat: point.lat, lng: point.lng }))
 
     // 4. Get ZORI growth for the selected borough ZIP range
     const { data: zillowData } = await supabase
@@ -144,8 +157,9 @@ export async function POST(request: NextRequest) {
       .gte('zip', zipRange.min)
       .lte('zip', zipRange.max)
 
-    const avgZoriGrowth = zillowData?.length
-      ? zillowData.reduce((s, r) => s + (r.zori_growth_12m ?? 0), 0) / zillowData.length
+    const boroughZillowRows = (zillowData ?? []) as ZillowGrowthRow[]
+    const avgZoriGrowth = boroughZillowRows.length
+      ? boroughZillowRows.reduce((s, r) => s + (r.zori_growth_12m ?? 0), 0) / boroughZillowRows.length
       : 0
 
     // 5. Score each parcel

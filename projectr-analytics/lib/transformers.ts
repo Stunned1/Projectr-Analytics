@@ -1,4 +1,14 @@
-import type { MasterDataRow, VisualBucket } from './supabase'
+import type { VisualBucket } from './supabase'
+
+type OperationalMetricRow = {
+  submarket_id: string | null
+  geometry: string | null
+  metric_name: string
+  metric_value: number | null
+  time_period: string | null
+  data_source: string
+  visual_bucket: VisualBucket
+}
 
 // FRED series IDs for key metrics
 export const FRED_SERIES: Record<string, { id: string; metric: string }> = {
@@ -11,7 +21,7 @@ export function transformFredData(
   metricName: string,
   observations: Array<{ date: string; value: string }>,
   submarketId: string
-): Omit<MasterDataRow, 'id' | 'created_at'>[] {
+): OperationalMetricRow[] {
   return observations
     .filter((o) => o.value !== '.' && o.value !== '')
     .slice(-12) // last 12 periods
@@ -29,7 +39,7 @@ export function transformFredData(
 export function transformHudData(
   fmrData: Record<string, number>,
   submarketId: string
-): Omit<MasterDataRow, 'id' | 'created_at'>[] {
+): OperationalMetricRow[] {
   return Object.entries(fmrData).map(([bedroom, rent]) => ({
     submarket_id: submarketId,
     geometry: null,
@@ -44,7 +54,7 @@ export function transformHudData(
 export function transformCensusData(
   variables: Record<string, number | null>,
   submarketId: string
-): Omit<MasterDataRow, 'id' | 'created_at'>[] {
+): OperationalMetricRow[] {
   const metricMap: Record<string, string> = {
     B01003_001E: 'Total_Population',
     B19013_001E: 'Median_Household_Income',

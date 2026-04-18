@@ -13,7 +13,7 @@ Track the full multi-phase convergence effort described by `dev/agent-planning.m
 
 ## Current Focus
 
-- Verify the shared-chart adoption in the report/PDF path and keep reducing bespoke chart payload construction.
+- Clear remaining build blockers in the current worktree so Phase 1 can be evaluated against a real full-build baseline instead of targeted tests only.
 - Keep tightening which analytical prompts and export surfaces receive real shared-contract charts versus explicitly flagged fallbacks.
 - Keep this worklog updated as each planning or implementation change lands.
 
@@ -33,6 +33,11 @@ Track the full multi-phase convergence effort described by `dev/agent-planning.m
 - Added the first router-backed chart path for active-ZIP unemployment or permit trend prompts in `/api/agent`, while leaving rent-trend prompts on the explicit placeholder path for now.
 - Added a grounded rent-trend chart path in `/api/agent` that reuses the persisted Zillow monthly series helper for active ZIP prompts.
 - Added `projectr-analytics/lib/report/scout-chart-pdf-adapter.ts` so the market report PDF now derives its rent, permit, and search-trends charts from the shared chart contract before rendering them through the existing React PDF chart components.
+- Fixed a nullability mismatch in `projectr-analytics/app/api/metro-benchmark/route.ts` so build-time type checking no longer treats nullable router `submarket_id` values as guaranteed strings.
+- Hardened `projectr-analytics/components/ScoutChartCard.tsx` against `recharts` formatter unions so the Phase 1 chart card now type-checks under the full production build.
+- Tightened shared router helpers and write paths in `lib/data/postgres-master-data.ts`, `lib/data/bigquery-master-data.ts`, `lib/transformers.ts`, `lib/texas-source-adapters.ts`, and `lib/texas-source-fetchers.ts` so stricter operational row contracts no longer inherit `geometry: unknown` or mis-handle scalar-vs-array filter inputs.
+- Changed `projectr-analytics/lib/supabase.ts` to lazy-create the client so `next build` no longer crashes during module evaluation when Supabase env vars are absent in the local build environment.
+- Typed previously implicit Supabase payloads in `app/api/aggregate/route.ts` and `app/api/analyze/route.ts` so those routes no longer collapse query results to `never[]` during stricter build checks.
 
 ## Remaining By Phase
 
@@ -76,6 +81,8 @@ Track the full multi-phase convergence effort described by `dev/agent-planning.m
 - Available external data sources may lag behind integration work, so some Phase 1 contract paths may need temporary placeholders.
 - The current `/api/agent` chart payload is intentionally placeholder-backed for trend-style prompts; the next pass needs router-backed real series before the feature should be treated as analyst-ready evidence.
 - `/api/agent` now has grounded rent and unemployment/permit chart paths for active ZIP prompts, but unsupported trend requests still use the explicit placeholder fallback when there is no wired historical source or not enough stored data.
+- Full `next build` verification is still surfacing unrelated TypeScript issues elsewhere in the worktree, so Phase 1 cannot be called fully closed until the build baseline is clean or the remaining blockers are explicitly scoped out.
+- The current remaining full-build blockers follow a repeated pattern in older API routes: untyped Supabase query payloads collapse to `never` under stricter checking, so more legacy routes may still need explicit local row types before the build baseline is fully clean.
 
 ## Open Questions
 
@@ -95,3 +102,6 @@ Track the full multi-phase convergence effort described by `dev/agent-planning.m
 - Added and verified the first real router-backed chart response in `/api/agent` for active-ZIP unemployment or permit trend prompts.
 - Added and verified a grounded Zillow monthly rent-trend chart response in `/api/agent` for active-ZIP rent prompts.
 - Added and verified a report-side shared-chart adapter so the market PDF chart inputs now flow through `ScoutChartOutput` before React PDF rendering.
+- Fixed the `metro-benchmark` route to guard nullable router submarket IDs while working through full-build verification for Phase 1.
+- Hardened the shared chart card, router adapters, Texas ingest write types, and lazy Supabase client while pushing `next build` verification forward into older route files.
+- Typed aggregate and analyze-route Supabase payloads during the ongoing full-build cleanup, leaving `app/api/borough/route.ts` as the next identified blocker in the same legacy inference pattern.

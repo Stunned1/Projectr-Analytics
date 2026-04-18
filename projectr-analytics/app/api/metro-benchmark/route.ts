@@ -80,17 +80,20 @@ export async function GET(request: NextRequest) {
 
     for (const r of masterRows) {
       const sid = r.submarket_id
+      const value = r.metric_value
+      if (!sid || value == null) continue
+
       if (r.metric_name === 'Vacancy_Rate' && r.data_source === 'Census ACS') {
-        vacByZip.set(sid, r.metric_value)
+        vacByZip.set(sid, value)
       }
       if (r.metric_name === 'Moved_From_Different_State' && r.data_source === 'Census ACS') {
-        migByZip.set(sid, r.metric_value)
+        migByZip.set(sid, value)
       }
       if (r.metric_name === 'Unemployment_Rate' && r.data_source === 'FRED' && r.time_period) {
         const cur = unempByZip.get(sid)
         const t = r.time_period
         if (!cur || t.localeCompare(cur.t) > 0) {
-          unempByZip.set(sid, { t, v: r.metric_value })
+          unempByZip.set(sid, { t, v: value })
         }
       }
     }

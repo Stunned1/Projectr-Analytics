@@ -20,6 +20,16 @@ function formatValue(value: number, format: ScoutChartOutput['yAxis']['valueForm
   return Number.isInteger(value) ? value.toLocaleString() : value.toFixed(1)
 }
 
+function formatChartValue(
+  value: string | number | readonly (string | number)[] | undefined,
+  format: ScoutChartOutput['yAxis']['valueFormat']
+): string {
+  if (Array.isArray(value)) return value.map((entry) => formatChartValue(entry, format)).join(', ')
+  if (typeof value === 'number') return formatValue(value, format)
+  if (typeof value === 'string') return value
+  return ''
+}
+
 function toRechartsRows(chart: ScoutChartOutput): Array<Record<string, string | number>> {
   const labels = new Set<string>()
   for (const series of chart.series) {
@@ -67,10 +77,10 @@ export function ScoutChartCard({ chart }: { chart: ScoutChartOutput }) {
                 tick={{ fill: '#9ca3af', fontSize: 10 }}
                 axisLine={{ stroke: '#374151' }}
                 tickLine={{ stroke: '#374151' }}
-                tickFormatter={(value: number) => formatValue(value, chart.yAxis.valueFormat)}
+                tickFormatter={(value) => formatChartValue(value, chart.yAxis.valueFormat)}
               />
               <Tooltip
-                formatter={(value: number) => formatValue(value, chart.yAxis.valueFormat)}
+                formatter={(value) => formatChartValue(value, chart.yAxis.valueFormat)}
                 contentStyle={{ backgroundColor: '#09090b', border: '1px solid #27272a', color: '#fff' }}
               />
               <Legend wrapperStyle={{ fontSize: '11px' }} />
@@ -94,10 +104,10 @@ export function ScoutChartCard({ chart }: { chart: ScoutChartOutput }) {
                 tick={{ fill: '#9ca3af', fontSize: 10 }}
                 axisLine={{ stroke: '#374151' }}
                 tickLine={{ stroke: '#374151' }}
-                tickFormatter={(value: number) => formatValue(value, chart.yAxis.valueFormat)}
+                tickFormatter={(value) => formatChartValue(value, chart.yAxis.valueFormat)}
               />
               <Tooltip
-                formatter={(value: number) => formatValue(value, chart.yAxis.valueFormat)}
+                formatter={(value) => formatChartValue(value, chart.yAxis.valueFormat)}
                 contentStyle={{ backgroundColor: '#09090b', border: '1px solid #27272a', color: '#fff' }}
               />
               <Legend wrapperStyle={{ fontSize: '11px' }} />

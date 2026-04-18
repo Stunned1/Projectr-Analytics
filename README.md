@@ -198,6 +198,7 @@ _04.18.2026_
 - Added the Phase 1 Scout chart and citation contract, extended `/api/agent` plus its NDJSON stream to return optional chart payloads with trace citations, and kept the response backward-compatible for text-only flows.
 - `/api/agent` now uses the shared market-data router to return grounded unemployment or permit trend charts for active ZIP prompts, while unsupported trend requests still fall back to explicitly flagged placeholder series.
 - `/api/agent` now also reuses the persisted `zillow_zori_monthly` history for grounded active-ZIP rent trend charts instead of treating rent trends as placeholder-only responses.
+- Full-build verification now type-checks through the shared chart card, router adapters, Texas ingest helpers, and lazy Supabase client creation instead of failing earlier on eager client initialization or stale write-row aliases.
 
 **Bug Fixes**
 
@@ -238,6 +239,11 @@ _04.17.2026_
 - Hybrid terminal navigation prompts now strip connector words and punctuation before the search query, so requests like `take me to Harris County Texas, and then explain rent and vacancy` no longer search for `harris county texas, and`.
 - Hybrid map-control parsing now recognizes broader analytical follow-ups such as `walk me through` and `tell me about`, keeping navigation-plus-analysis prompts on the intended direct-search flow.
 - `/api/agent` now uses a bounded Gemini fallback parser only when the deterministic direct-control parser cannot confidently resolve a map action, which keeps normal search/layer commands fast while rescuing messier terminal phrasing.
+
+_04.18.2026_
+- The shared chart card now accepts the full `recharts` tooltip and axis formatter value unions, fixing production type-check failures in the new Phase 1 visualization path.
+- Shared router helpers and Texas ingest adapters now use explicit operational insert-row types instead of inheriting `geometry: unknown` from older Supabase row aliases.
+- `lib/supabase.ts` now lazy-creates the client so builds no longer crash during module evaluation when local Supabase env vars are absent.
 - The shared market search parser now recognizes trailing state names or USPS codes even without commas, so agent-driven searches like `harris county texas` route into the same county / metro / city resolution path as `Harris County, TX` instead of falling through to the city-only error path.
 - Agent-driven search actions now canonicalize resolved geographies before dispatch, so the terminal emits queries like `Harris County, TX` and `Houston, TX` instead of lowercased raw prompt fragments that still need downstream cleanup.
 - Natural-language terminal map controls now run through a bounded Gemini interpreter that can emit ordered actions like `search -> permits ON`, while slash-prefixed commands stay on the local deterministic fast path and filler like `please` no longer pollutes geography searches.
@@ -301,6 +307,7 @@ _04.18.2026_
 - **Transit lines missing but yellow circles remain** - When `TRANSITLAND_API_KEY` is absent or Transitland returns no drawable routes, `/api/transit` falls back to `lib/fetchGtfs.ts`; if that Overpass query fails and hits the smaller retry, the retry only requests stop nodes and no rail ways, so the map renders yellow subway entrance circles without PathLayer route lines.
 
 - **EDA fallback still crashes on malformed profile entries** - `lib/eda-assistant.ts` now normalizes missing workspace arrays, but `/api/agent` can still throw if `uploadedDatasets` or `market.metrics` contain `null` entries; the fallback normalizer needs object-shape guards before it dereferences dataset and metric fields.
+- **Full build still hits untyped Supabase route payloads** - `npm run build` now gets past the shared chart and router code, but older API routes like `app/api/borough/route.ts` still infer Supabase `data` payloads as `never[]`; each affected route needs explicit local row typing before the production build baseline is fully clean.
 
 ## Minor Gaps
 

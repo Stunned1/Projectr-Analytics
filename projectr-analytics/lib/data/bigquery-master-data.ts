@@ -279,7 +279,7 @@ export async function fetchMetricSeriesFromBigQuery(
 
   const dataSources = Array.isArray(options.dataSource)
     ? options.dataSource.map((value) => value.trim()).filter(Boolean)
-    : normalizeKey(options.dataSource)
+    : typeof options.dataSource === 'string' && normalizeKey(options.dataSource)
       ? [options.dataSource.trim()]
       : []
 

@@ -5,11 +5,19 @@ import * as XLSX from 'xlsx'
 import { buildCountyAreaKey, buildMetroAreaKey, normalizeCountyDisplayName, normalizeMetroDisplayName } from './area-keys'
 import { upsertMarketDataRows } from './data/market-data-router'
 import type { PostgresMasterDataClientLike } from './data/postgres-master-data'
-import type { MasterDataRow, VisualBucket } from './supabase'
+import type { VisualBucket } from './supabase'
 
 dotenv.config({ path: '.env.local' })
 
-type InsertableMasterRow = Omit<MasterDataRow, 'id' | 'created_at'>
+export type InsertableMasterRow = {
+  submarket_id: string | null
+  geometry: string | null
+  metric_name: string
+  metric_value: number | null
+  time_period: string | null
+  data_source: string
+  visual_bucket: VisualBucket
+}
 type NormalizedRecord = Record<string, unknown>
 type DatasetKind = 'housing' | 'building-permits' | 'demographics-estimates' | 'demographics-projections'
 

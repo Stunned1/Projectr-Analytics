@@ -1,9 +1,26 @@
 import { createClient } from '@supabase/supabase-js'
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? null
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? null
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+let cachedSupabase: ReturnType<typeof createClient> | null = null
+
+function getSupabaseClient(): ReturnType<typeof createClient> {
+  if (cachedSupabase) return cachedSupabase
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new Error(
+      'Supabase client is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.'
+    )
+  }
+  cachedSupabase = createClient(supabaseUrl, supabaseAnonKey)
+  return cachedSupabase
+}
+
+export const supabase = new Proxy({} as ReturnType<typeof createClient>, {
+  get(_target, property, receiver) {
+    return Reflect.get(getSupabaseClient(), property, receiver)
+  },
+})
 
 export type VisualBucket = 'POLYGON' | 'MARKER' | 'HEATMAP' | 'TIME_SERIES' | 'TABULAR'
 

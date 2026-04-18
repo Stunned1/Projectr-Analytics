@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { upsertMarketDataRows } from '@/lib/data/market-data-router'
+import type { VisualBucket } from '@/lib/data/types'
 import { geocodeZip } from '@/lib/geocoder'
 import { geocodeAddressForward, getGoogleForwardGeocodeKey } from '@/lib/google-forward-geocode'
 import {
@@ -147,7 +148,7 @@ export async function POST(request: NextRequest) {
       metric_value: number | null
       time_period: string | null
       data_source: string
-      visual_bucket: string
+      visual_bucket: VisualBucket
       _lat: number | null
       _lng: number | null
       _label: string
