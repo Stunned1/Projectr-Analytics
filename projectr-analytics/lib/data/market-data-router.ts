@@ -293,12 +293,16 @@ export async function getAnalyticalComparison(
   request: AnalyticalComparisonRequest,
   dependencies: AnalyticalComparisonDependencies = {}
 ): Promise<AnalyticalComparisonResult> {
-  if (request.comparisonMode !== 'history') {
+  if (request.comparisonMode !== 'history' && request.comparisonMode !== 'peer_market') {
     throw new Error(`Unsupported analytical comparison mode: ${request.comparisonMode}`)
   }
 
-  if (request.comparisonMarket !== null) {
+  if (request.comparisonMode === 'history' && request.comparisonMarket !== null) {
     throw new Error('comparisonMarket is not supported for history comparisons')
+  }
+
+  if (request.comparisonMode === 'peer_market' && request.comparisonMarket === null) {
+    throw new Error('comparisonMarket is required for peer-market comparisons')
   }
 
   const metric = request.metric
@@ -307,28 +311,37 @@ export async function getAnalyticalComparison(
   }
 
   const subject = normalizeAnalyticalSubject(request.subjectMarket)
+  const comparison = request.comparisonMarket ? normalizeAnalyticalSubject(request.comparisonMarket) : null
+  if (comparison && subject.kind !== comparison.kind) {
+    throw new Error('peer-market comparisons require matching subject kinds')
+  }
+
   const timeWindow = normalizeAnalyticalTimeWindow(request.timeWindow, dependencies.now ?? new Date())
   const config = ANALYTICAL_METRIC_CONFIG[metric]
-  const points = await getHistoricalSeriesForMetric(metric, subject, timeWindow, dependencies)
+  const comparisonSubjects = comparison ? [subject, comparison] : [subject]
+  const series = await Promise.all(
+    comparisonSubjects.map(async (candidate) => {
+      const points = await getHistoricalSeriesForMetric(metric, candidate, timeWindow, dependencies)
+      if (points.length === 0) {
+        throw new Error(`Insufficient historical data for ${candidate.label}`)
+      }
 
-  if (points.length === 0) {
-    throw new Error(`Insufficient historical data for ${subject.label}`)
-  }
+      return {
+        key: buildSeriesKey(metric, candidate),
+        label: candidate.label,
+        subject: candidate,
+        points,
+      } satisfies AnalyticalComparisonSeries
+    })
+  )
 
   return {
     comparisonMode: request.comparisonMode,
     metric,
     metricLabel: config.metricLabel,
     timeWindow,
-    series: [
-      {
-        key: buildSeriesKey(metric, subject),
-        label: subject.label,
-        subject,
-        points,
-      },
-    ],
-    citations: [buildComparisonCitation(metric, subject, config, points)],
+    series,
+    citations: series.map((entry) => buildComparisonCitation(metric, entry.subject, config, entry.points)),
   }
 }
 

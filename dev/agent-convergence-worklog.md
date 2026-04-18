@@ -13,7 +13,7 @@ Track the full multi-phase convergence effort described by `dev/agent-planning.m
 
 ## Current Focus
 
-- Close out the first Phase 2 history-first slice after verification, then choose the next comparison-ready expansion step for market A vs market B support.
+- Extend the first Phase 2 slice from market-vs-own-history into bounded market A vs market B execution on the same analytical router contract.
 - Keep legacy NYC-only route cleanup deferred unless it blocks shared infrastructure or a future verification gate we explicitly choose to enforce.
 - Keep this worklog updated as each planning or implementation change lands.
 
@@ -41,6 +41,7 @@ Track the full multi-phase convergence effort described by `dev/agent-planning.m
 - Added comparison-ready history helpers in `projectr-analytics/lib/data/market-data-router.ts` so rent, unemployment rate, and permit-unit history requests now share one normalized analytical request/result contract.
 - Extended `projectr-analytics/app/api/agent/route.ts` and `projectr-analytics/lib/agent-types.ts` so bounded history prompts can resolve a subject, call the router history helper, and return grounded charted responses with citations.
 - Replaced the route-local Texas county / metro history parser shim with shared area-name normalization plus canonical Texas area keys, and added regression coverage for explicit Texas prompts, `in Texas` phrasing, trailing non-state words, and non-Texas rejection.
+- Extended the shared analytical request path so `/api/agent` and `market-data-router` can execute bounded peer-market comparisons with multi-series chart output on the same contract used for history prompts.
 
 ## Remaining By Phase
 
@@ -55,7 +56,8 @@ Track the full multi-phase convergence effort described by `dev/agent-planning.m
 - Define missing comparison and historical-read helpers.
 - Avoid direct BigQuery query sprawl outside `market-data-router`.
 - First active slice: implement market-vs-own-history prompts now using comparison-ready request/result contracts so market A vs market B can be added later without rewriting the assistant boundary.
-- Next follow-up after this slice: add actual peer-market execution on top of the same analytical request contract instead of introducing a second route-local comparison path.
+- Newly landed bounded peer slice: explicit ZIP-vs-ZIP rent comparisons and Texas county-vs-county permit comparisons now run on the same analytical contract.
+- Next follow-up after this slice: broaden peer-market execution beyond explicit type-matched prompts without introducing a second route-local comparison path.
 
 ### Phase 3
 
@@ -91,6 +93,7 @@ Track the full multi-phase convergence effort described by `dev/agent-planning.m
 - The current remaining full-build blockers follow a repeated pattern in older API routes: untyped Supabase query payloads collapse to `never` under stricter checking, so more legacy routes may still need explicit local row types before the build baseline is fully clean.
 - Because the product focus is now Texas-first, not every legacy NYC-only route should be treated as a mandatory convergence blocker if it does not affect shared Texas workflows or deployment-critical validation.
 - The targeted PDF adapter test still hits sandbox `spawn EPERM` in this environment even though the other targeted Phase 2 test files pass, so release-level verification should rerun that test outside this sandbox before treating the full targeted suite as environment-clean.
+- The current peer-market path is still intentionally narrow: it expects two explicit markets in the prompt and keeps comparisons to matching subject kinds instead of inferring peers automatically.
 
 ## Open Questions
 
@@ -118,3 +121,4 @@ Track the full multi-phase convergence effort described by `dev/agent-planning.m
 - Replaced the route-local Texas county / metro history parser shim in `/api/agent` with shared area-name normalization and canonical Texas area keys, while keeping explicit non-Texas prompts rejected.
 - Tightened `/api/agent` history parsing so explicit Texas prompts like `Harris County, TX` and `Austin metro area, TX` resolve to canonical shared keys and labels, while space-delimited non-Texas prompts like `Cook County Illinois` and `Miami metro area Florida` are rejected instead of being coerced to Texas.
 - Verified the first Phase 2 slice with passing router, agent-response, chart-contract, and imported-chart-bridge tests plus lint with 0 errors; the remaining PDF adapter test still hits sandbox `spawn EPERM` and needs an unsandboxed rerun for a fully clean targeted verification set.
+- Added bounded peer-market execution on top of the same analytical contract, with passing router and agent-response tests for ZIP-vs-ZIP rent comparisons and Texas county-vs-county permit comparisons.

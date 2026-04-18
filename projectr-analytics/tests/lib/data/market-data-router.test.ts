@@ -815,6 +815,61 @@ test('rejects a non-null comparison market for history requests', async () => {
   );
 });
 
+test('returns a comparison-ready peer-market rent result for two ZIPs', async () => {
+  const { getAnalyticalComparisonForTest } = await loadMarketDataRouterModule();
+  const calls: Array<{ zip: string; startDate: string }> = [];
+
+  const result = await getAnalyticalComparisonForTest(
+    {
+      comparisonMode: 'peer_market',
+      metric: 'rent',
+      subjectMarket: { kind: 'zip', id: '78701', label: '78701' },
+      comparisonMarket: { kind: 'zip', id: '77002', label: '77002' },
+      timeWindow: { mode: 'relative', unit: 'months', value: 12 },
+    },
+    {
+      now: new Date('2026-04-18T00:00:00.000Z'),
+      fetchRentSeries: async (zip, options) => {
+        calls.push({ zip, startDate: options.startDate });
+        return zip === '78701'
+          ? [
+              { x: '2025-04', y: 2100 },
+              { x: '2026-04', y: 2250 },
+            ]
+          : [
+              { x: '2025-04', y: 1950 },
+              { x: '2026-04', y: 2050 },
+            ];
+      },
+    }
+  );
+
+  assert.deepStrictEqual(calls, [
+    { zip: '78701', startDate: '2025-04-01' },
+    { zip: '77002', startDate: '2025-04-01' },
+  ]);
+  assert.strictEqual(result.comparisonMode, 'peer_market');
+  assert.strictEqual(result.series.length, 2);
+  assert.strictEqual(result.series[1]?.subject.id, '77002');
+  assert.strictEqual(result.citations.length, 2);
+});
+
+test('rejects peer-market comparisons with mismatched subject kinds', async () => {
+  const { getAnalyticalComparisonForTest } = await loadMarketDataRouterModule();
+
+  await assert.rejects(
+    () =>
+      getAnalyticalComparisonForTest({
+        comparisonMode: 'peer_market',
+        metric: 'permit_units',
+        subjectMarket: { kind: 'county', id: 'county:TX:harris-county', label: 'Harris County, TX' },
+        comparisonMarket: { kind: 'metro', id: 'metro:TX:austin', label: 'Austin, TX' },
+        timeWindow: { mode: 'relative', unit: 'years', value: 5 },
+      }),
+    /matching subject kinds/i
+  );
+});
+
 test('rejects unsupported analytical metrics before querying history', async () => {
   const { getAnalyticalComparisonForTest } = await loadMarketDataRouterModule();
   await assert.rejects(

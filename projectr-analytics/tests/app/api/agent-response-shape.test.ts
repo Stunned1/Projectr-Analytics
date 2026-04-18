@@ -302,6 +302,100 @@ test('returns a grounded permit history chart for an explicit Texas metro prompt
   assert.match(response.message, /Austin/i)
 })
 
+test('returns a grounded rent comparison chart for two ZIP prompts', async () => {
+  const calls: AnalyticalComparisonRequest[] = []
+  const response = await buildHistoryChartedResponseForTest('compare rent history between 78701 and 77002', null, {
+    getAnalyticalComparison: async (request: AnalyticalComparisonRequest): Promise<AnalyticalComparisonResult> => {
+      calls.push(request)
+      return {
+        comparisonMode: 'peer_market',
+        metric: 'rent',
+        metricLabel: 'Rent',
+        timeWindow: { mode: 'relative', startDate: '2025-04-01', label: 'Last 12 months', monthsBack: 12 },
+        series: [
+          {
+            key: 'zip:78701:rent',
+            label: '78701',
+            subject: { kind: 'zip', id: '78701', label: '78701' },
+            points: [
+              { x: '2025-04', y: 2100 },
+              { x: '2026-04', y: 2250 },
+            ],
+          },
+          {
+            key: 'zip:77002:rent',
+            label: '77002',
+            subject: { kind: 'zip', id: '77002', label: '77002' },
+            points: [
+              { x: '2025-04', y: 1950 },
+              { x: '2026-04', y: 2050 },
+            ],
+          },
+        ],
+        citations: [
+          { id: 'rent:zip:78701', label: 'Zillow Research', sourceType: 'public_dataset', periodLabel: '2025-04 to 2026-04' },
+          { id: 'rent:zip:77002', label: 'Zillow Research', sourceType: 'public_dataset', periodLabel: '2025-04 to 2026-04' },
+        ],
+      }
+    },
+  })
+
+  assert.equal(calls[0]?.comparisonMode, 'peer_market')
+  assert.equal(calls[0]?.subjectMarket.id, '78701')
+  assert.equal(calls[0]?.comparisonMarket?.id, '77002')
+  assert.equal(response.chart?.series.length, 2)
+  assert.match(response.message, /78701 versus 77002/i)
+})
+
+test('returns a grounded permit comparison chart for two Texas county prompts', async () => {
+  const calls: AnalyticalComparisonRequest[] = []
+  const response = await buildHistoryChartedResponseForTest(
+    'compare permit history for Harris County, TX and Travis County, TX',
+    null,
+    {
+      getAnalyticalComparison: async (request: AnalyticalComparisonRequest): Promise<AnalyticalComparisonResult> => {
+        calls.push(request)
+        return {
+          comparisonMode: 'peer_market',
+          metric: 'permit_units',
+          metricLabel: 'Permit units',
+          timeWindow: { mode: 'relative', startDate: '2021-04-01', label: 'Last 5 years', monthsBack: 60 },
+          series: [
+            {
+              key: 'county:TX:harris-county:permit_units',
+              label: 'Harris County, TX',
+              subject: { kind: 'county', id: 'county:TX:harris-county', label: 'Harris County, TX' },
+              points: [
+                { x: '2021-04-01', y: 1024 },
+                { x: '2025-04-01', y: 1180 },
+              ],
+            },
+            {
+              key: 'county:TX:travis-county:permit_units',
+              label: 'Travis County, TX',
+              subject: { kind: 'county', id: 'county:TX:travis-county', label: 'Travis County, TX' },
+              points: [
+                { x: '2021-04-01', y: 820 },
+                { x: '2025-04-01', y: 910 },
+              ],
+            },
+          ],
+          citations: [
+            { id: 'permit:county:TX:harris-county', label: 'Census BPS / Projectr master data', sourceType: 'internal_dataset', periodLabel: '2021-04-01 to 2025-04-01' },
+            { id: 'permit:county:TX:travis-county', label: 'Census BPS / Projectr master data', sourceType: 'internal_dataset', periodLabel: '2021-04-01 to 2025-04-01' },
+          ],
+        }
+      },
+    }
+  )
+
+  assert.equal(calls[0]?.comparisonMode, 'peer_market')
+  assert.equal(calls[0]?.subjectMarket.id, 'county:TX:harris-county')
+  assert.equal(calls[0]?.comparisonMarket?.id, 'county:TX:travis-county')
+  assert.equal(response.chart?.series.length, 2)
+  assert.match(response.message, /Harris County, TX versus Travis County, TX/i)
+})
+
 test('rejects a space-delimited non-Texas county history prompt', async () => {
   let called = false
   const response = await buildHistoryChartedResponseForTest('show me permit history for Cook County Illinois', null, {

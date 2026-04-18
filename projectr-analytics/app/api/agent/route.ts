@@ -459,6 +459,10 @@ function hasHistoryIntent(userMessage: string): boolean {
   return /\b(history|trend|trends|timeline|over time|time series|changed|change)\b/i.test(userMessage)
 }
 
+function hasPeerComparisonIntent(userMessage: string): boolean {
+  return /\b(compare|comparison|versus|vs\.?)\b/i.test(userMessage)
+}
+
 function detectHistoryMetric(userMessage: string): AgentHistoryMetric | null {
   const prompt = userMessage.toLowerCase()
   if (!hasHistoryIntent(prompt)) return null
@@ -552,6 +556,53 @@ function resolveHistorySubjectMarket(
   return null
 }
 
+function splitPeerComparisonChunks(userMessage: string): string[] {
+  return userMessage
+    .split(/\b(?:versus|vs\.?|and)\b/i)
+    .map((chunk) => chunk.trim())
+    .filter(Boolean)
+}
+
+function resolvePeerComparisonMarkets(
+  userMessage: string,
+  context: MapContext | null | undefined
+): [AgentHistorySubject, AgentHistorySubject] | null {
+  const chunks = splitPeerComparisonChunks(userMessage)
+  const subjects: AgentHistorySubject[] = []
+
+  for (const chunk of chunks) {
+    const subject = resolveHistorySubjectMarket(chunk, null)
+    if (!subject) continue
+    if (subjects.some((existing) => existing.kind === subject.kind && existing.id === subject.id)) continue
+    subjects.push(subject)
+    if (subjects.length === 2) break
+  }
+
+  if (subjects.length >= 2) {
+    return [subjects[0], subjects[1]]
+  }
+
+  const explicitZips = Array.from(new Set(userMessage.match(/\b\d{5}\b/g) ?? []))
+  if (explicitZips.length >= 2) {
+    return explicitZips.slice(0, 2).map((zip) => ({ kind: 'zip', id: zip, label: zip })) as [
+      AgentHistorySubject,
+      AgentHistorySubject,
+    ]
+  }
+
+  if (subjects.length === 1 && context?.zip?.trim()) {
+    const activeZip = context.zip.trim()
+    if (subjects[0].kind === 'zip' && subjects[0].id !== activeZip) {
+      return [
+        { kind: 'zip', id: activeZip, label: context.label?.trim() || context.eda?.geographyLabel?.trim() || activeZip },
+        subjects[0],
+      ]
+    }
+  }
+
+  return null
+}
+
 function buildHistoryComparisonRequest(
   metric: AgentHistoryMetric,
   subjectMarket: AgentHistorySubject
@@ -572,12 +623,24 @@ function buildHistoryChartFromComparison(comparison: AnalyticalComparisonResult)
     color: '#D76B3D',
     points: entry.points.map((point) => ({ x: point.x, y: point.y })),
   }))
+  const title =
+    comparison.comparisonMode === 'peer_market' && comparison.series.length >= 2
+      ? `${comparison.metricLabel} comparison: ${comparison.series[0]?.label ?? 'Market A'} vs ${comparison.series[1]?.label ?? 'Market B'}`
+      : `${comparison.series[0]?.label ?? 'Market'} ${comparison.metricLabel.toLowerCase()} history`
+  const summary =
+    comparison.comparisonMode === 'peer_market' && comparison.series.length >= 2
+      ? `Grounded ${comparison.metricLabel.toLowerCase()} comparison for ${comparison.series[0]?.label ?? 'Market A'} versus ${comparison.series[1]?.label ?? 'Market B'}.`
+      : `Grounded ${comparison.metricLabel.toLowerCase()} history for ${comparison.series[0]?.label ?? 'the selected market'}.`
+  const subtitle =
+    comparison.comparisonMode === 'peer_market'
+      ? 'Peer-market series from the shared market-data router'
+      : 'Historical series from the shared market-data router'
 
   return normalizeScoutChartOutput({
     kind: HISTORY_METRIC_CONFIG[comparison.metric].chartKind,
-    title: `${comparison.series[0]?.label ?? 'Market'} ${comparison.metricLabel.toLowerCase()} history`,
-    subtitle: 'Historical series from the shared market-data router',
-    summary: `Grounded ${comparison.metricLabel.toLowerCase()} history for ${comparison.series[0]?.label ?? 'the selected market'}.`,
+    title,
+    subtitle,
+    summary,
     placeholder: false,
     confidenceLabel: 'router-backed history',
     xAxis: { key: 'period', label: 'Period' },
@@ -591,6 +654,31 @@ function buildHistoryTrace(comparison: AnalyticalComparisonResult): AgentTrace {
   const subjectLabel = comparison.series[0]?.label ?? 'the selected market'
   const firstPoint = comparison.series[0]?.points[0] ?? null
   const lastPoint = comparison.series[0]?.points[comparison.series[0]?.points.length - 1] ?? null
+  const comparisonLabel = comparison.series[1]?.label ?? null
+  const comparisonLastPoint = comparison.series[1]?.points[comparison.series[1]?.points.length - 1] ?? null
+
+  if (comparison.comparisonMode === 'peer_market' && comparisonLabel) {
+    return {
+      summary: `${comparison.metricLabel} comparison for ${subjectLabel} versus ${comparisonLabel}`,
+      taskType: 'compare_segments',
+      methodology:
+        'Scout normalized the comparison request, delegated both historical reads to the comparison-ready market-data router, and rendered the returned series without inventing any intermediate values.',
+      keyFindings: [
+        `${comparison.series.length} grounded historical series were returned for the comparison.`,
+        comparisonLastPoint && lastPoint
+          ? `Latest ${comparison.metricLabel.toLowerCase()} is ${lastPoint.y} for ${subjectLabel} versus ${comparisonLastPoint.y} for ${comparisonLabel}.`
+          : `Scout returned grounded comparative history for both markets.`,
+      ],
+      evidence: [
+        `Metric: ${comparison.metricLabel}.`,
+        `Window: ${comparison.timeWindow.label}.`,
+        `Markets: ${subjectLabel} and ${comparisonLabel}.`,
+      ],
+      caveats: ['Only rent, unemployment rate, and permit history are supported in this bounded comparative path.'],
+      nextQuestions: ['Ask for another pair of ZIPs, counties, or metros if you want a different comparison.'],
+      citations: comparison.citations,
+    }
+  }
 
   return {
     summary: `${comparison.metricLabel} history for ${subjectLabel}`,
@@ -646,7 +734,9 @@ async function maybeBuildHistoryChartedResponse(
     )
   }
 
-  const subjectMarket = resolveHistorySubjectMarket(userMessage, context)
+  const peerMarkets = hasPeerComparisonIntent(userMessage) ? resolvePeerComparisonMarkets(userMessage, context) : null
+  const subjectMarket = peerMarkets?.[0] ?? resolveHistorySubjectMarket(userMessage, context)
+  const comparisonMarket = peerMarkets?.[1] ?? null
   if (!subjectMarket) {
     return {
       message: 'I could not identify which ZIP, county, or metro to use for that history request.',
@@ -683,6 +773,42 @@ async function maybeBuildHistoryChartedResponse(
     }
   }
 
+  if (comparisonMarket && subjectMarket.kind !== comparisonMarket.kind) {
+    return {
+      message: 'Both comparison markets need to resolve to the same geography type for this bounded comparison path.',
+      action: { type: 'none' as const },
+      trace: {
+        summary: 'Peer comparison requires matching geography kinds',
+        taskType: 'compare_segments',
+        methodology:
+          'Scout recognized a comparison request, but the two resolved geographies did not map to the same subject kind.',
+        keyFindings: ['No chart was generated.'],
+        evidence: [`Resolved kinds: ${subjectMarket.kind} and ${comparisonMarket.kind}.`],
+        caveats: ['Use ZIP vs ZIP, county vs county, or metro vs metro comparisons.'],
+        nextQuestions: ['Ask for a ZIP-to-ZIP comparison.', 'Ask for a county-to-county comparison within Texas.'],
+      },
+      chart: null,
+    }
+  }
+
+  if (metric === 'rent' && comparisonMarket && comparisonMarket.kind !== 'zip') {
+    return {
+      message: 'Rent comparisons are only supported for ZIP subjects right now.',
+      action: { type: 'none' as const },
+      trace: {
+        summary: 'Rent comparison requires ZIP subjects',
+        taskType: 'compare_segments',
+        methodology:
+          'Scout recognized a rent comparison request but the bounded router path only supports rent at ZIP granularity.',
+        keyFindings: ['No chart was generated.'],
+        evidence: [`Resolved subject kinds: ${subjectMarket.kind}${comparisonMarket ? ` and ${comparisonMarket.kind}` : ''}.`],
+        caveats: ['Use two ZIP codes for rent comparisons.'],
+        nextQuestions: ['Ask to compare rent history between two ZIPs like 78701 and 77002.'],
+      },
+      chart: null,
+    }
+  }
+
   const fetchAnalyticalComparison =
     dependencies.getAnalyticalComparison ?? (async (request: AnalyticalComparisonRequest) => {
       const { getAnalyticalComparison } = await import('@/lib/data/market-data-router')
@@ -690,10 +816,27 @@ async function maybeBuildHistoryChartedResponse(
     })
 
   try {
-    const comparison = await fetchAnalyticalComparison(buildHistoryComparisonRequest(metric, subjectMarket))
+    const comparison = await fetchAnalyticalComparison(
+      comparisonMarket
+        ? {
+            comparisonMode: 'peer_market',
+            metric,
+            subjectMarket,
+            comparisonMarket,
+            timeWindow: defaultHistoryWindow(metric),
+          }
+        : buildHistoryComparisonRequest(metric, subjectMarket)
+    )
     const chart = buildHistoryChartFromComparison(comparison)
+    const subjectLine =
+      comparison.comparisonMode === 'peer_market' && comparison.series.length >= 2
+        ? `${comparison.series[0]?.label ?? subjectMarket.label} versus ${comparison.series[1]?.label ?? comparisonMarket?.label ?? 'the comparison market'}`
+        : comparison.series[0]?.label ?? subjectMarket.label
     return {
-      message: `Here is the ${comparison.timeWindow.label.toLowerCase()} ${comparison.metricLabel.toLowerCase()} history for ${comparison.series[0]?.label ?? subjectMarket.label}.`,
+      message:
+        comparison.comparisonMode === 'peer_market'
+          ? `Here is the ${comparison.timeWindow.label.toLowerCase()} ${comparison.metricLabel.toLowerCase()} comparison for ${subjectLine}.`
+          : `Here is the ${comparison.timeWindow.label.toLowerCase()} ${comparison.metricLabel.toLowerCase()} history for ${subjectLine}.`,
       action: { type: 'none' as const },
       trace: buildHistoryTrace(comparison),
       chart,
