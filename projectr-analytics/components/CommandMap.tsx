@@ -14,6 +14,7 @@ import type { Site } from '@/lib/sites-store'
 import type { AnalysisSite } from '@/lib/agent-types'
 import type { ClientUploadMarker } from '@/lib/client-upload-markers-store'
 import { detectNycBoroughFromZips, isNycZip } from '@/lib/geography'
+import { selectMultiZipBoundaryTargets } from '@/lib/area-boundaries'
 import { fetchMomentumScores, normalizeMomentumZipList } from '@/lib/momentum-client'
 import { cn } from '@/lib/utils'
 
@@ -150,6 +151,8 @@ const DEFAULT_LAYER_STATE: LayerState = {
   momentum: false,
   clientData: true,
 }
+
+const MULTI_ZIP_BOUNDARY_BATCH_SIZE = 20
 
 /** Pill colors - reused for collapsed layer “active” dot stack (CommandMap chrome). */
 const LAYER_DOT_INDICATORS: Array<{
@@ -908,20 +911,45 @@ function CommandMap({
     if (!cityZips?.length || !cityBoundaryKey) return
     let cancelled = false
 
-    // Fetch boundaries for all city ZIPs in parallel (limit 30)
-    const sample = cityZips.filter((z) => z.lat && z.lng).slice(0, 30)
-    Promise.allSettled(
-      sample.map((z) =>
-        dedupedFetchJson<GeoJSON>('/api/boundaries?zip=' + z.zip)
-          .then((geojson) => ({ zip: z.zip, geojson, zori: z.zori_latest, zhvi: z.zhvi_latest }))
-      )
-    ).then((results) => {
-      if (cancelled) return
-      const loaded: ZipBoundary[] = results
-        .filter((r): r is PromiseFulfilledResult<ZipBoundary> => r.status === 'fulfilled' && hasFeatures(r.value.geojson) && r.value.geojson.features.length > 0)
-        .map((r) => r.value)
-      setCityBoundariesState({ key: cityBoundaryKey, value: loaded })
-    })
+    // Fetch multi-ZIP area boundaries in stable batches so Houston-sized city views render fully
+    // without sending one giant request burst when a county or metro search resolves.
+    const loadCityBoundaries = async () => {
+      const sample = selectMultiZipBoundaryTargets(cityZips)
+      if (sample.length === 0) {
+        if (!cancelled) {
+          setCityBoundariesState({ key: cityBoundaryKey, value: [] })
+        }
+        return
+      }
+
+      const loaded: ZipBoundary[] = []
+
+      for (let index = 0; index < sample.length; index += MULTI_ZIP_BOUNDARY_BATCH_SIZE) {
+        if (cancelled) return
+
+        const chunk = sample.slice(index, index + MULTI_ZIP_BOUNDARY_BATCH_SIZE)
+        const results = await Promise.allSettled(
+          chunk.map((z) =>
+            dedupedFetchJson<GeoJSON>('/api/boundaries?zip=' + z.zip)
+              .then((geojson) => ({ zip: z.zip, geojson, zori: z.zori_latest, zhvi: z.zhvi_latest }))
+          )
+        )
+
+        if (cancelled) return
+
+        loaded.push(
+          ...results
+            .filter((r): r is PromiseFulfilledResult<ZipBoundary> => r.status === 'fulfilled' && hasFeatures(r.value.geojson) && r.value.geojson.features.length > 0)
+            .map((r) => r.value)
+        )
+      }
+
+      if (!cancelled) {
+        setCityBoundariesState({ key: cityBoundaryKey, value: loaded })
+      }
+    }
+
+    void loadCityBoundaries()
     return () => {
       cancelled = true
     }

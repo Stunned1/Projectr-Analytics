@@ -6,6 +6,7 @@ export const BIGQUERY_TABLES = {
   masterData: 'master_data',
   zillow: 'zillow_zori_monthly',
   nycPermits: 'nyc_permits',
+  texasZctaDim: 'texas_zcta_dim',
 } as const
 
 export type BigQueryLogicalTableName = keyof typeof BIGQUERY_TABLES

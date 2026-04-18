@@ -1,6 +1,12 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { hydrateAreaZipResults } from '@/lib/area-search'
 import { buildMetroAreaKey, normalizeMetroDisplayName } from '@/lib/area-keys'
+import { fetchTexasZctaRowsByMetro } from '@/lib/data/bigquery-texas-zcta'
+import {
+  mergeTexasMetroCoverageRows,
+  shouldMergeTexasMetroCoverage,
+  type MetroZipCoverageRow,
+} from '@/lib/data/texas-metro-coverage'
 import { supabase } from '@/lib/supabase'
 import { normalizeUsStateToAbbr } from '@/lib/us-state-abbr'
 
@@ -16,6 +22,22 @@ type MetroLookupRow = {
   metro_name_short?: string | null
   lat: number | null
   lng: number | null
+}
+
+function mapTexasMetroRows(rows: Awaited<ReturnType<typeof fetchTexasZctaRowsByMetro>>): MetroZipCoverageRow[] {
+  return rows.map((row) => ({
+    zip: row.zcta5,
+    city: row.city ?? `ZIP ${row.zcta5}`,
+    state: row.state_abbr,
+    metro_name: row.metro_name,
+    metro_name_short: row.metro_name_short,
+    lat: row.lat,
+    lng: row.lng,
+    zori_latest: row.zori_latest,
+    zhvi_latest: row.zhvi_latest,
+    zori_growth_12m: row.zori_growth_12m,
+    zhvi_growth_12m: row.zhvi_growth_12m,
+  }))
 }
 
 async function queryMetroRows(
@@ -43,6 +65,29 @@ function metroShortAlias(value: string): string | null {
   return primary && primary !== value ? primary : primary || null
 }
 
+async function queryTexasMetroRows(
+  metroName: string,
+  stateAbbr?: string | null
+): Promise<MetroZipCoverageRow[]> {
+  if (stateAbbr && stateAbbr !== 'TX') return []
+
+  let rows = await fetchTexasZctaRowsByMetro(metroName, 'TX', { limit: MAX_METRO_ZIPS })
+  if (rows.length === 0) {
+    rows = await fetchTexasZctaRowsByMetro(metroName, 'TX', {
+      limit: MAX_METRO_ZIPS,
+      fuzzy: true,
+    })
+  }
+  if (rows.length === 0) {
+    const alias = metroShortAlias(metroName)
+    if (alias && alias !== metroName) {
+      rows = await fetchTexasZctaRowsByMetro(alias, 'TX', { limit: MAX_METRO_ZIPS })
+    }
+  }
+
+  return mapTexasMetroRows(rows)
+}
+
 export async function GET(request: NextRequest) {
   const metroRaw = request.nextUrl.searchParams.get('metro')?.trim()
   const stateRaw = request.nextUrl.searchParams.get('state')?.trim()
@@ -59,7 +104,7 @@ export async function GET(request: NextRequest) {
   const metroName = normalizeMetroDisplayName(metroRaw)
 
   try {
-    let rows = await queryMetroRows('metro_name', metroName, stateAbbr)
+    let rows: MetroZipCoverageRow[] = await queryMetroRows('metro_name', metroName, stateAbbr)
     if (rows.length === 0) {
       rows = await queryMetroRows('metro_name_short', metroName, stateAbbr)
     }
@@ -73,6 +118,13 @@ export async function GET(request: NextRequest) {
       const alias = metroShortAlias(metroName)
       if (alias && alias !== metroName) {
         rows = await queryMetroRows('metro_name_short', alias, stateAbbr)
+      }
+    }
+
+    if (shouldMergeTexasMetroCoverage(stateAbbr, rows)) {
+      const texasCoverageRows = await queryTexasMetroRows(metroName, stateAbbr)
+      if (texasCoverageRows.length > 0) {
+        rows = mergeTexasMetroCoverageRows(rows, texasCoverageRows)
       }
     }
 

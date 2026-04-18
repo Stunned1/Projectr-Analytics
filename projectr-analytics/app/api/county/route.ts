@@ -1,6 +1,12 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { hydrateAreaZipResults } from '@/lib/area-search'
 import { buildCountyAreaKey, normalizeCountyDisplayName } from '@/lib/area-keys'
+import { fetchTexasZctaRowsByCounty } from '@/lib/data/bigquery-texas-zcta'
+import {
+  mergeTexasCountyCoverageRows,
+  shouldMergeTexasCountyCoverage,
+  type CountyZipCoverageRow,
+} from '@/lib/data/texas-county-coverage'
 import { geoTrendsStub, geocodeZip } from '@/lib/geocoder'
 import { supabase } from '@/lib/supabase'
 import { normalizeUsStateToAbbr } from '@/lib/us-state-abbr'
@@ -13,15 +19,7 @@ const TIGER_COUNTY_LAYER =
 const TIGER_ZCTA_LAYER =
   'https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/PUMA_TAD_TAZ_UGA_ZCTA/MapServer/1/query'
 
-type CountyLookupRow = {
-  zip: string
-  city: string
-  state: string | null
-  metro_name: string | null
-  lat: number | null
-  lng: number | null
-  county_name?: string | null
-}
+type CountyLookupRow = CountyZipCoverageRow
 
 type TigerCountyFeature = {
   geometry?: Record<string, unknown> | null
@@ -234,6 +232,15 @@ export async function GET(request: NextRequest) {
       if (stateAbbr) fuzzyQuery = fuzzyQuery.eq('state', stateAbbr)
       const { data: fuzzyRows } = await fuzzyQuery.ilike('county_name', fuzzyPattern)
       rows = (fuzzyRows ?? []) as CountyLookupRow[]
+    }
+
+    if (shouldMergeTexasCountyCoverage(stateAbbr, rows)) {
+      const texasCoverageRows = await fetchTexasZctaRowsByCounty(countyName, stateAbbr, {
+        limit: MAX_COUNTY_ZIPS,
+      })
+      if (texasCoverageRows.length > 0) {
+        rows = mergeTexasCountyCoverageRows(rows, texasCoverageRows)
+      }
     }
 
     // Some environments have `zip_metro_lookup.county_name` populated incorrectly (e.g. "TX").

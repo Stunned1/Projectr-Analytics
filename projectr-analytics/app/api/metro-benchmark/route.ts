@@ -1,5 +1,10 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import {
+  fetchTexasZctaRowByZip,
+  fetchTexasZctaRowsByMetro,
+} from '@/lib/data/bigquery-texas-zcta'
+import { mergeTexasPeerZipLists } from '@/lib/data/texas-metro-coverage'
 import { getLatestRowsForSubmarkets } from '@/lib/data/market-data-router'
 
 export const dynamic = 'force-dynamic'
@@ -24,11 +29,16 @@ export async function GET(request: NextRequest) {
   try {
     const { data: row } = await supabase
       .from('zip_metro_lookup')
-      .select('metro_name_short')
+      .select('metro_name, metro_name_short, state')
       .eq('zip', zip)
       .maybeSingle()
 
-    const metro = row?.metro_name_short
+    const texasCoverageRow =
+      row?.state === 'TX' || !row?.metro_name_short
+        ? await fetchTexasZctaRowByZip(zip)
+        : null
+
+    const metro = row?.metro_name_short ?? texasCoverageRow?.metro_name_short ?? row?.metro_name ?? texasCoverageRow?.metro_name
     if (!metro) {
       return NextResponse.json({
         found: false,
@@ -41,9 +51,25 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    const { data: peers } = await supabase.from('zip_metro_lookup').select('zip').eq('metro_name_short', metro)
+    let peerQuery = supabase.from('zip_metro_lookup').select('zip').eq('metro_name_short', metro)
+    if (row?.state) {
+      peerQuery = peerQuery.eq('state', row.state)
+    }
+    const { data: peers } = await peerQuery
 
-    const zips = (peers ?? []).map((p) => p.zip).filter(Boolean)
+    const canonicalPeers =
+      texasCoverageRow != null
+        ? await fetchTexasZctaRowsByMetro(
+            texasCoverageRow.metro_name_short ?? texasCoverageRow.metro_name ?? metro,
+            'TX',
+            { limit: MAX_PEER_ZIPS }
+          )
+        : []
+
+    const zips = mergeTexasPeerZipLists(
+      (peers ?? []).map((p) => p.zip).filter(Boolean),
+      canonicalPeers
+    )
     if (!zips.length) {
       return NextResponse.json({
         found: true,
@@ -59,11 +85,12 @@ export async function GET(request: NextRequest) {
 
     const { data: snaps } = await supabase
       .from('zillow_zip_snapshot')
-      .select('zori_latest, zhvi_latest')
+      .select('zip, zori_latest, zhvi_latest')
       .in('zip', zips)
 
     const zoris = (snaps ?? []).map((s) => s.zori_latest).filter((v): v is number => v != null && v > 0)
     const zhvis = (snaps ?? []).map((s) => s.zhvi_latest).filter((v): v is number => v != null && v > 0)
+    const pricingPeerZipCount = new Set((snaps ?? []).map((snapshot) => snapshot.zip).filter(Boolean)).size
 
     const avg_zori = zoris.length ? Math.round(zoris.reduce((a, b) => a + b, 0) / zoris.length) : null
     const avg_zhvi = zhvis.length ? Math.round(zhvis.reduce((a, b) => a + b, 0) / zhvis.length) : null
@@ -113,7 +140,7 @@ export async function GET(request: NextRequest) {
       metro_name_short: metro,
       avg_zori,
       avg_zhvi,
-      zip_count: zips.length,
+      zip_count: pricingPeerZipCount,
       avg_vacancy_rate,
       avg_unemployment_rate,
       avg_migration_movers,

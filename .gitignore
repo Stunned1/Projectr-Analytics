@@ -12,3 +12,6 @@ zillow_zori_monthly.jsonl
 .worktrees/
 projectr-analytics/.next-dev.out.log
 projectr-analytics/.next-dev.err.log
+*.env.local
+.env.local
+message.txt

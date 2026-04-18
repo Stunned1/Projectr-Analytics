@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test": "tsx --test",
     "check:bigquery": "tsx scripts/check-bigquery-config.ts",
+    "load:texas:zctas": "tsx scripts/load-texas-zcta-dim.ts",
     "ingest:zillow": "tsx scripts/ingest-zillow.ts",
     "ingest:texas:housing": "tsx scripts/ingest-texas-housing-activity.ts",
     "ingest:texas:permits": "tsx scripts/ingest-texas-building-permits.ts",

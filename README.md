@@ -110,6 +110,7 @@ TRANSITLAND_API_KEY=             # free at transit.land/sign-up (Developer API, 
 
 BigQuery router reads use standard Google Cloud server credentials. If you want to exercise the helper locally, authenticate with Application Default Credentials or point `GOOGLE_APPLICATION_CREDENTIALS` at a service-account JSON before calling it.
 For a direct local probe, run `npm run check:bigquery` inside `projectr-analytics`; it prints the resolved dataset-scoped BigQuery config, the logical table identifiers, and performs a `LIMIT 1` query against the shared `master_data` table.
+For Texas statewide ZIP/ZCTA coverage seeding, run `npm run load:texas:zctas -- --skip-bigquery --out tmp/texas_zcta_dim.ndjson` to build the free Census-based `texas_zcta_dim` payload locally, or omit `--skip-bigquery` to load that table into the configured BigQuery dataset.
 
 ### First-time data setup
 1. Download Zillow CSVs (see section below) into `zillow-csv's/` at repo root
@@ -118,9 +119,10 @@ For a direct local probe, run `npm run check:bigquery` inside `projectr-analytic
 4. `npm run ingest:zillow` - loads Zillow data into Supabase
 5. `npm run populate:centroids` - run 6-7 times until "All centroids already populated" (geocodes ~7,661 ZIPs)
 6. `npm run ingest:permits` - ingests NYC DOB building permits into `nyc_permits` table (all 5 boroughs, NB/A1/A2/DM, 2022+); takes ~10-20 min
-7. Optional Texas source loads: run the official-source fetchers directly with `npm run ingest:texas:housing -- --fetch [--scope county|metro|both] [--match houston,harris] [--limit 5]`, `npm run ingest:texas:permits -- --fetch [--scope county|metro|both]`, and `npm run ingest:texas:demographics -- --fetch [--dataset estimates|projections] [--scope county|metro|both] [--scenario High|Mid|Low]`; `--file <path>` still works as a manual fallback for local exports.
-8. `npm run dev`
-9. Optional before demos/recordings: with `npm run dev` running, `npm run warm:demo` - warms cache for ZIPs 77002, 75201, and 78701 via market/transit/trends/cycle APIs (`WARM_BASE_URL` overrides default `http://127.0.0.1:3000`).
+7. Optional BigQuery canonical geography seed: run `npm run load:texas:zctas -- --skip-bigquery --out tmp/texas_zcta_dim.ndjson` to build the free Census-based Texas ZCTA dimension locally, or omit `--skip-bigquery` to load `texas_zcta_dim` into the configured BigQuery dataset; the loader overlays current Zillow coverage when Supabase creds are present and still emits public-baseline-only rows when they are not.
+8. Optional Texas source loads: run the official-source fetchers directly with `npm run ingest:texas:housing -- --fetch [--scope county|metro|both] [--match houston,harris] [--limit 5]`, `npm run ingest:texas:permits -- --fetch [--scope county|metro|both]`, and `npm run ingest:texas:demographics -- --fetch [--dataset estimates|projections] [--scope county|metro|both] [--scenario High|Mid|Low]`; `--file <path>` still works as a manual fallback for local exports.
+9. `npm run dev`
+10. Optional before demos/recordings: with `npm run dev` running, `npm run warm:demo` - warms cache for ZIPs 77002, 75201, and 78701 via market/transit/trends/cycle APIs (`WARM_BASE_URL` overrides default `http://127.0.0.1:3000`).
 
 ### Known setup issues
 - **Shortlist / `saved_sites`** - enable **Anonymous sign-ins** under Supabase Authentication → Providers (or use email/OAuth); the app calls `signInAnonymously()` when there is no session so `saved_sites` inserts satisfy RLS.
@@ -190,6 +192,12 @@ _04.17.2026_
 _04.18.2026_
 - BigQuery config is now dataset-scoped instead of relying on one global `BIGQUERY_TABLE_ID`, and the shared table registry lets each adapter target its own BigQuery table while keeping the master-data router on `master_data`.
 - Added `npm run check:bigquery`, a local BigQuery probe that prints the resolved config plus logical table identifiers and runs a cheap `LIMIT 1` reachability query against the shared `master_data` table.
+- Added `npm run load:texas:zctas`, which builds a free Census-based `texas_zcta_dim` table for BigQuery, overlays current Zillow coverage when available, and lets `/api/city` fall back to canonical Texas ZCTA rows when the older Zillow-derived lookup table has gaps.
+- `/api/county` can now fall back to `texas_zcta_dim` for Texas county searches before dropping into slower cache/TIGER recovery paths, and single-ZIP market loads can backfill missing Texas city/metro labels from the same BigQuery coverage table when `zip_metro_lookup` is sparse.
+- Texas county searches now merge partial `zip_metro_lookup` rows with canonical `texas_zcta_dim` county coverage instead of only using BigQuery on zero-row misses, so thin Texas counties can complete from canonical ZIP sets when lookup coverage is incomplete.
+- Texas city searches now merge `zip_metro_lookup` rows with canonical `texas_zcta_dim` coverage instead of only falling back on zero-row misses, and the map batches up to 120 multi-ZIP boundary fetches so Houston-sized city views no longer draw the old sparse subset.
+- `/api/metro`, `/api/metro-benchmark`, `/api/neighbors`, and aggregate metro-velocity lookups now reuse canonical `texas_zcta_dim` coverage for Texas metros and peer ZIP sets instead of relying only on sparse `zip_metro_lookup` rows.
+- Texas permit activity centroid resolution now builds its place lookup from canonical statewide `texas_zcta_dim` coverage plus any existing `zip_metro_lookup` rows, which dramatically expands city/county centroid coverage before Google geocode fallback is needed.
 - Cycle analysis and report generation now privately pull longer `Unemployment_Rate` and `Permit_Units` series through the shared market-data router when BigQuery history is configured, while preserving the existing behavior when the cold-history path is unavailable.
 - `/api/agent` now resolves Texas county and metro history prompts through the shared area-name normalizers and canonical area keys instead of the route-local parser shim, while still rejecting explicit non-Texas county or metro prompts.
 - `/api/agent` now preserves explicit Texas prompts like `Harris County, TX` and `Austin metro area, TX` as canonical shared keys and labels, and rejects space-delimited non-Texas prompts like `Cook County Illinois` or `Miami metro area Florida` instead of silently defaulting them to Texas.
@@ -251,6 +259,7 @@ _04.18.2026_
 - The shared market search parser now recognizes trailing state names or USPS codes even without commas, so agent-driven searches like `harris county texas` route into the same county / metro / city resolution path as `Harris County, TX` instead of falling through to the city-only error path.
 - Agent-driven search actions now canonicalize resolved geographies before dispatch, so the terminal emits queries like `Harris County, TX` and `Houston, TX` instead of lowercased raw prompt fragments that still need downstream cleanup.
 - Natural-language terminal map controls now run through a bounded Gemini interpreter that can emit ordered actions like `search -> permits ON`, while slash-prefixed commands stay on the local deterministic fast path and filler like `please` no longer pollutes geography searches.
+- Texas city searches now merge `zip_metro_lookup` rows with canonical `texas_zcta_dim` coverage instead of only falling back on zero-row misses, and the map batches up to 120 multi-ZIP boundary fetches so Houston-sized city views no longer draw the old sparse subset.
 
 **Map & Visualization**
 
@@ -341,6 +350,8 @@ _04.18.2026_
 - **County search still depends on available ZIP coverage for map overlays** - The county route now uses TIGER county/ZCTA fallback plus ZIP geocode validation, but counties with very thin Zillow or boundary coverage can still load the aggregate panel with only a small ZIP set on the map; fixing that cleanly would require a broader county-to-ZIP source or county polygon rendering as a first-class shared path.
 - **Full Texas TREC backfills are network-heavy** - The new direct TREC fetch mode removes manual export prep, but statewide county + metro backfills still make hundreds of remote requests; use `--scope`, `--match`, and `--limit` for fast QA seeds until we add scheduled/background ingest orchestration.
 - **Texas raw permits currently only work in Austin** - Austin is the only Texas market with a wired row-level permit feed in Scout today because the Austin Open Data source exposes usable permit records that can be normalized into the shared raw-permit schema for New Building, Demolition, and Major Renovation views. Dallas, Houston, San Antonio, Fort Worth, and the rest of Texas still fall back to TREC place-level monthly permit activity because they do not yet have shared, normalized raw permit adapters in this repo.
+- **Texas statewide geography cutover is still partial** - Texas city/county/metro search, peer ZIP resolution, aggregate metro velocity, and Texas permit centroid lookup now merge or fall back to canonical `texas_zcta_dim` coverage, but a few other lookup-backed overlays still depend on older `zip_metro_lookup` rows until the broader cutover is completed.
+- **Canonical Texas county labels still need cleanup** - Some `texas_zcta_dim` rows still carry polluted county labels like `TX County` because the seed overlay inherited bad lookup metadata. County merge/fallback now helps where canonical county names are valid, but the loader should be rebuilt or post-cleaned so those rows become reachable by county name.
 - **Sandboxed PDF adapter verification** - `tests/lib/report/scout-chart-pdf-adapter.test.ts` can hit `spawn EPERM` under the current sandbox even though the other targeted convergence tests pass; rerun that file outside the sandbox before treating the full targeted verification set as environment-clean.
 
 - **Read-heavy runtime** - Most user interactions fan out into repeated reads across market, transit, trends, cycle, parcel, tract, boundary, amenity, POI, and flood routes; writes are mostly limited to ingestion and saved-site mutations, so the current tooling is better at read-heavy workloads than write-heavy ones.

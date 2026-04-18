@@ -14,6 +14,7 @@
  */
 import { type NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import { fetchTexasZctaRowByZip } from '@/lib/data/bigquery-texas-zcta'
 import { getAreaRows, getRowsForSubmarkets } from '@/lib/data/market-data-router'
 import { geocodeZip } from '@/lib/geocoder'
 import { fetchFred } from '@/lib/fetchers'
@@ -48,6 +49,7 @@ type ZillowSnapshotRow = {
 
 type ZipMetroLookupRow = {
   metro_name_short: string | null
+  state: string | null
 }
 
 const ZIP_CACHE_METRICS = [
@@ -173,6 +175,8 @@ export async function POST(request: NextRequest) {
 
     const rows = cachedRows as CachedRow[]
     const metroLookup = (lookup ?? null) as ZipMetroLookupRow | null
+    const texasCoverageRow =
+      metroLookup?.metro_name_short ? null : await fetchTexasZctaRowByZip(zips[0])
 
     const latestAreaMetrics = latestMetricRows(directAreaRows).map((row) => ({
       metric_name: row.metric_name,
@@ -352,11 +356,12 @@ export async function POST(request: NextRequest) {
 
     // 5. Pull metro velocity for the first ZIP's metro
     let metroVelocity = null
-    if (metroLookup?.metro_name_short) {
+    const metroNameShort = metroLookup?.metro_name_short ?? texasCoverageRow?.metro_name_short ?? null
+    if (metroNameShort) {
       const { data: metroSnapshot } = await supabase
         .from('zillow_metro_snapshot')
         .select('region_name, doz_pending_latest, price_cut_pct_latest, inventory_latest, as_of_date')
-        .eq('region_name', metroLookup.metro_name_short)
+        .eq('region_name', metroNameShort)
         .single()
       metroVelocity = metroSnapshot
     }

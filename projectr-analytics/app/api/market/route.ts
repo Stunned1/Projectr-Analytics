@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import { fetchTexasZctaRowByZip } from '@/lib/data/bigquery-texas-zcta'
 import { getRowsForSubmarket, upsertMarketDataRows } from '@/lib/data/market-data-router'
 import { geocodeZip } from '@/lib/geocoder'
 import { fetchFred, fetchHud, fetchCensus, fetchPermits } from '@/lib/fetchers'
@@ -23,19 +24,30 @@ async function getZillowData(zip: string) {
     .eq('zip', zip)
     .single()
 
+  const texasCoverageRow =
+    lookup?.metro_name || lookup?.city || lookup?.metro_name_short
+      ? null
+      : await fetchTexasZctaRowByZip(zip)
+
+  const lookupMeta = {
+    metro_name: lookup?.metro_name ?? texasCoverageRow?.metro_name ?? null,
+    metro_name_short: lookup?.metro_name_short ?? texasCoverageRow?.metro_name_short ?? null,
+    city: lookup?.city ?? texasCoverageRow?.city ?? null,
+  }
+
   // Metro velocity via metro_name_short
   let metroVelocity = null
-  if (lookup?.metro_name_short) {
+  if (lookupMeta.metro_name_short) {
     const { data: mv } = await supabase
       .from('zillow_metro_snapshot')
       .select('region_name, doz_pending_latest, price_cut_pct_latest, inventory_latest, as_of_date')
-      .eq('region_name', lookup.metro_name_short)
+      .eq('region_name', lookupMeta.metro_name_short)
       .single()
     metroVelocity = mv
   }
 
   return {
-    zillow: snap ? { ...snap, metro_name: lookup?.metro_name ?? null, city: lookup?.city ?? null } : null,
+    zillow: snap ? { ...snap, metro_name: lookupMeta.metro_name, city: lookupMeta.city } : null,
     metro_velocity: metroVelocity,
   }
 }

@@ -1,4 +1,11 @@
 import { normalizeCountyDisplayName, normalizeMetroDisplayName, stripTrailingStateSuffix } from '@/lib/area-keys'
+import { fetchTexasZctaRowsByState } from '@/lib/data/bigquery-texas-zcta'
+import {
+  buildTexasPlaceCentroidMaps,
+  buildTexasPlaceKey,
+  normalizeTexasCityToken,
+  type TexasPlaceLookupRow,
+} from '@/lib/data/texas-place-centroids'
 import { geocodeAddressForward } from '@/lib/google-forward-geocode'
 import { supabase } from '@/lib/supabase'
 
@@ -34,13 +41,6 @@ type TrecPermitPlaceRow = {
 type TrecEnvelope = {
   queryRows?: number | string | null
   rowData?: TrecPermitPlaceRow[]
-}
-
-type TexasLookupRow = {
-  city: string | null
-  county_name?: string | null
-  lat: number | null
-  lng: number | null
 }
 
 type TexasPlaceCentroid = {
@@ -103,27 +103,6 @@ let texasLookupCache:
     }
   | null = null
 
-function normalizeText(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/^city of\s+/i, '')
-    .replace(/&/g, ' and ')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-function normalizeCountyToken(value: string | null | undefined): string {
-  if (!value) return ''
-  return normalizeText(value.replace(/\s+county$/i, ''))
-}
-
-function normalizeCityToken(value: string | null | undefined): string {
-  if (!value) return ''
-  return normalizeText(stripTrailingStateSuffix(value))
-}
-
 function normalizeScopeName(scope: TexasPermitScope): string {
   if (scope.kind === 'county') {
     return normalizeCountyDisplayName(scope.name)
@@ -135,13 +114,7 @@ function normalizeScopeName(scope: TexasPermitScope): string {
 }
 
 function buildScopeCacheKey(scope: TexasPermitScope): string {
-  return `${scope.kind}:${normalizeText(normalizeScopeName(scope))}`
-}
-
-function buildPlaceKey(placeName: string, countyName: string | null): string {
-  const city = normalizeCityToken(placeName)
-  const county = normalizeCountyToken(countyName)
-  return county ? `${city}|${county}` : city
+  return `${scope.kind}:${normalizeTexasCityToken(normalizeScopeName(scope))}`
 }
 
 function toNumber(value: unknown): number {
@@ -301,17 +274,6 @@ async function fetchTrecPermitRows(scope: TexasPermitScope): Promise<{ rows: Tre
   }
 }
 
-function mergeCentroid(existing: TexasPlaceCentroid | undefined, lat: number, lng: number): TexasPlaceCentroid {
-  if (!existing) {
-    return { lat, lng, source: 'zip_lookup' }
-  }
-  return {
-    lat: (existing.lat + lat) / 2,
-    lng: (existing.lng + lng) / 2,
-    source: 'zip_lookup',
-  }
-}
-
 async function loadTexasLookupMaps(): Promise<{
   byCity: Map<string, TexasPlaceCentroid>
   byCityCounty: Map<string, TexasPlaceCentroid>
@@ -335,21 +297,9 @@ async function loadTexasLookupMaps(): Promise<{
     throw new Error(error.message)
   }
 
-  const rows = (data ?? []) as TexasLookupRow[]
-  const byCity = new Map<string, TexasPlaceCentroid>()
-  const byCityCounty = new Map<string, TexasPlaceCentroid>()
-
-  for (const row of rows) {
-    if (row.lat == null || row.lng == null || !row.city) continue
-    const cityKey = normalizeCityToken(row.city)
-    if (!cityKey) continue
-    byCity.set(cityKey, mergeCentroid(byCity.get(cityKey), row.lat, row.lng))
-
-    const countyKey = normalizeCountyToken(row.county_name)
-    if (!countyKey) continue
-    const combinedKey = `${cityKey}|${countyKey}`
-    byCityCounty.set(combinedKey, mergeCentroid(byCityCounty.get(combinedKey), row.lat, row.lng))
-  }
+  const rows = (data ?? []) as TexasPlaceLookupRow[]
+  const canonicalRows = await fetchTexasZctaRowsByState('TX', { limit: 5000 })
+  const { byCity, byCityCounty } = buildTexasPlaceCentroidMaps(rows, canonicalRows)
 
   texasLookupCache = {
     expiresAt: Date.now() + TEXAS_LOOKUP_CACHE_TTL_MS,
@@ -364,7 +314,7 @@ async function geocodeTexasPlace(
   placeName: string,
   countyName: string | null
 ): Promise<TexasPlaceCentroid | null> {
-  const cacheKey = buildPlaceKey(placeName, countyName)
+  const cacheKey = buildTexasPlaceKey(placeName, countyName)
   const cached = centroidCache.get(cacheKey)
   if (cached && cached.expiresAt > Date.now()) {
     return cached.value
@@ -429,8 +379,8 @@ async function resolveCentroids(
   const unresolved: TexasPermitGroup[] = []
 
   for (const group of groups) {
-    const placeKey = buildPlaceKey(group.place_name, group.county_name)
-    const cityKey = normalizeCityToken(group.place_name)
+    const placeKey = buildTexasPlaceKey(group.place_name, group.county_name)
+    const cityKey = normalizeTexasCityToken(group.place_name)
     const lookupCentroid = byCityCounty.get(placeKey) ?? byCity.get(cityKey) ?? null
 
     if (lookupCentroid) {
@@ -497,7 +447,7 @@ function buildPermitGroups(rows: TrecPermitPlaceRow[]): { groups: TexasPermitGro
     const countyName = entry.row.county_name?.trim() || null
     const metroName = entry.row.metropolitan_statistical_area_name?.trim() || null
     const stateName = entry.row.state_name?.trim() || 'Texas'
-    const id = entry.row.place_fips?.trim() || `${buildPlaceKey(placeName, countyName)}`
+    const id = entry.row.place_fips?.trim() || `${buildTexasPlaceKey(placeName, countyName)}`
     const monthLabel = formatMonth(entry.date)
     const totalBuildings = sumValues(
       entry.row.buildings_1_unit,

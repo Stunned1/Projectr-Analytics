@@ -9,6 +9,13 @@
  */
 import { type NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import { fetchTexasZctaRowsByCity } from '@/lib/data/bigquery-texas-zcta'
+import {
+  MAX_CITY_ZIP_RESULTS,
+  mergeTexasCityCoverageRows,
+  shouldMergeTexasCityCoverage,
+  type CityZipCoverageRow,
+} from '@/lib/data/texas-city-coverage'
 import { normalizeUsStateToAbbr } from '@/lib/us-state-abbr'
 
 export const dynamic = 'force-dynamic'
@@ -20,6 +27,14 @@ interface ZipResult {
   metro_name: string | null
   lat: number | null
   lng: number | null
+  zori_latest: number | null
+  zhvi_latest: number | null
+  zori_growth_12m: number | null
+  zhvi_growth_12m: number | null
+}
+
+type SnapshotRow = {
+  zip: string
   zori_latest: number | null
   zhvi_latest: number | null
   zori_growth_12m: number | null
@@ -54,15 +69,28 @@ export async function GET(request: NextRequest) {
       .select('zip, city, state, metro_name, lat, lng')
       .ilike('city', city) // exact case-insensitive match, not prefix
       .not('lat', 'is', null)
-      .limit(50)
+      .limit(MAX_CITY_ZIP_RESULTS)
 
     if (stateAbbr) query = query.eq('state', stateAbbr)
 
     const { data: lookupZips } = await query
 
-    let zips: Array<{ zip: string; city: string; state: string | null; metro_name: string | null; lat: number | null; lng: number | null }> = lookupZips ?? []
+    let zips: CityZipCoverageRow[] = (lookupZips ?? []) as CityZipCoverageRow[]
 
-    // Step 2: Fallback to zippopotam if no results
+    // Step 2: Texas-first canonical coverage merge so partial Zillow-derived lookup rows do not truncate cities like Houston.
+    if (shouldMergeTexasCityCoverage(stateAbbr, zips)) {
+      const texasCoverageRows = await fetchTexasZctaRowsByCity(city, 'TX', {
+        limit: MAX_CITY_ZIP_RESULTS,
+      })
+      if (texasCoverageRows.length > 0) {
+        zips = mergeTexasCityCoverageRows(zips, texasCoverageRows, city)
+        if (!stateAbbr && zips.every((row) => row.state === 'TX')) {
+          stateAbbr = 'TX'
+        }
+      }
+    }
+
+    // Step 3: Fallback to zippopotam if no results
     if (zips.length === 0) {
       const stateParam = stateAbbr?.toLowerCase() ?? ''
       const cityParam = city.toLowerCase().replace(/\s+/g, '-')
@@ -90,23 +118,25 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: `No ZIPs found for "${city}"`, zips: [] }, { status: 404 })
     }
 
-    // Step 3: Get Zillow snapshots for all found ZIPs
+    // Step 4: Get Zillow snapshots for all found ZIPs
     const zipList = zips.map((z) => z.zip)
     const { data: snapshots } = await supabase
       .from('zillow_zip_snapshot')
       .select('zip, zori_latest, zhvi_latest, zori_growth_12m, zhvi_growth_12m')
       .in('zip', zipList)
 
-    const snapshotMap = new Map(snapshots?.map((s) => [s.zip, s]) ?? [])
+    const snapshotMap = new Map(
+      ((snapshots ?? []) as SnapshotRow[]).map((snapshot) => [snapshot.zip, snapshot] as const)
+    )
 
     const results: ZipResult[] = zips.map((z) => {
       const snap = snapshotMap.get(z.zip)
       return {
         ...z,
-        zori_latest: snap?.zori_latest ?? null,
-        zhvi_latest: snap?.zhvi_latest ?? null,
-        zori_growth_12m: snap?.zori_growth_12m ?? null,
-        zhvi_growth_12m: snap?.zhvi_growth_12m ?? null,
+        zori_latest: snap?.zori_latest ?? z.zori_latest ?? null,
+        zhvi_latest: snap?.zhvi_latest ?? z.zhvi_latest ?? null,
+        zori_growth_12m: snap?.zori_growth_12m ?? z.zori_growth_12m ?? null,
+        zhvi_growth_12m: snap?.zhvi_growth_12m ?? z.zhvi_growth_12m ?? null,
       }
     })
 
