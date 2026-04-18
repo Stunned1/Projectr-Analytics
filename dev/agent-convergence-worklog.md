@@ -6,15 +6,15 @@ Track the full multi-phase convergence effort described by `dev/agent-planning.m
 
 ## Phase Status
 
-- Phase 1: In progress
+- Phase 1: Complete
 - Phase 2: Not started
 - Phase 3: Not started
 - Phase 4: Not started
 
 ## Current Focus
 
-- Clear remaining build blockers in the current worktree so Phase 1 can be evaluated against a real full-build baseline instead of targeted tests only.
-- Keep tightening which analytical prompts and export surfaces receive real shared-contract charts versus explicitly flagged fallbacks.
+- Preserve the closed Phase 1 Texas-first convergence baseline while deciding when to begin Phase 2 router-first analytical expansion.
+- Keep legacy NYC-only route cleanup deferred unless it blocks shared infrastructure or a future verification gate we explicitly choose to enforce.
 - Keep this worklog updated as each planning or implementation change lands.
 
 ## Completed
@@ -43,9 +43,8 @@ Track the full multi-phase convergence effort described by `dev/agent-planning.m
 
 ### Phase 1
 
-- Add broader verification for the new chart card if we want explicit component-level coverage beyond the current contract and bridge tests.
-- Reduce placeholder fallbacks further so only unsupported or insufficient-data trend prompts use them.
-- Decide whether the next shared-contract adapter after the market PDF should be the case-brief PDF or another live analysis surface.
+- Closed for the Texas-first scope: shared chart/citation contract, charted `/api/agent` responses, assistant rendering, imported-data bridge, and market-PDF adoption are implemented and verified by the targeted Phase 1 test suite plus lint.
+- Deferred from Phase 1 closeout: unsupported trend prompts may still return explicit placeholder charts, and legacy NYC-only route type cleanup remains maintenance work unless a later phase or deployment gate requires it.
 
 ### Phase 2
 
@@ -72,6 +71,7 @@ Track the full multi-phase convergence effort described by `dev/agent-planning.m
 - `recharts` will be the Phase 1 standard app chart renderer.
 - React PDF remains the export stack during Phase 1.
 - Placeholder data is allowed only when explicitly flagged and never presented as grounded evidence.
+- NYC borough-specific routes are maintenance-only for now and should only be cleaned up when they block the Texas MVP, shared contracts, or a build path we still need to keep green.
 - This worklog must be updated whenever related planning or implementation work changes.
 
 ## Concerns
@@ -83,6 +83,7 @@ Track the full multi-phase convergence effort described by `dev/agent-planning.m
 - `/api/agent` now has grounded rent and unemployment/permit chart paths for active ZIP prompts, but unsupported trend requests still use the explicit placeholder fallback when there is no wired historical source or not enough stored data.
 - Full `next build` verification is still surfacing unrelated TypeScript issues elsewhere in the worktree, so Phase 1 cannot be called fully closed until the build baseline is clean or the remaining blockers are explicitly scoped out.
 - The current remaining full-build blockers follow a repeated pattern in older API routes: untyped Supabase query payloads collapse to `never` under stricter checking, so more legacy routes may still need explicit local row types before the build baseline is fully clean.
+- Because the product focus is now Texas-first, not every legacy NYC-only route should be treated as a mandatory convergence blocker if it does not affect shared Texas workflows or deployment-critical validation.
 
 ## Open Questions
 
@@ -105,3 +106,5 @@ Track the full multi-phase convergence effort described by `dev/agent-planning.m
 - Fixed the `metro-benchmark` route to guard nullable router submarket IDs while working through full-build verification for Phase 1.
 - Hardened the shared chart card, router adapters, Texas ingest write types, and lazy Supabase client while pushing `next build` verification forward into older route files.
 - Typed aggregate and analyze-route Supabase payloads during the ongoing full-build cleanup, leaving `app/api/borough/route.ts` as the next identified blocker in the same legacy inference pattern.
+- Recorded the Texas-first priority decision: borough cleanup is now deferred unless it blocks shared convergence work or a build path that still matters to the Texas MVP.
+- Marked Phase 1 complete for the Texas-first scope after a fresh verification pass: 11 targeted Phase 1 tests passed and lint reported 0 errors with only existing warnings.

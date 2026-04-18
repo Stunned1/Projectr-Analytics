@@ -199,6 +199,7 @@ _04.18.2026_
 - `/api/agent` now uses the shared market-data router to return grounded unemployment or permit trend charts for active ZIP prompts, while unsupported trend requests still fall back to explicitly flagged placeholder series.
 - `/api/agent` now also reuses the persisted `zillow_zori_monthly` history for grounded active-ZIP rent trend charts instead of treating rent trends as placeholder-only responses.
 - Full-build verification now type-checks through the shared chart card, router adapters, Texas ingest helpers, and lazy Supabase client creation instead of failing earlier on eager client initialization or stale write-row aliases.
+- Phase 1 agent/chart convergence is now considered complete for the Texas-first scope after the shared chart contract, live assistant rendering, imported-data bridge, and market PDF adapter all passed the targeted verification set.
 
 **Bug Fixes**
 
@@ -381,6 +382,7 @@ npm run ingest:zillow
 - **CSV import review and non-map fallback UI** — Uploads now go through an explicit review step before commit, then land in an imported-data workspace that exposes the chosen rendering path. Map-ready datasets flow to the Client layer, while non-map datasets stay visible through summary cards, raw tables, and chart fallbacks on `/upload` and in the command-center sidebar.
 - **Normalize for map follow-up** — `map_normalizable` imports now expose an explicit **Resolve geography** step inside **Imported Data**. Projectr previews how many rows have usable location clues, attempts ZIP/address normalization through the existing upload geocode path, updates per-dataset workflow state (`mapped`, `sidebar_only`, `errored`), and promotes successfully resolved rows onto the Client layer without requiring a re-upload.
 - **Open-ended strategy mode** — The default assistant is intentionally EDA-only. If Scout ever brings back speculative investment or strategy guidance, it should ship as a separate gated surface with its own evidence rules and approval model rather than leaking back into the default map assistant.
+- **Legacy NYC borough route cleanup** — Texas ZIP / county / metro workflows are the active product priority, so borough-specific route hardening is deferred unless an NYC-only path blocks shared infrastructure, the production build baseline we still need, or another Texas-first convergence task.
 
 - **Texas parcel polygons outside NYC-style workflows** — TxGIO parcel coverage is optional, county-scoped, and not normalized into the default MVP path. Wiring parcel polygons across Texas cleanly would require county-on-demand ingest, spatial tiling, and a separate shared parcel contract so statewide loads do not wreck latency.
 
