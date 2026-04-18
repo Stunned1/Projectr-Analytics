@@ -7,13 +7,13 @@ Track the full multi-phase convergence effort described by `dev/agent-planning.m
 ## Phase Status
 
 - Phase 1: Complete
-- Phase 2: Not started
+- Phase 2: In progress
 - Phase 3: Not started
 - Phase 4: Not started
 
 ## Current Focus
 
-- Preserve the closed Phase 1 Texas-first convergence baseline while deciding when to begin Phase 2 router-first analytical expansion.
+- Close out the first Phase 2 history-first slice after verification, then choose the next comparison-ready expansion step for market A vs market B support.
 - Keep legacy NYC-only route cleanup deferred unless it blocks shared infrastructure or a future verification gate we explicitly choose to enforce.
 - Keep this worklog updated as each planning or implementation change lands.
 
@@ -38,6 +38,9 @@ Track the full multi-phase convergence effort described by `dev/agent-planning.m
 - Tightened shared router helpers and write paths in `lib/data/postgres-master-data.ts`, `lib/data/bigquery-master-data.ts`, `lib/transformers.ts`, `lib/texas-source-adapters.ts`, and `lib/texas-source-fetchers.ts` so stricter operational row contracts no longer inherit `geometry: unknown` or mis-handle scalar-vs-array filter inputs.
 - Changed `projectr-analytics/lib/supabase.ts` to lazy-create the client so `next build` no longer crashes during module evaluation when Supabase env vars are absent in the local build environment.
 - Typed previously implicit Supabase payloads in `app/api/aggregate/route.ts` and `app/api/analyze/route.ts` so those routes no longer collapse query results to `never[]` during stricter build checks.
+- Added comparison-ready history helpers in `projectr-analytics/lib/data/market-data-router.ts` so rent, unemployment rate, and permit-unit history requests now share one normalized analytical request/result contract.
+- Extended `projectr-analytics/app/api/agent/route.ts` and `projectr-analytics/lib/agent-types.ts` so bounded history prompts can resolve a subject, call the router history helper, and return grounded charted responses with citations.
+- Replaced the route-local Texas county / metro history parser shim with shared area-name normalization plus canonical Texas area keys, and added regression coverage for explicit Texas prompts, `in Texas` phrasing, trailing non-state words, and non-Texas rejection.
 
 ## Remaining By Phase
 
@@ -51,6 +54,8 @@ Track the full multi-phase convergence effort described by `dev/agent-planning.m
 - Expand router-first analytical reads for agent-facing EDA requests.
 - Define missing comparison and historical-read helpers.
 - Avoid direct BigQuery query sprawl outside `market-data-router`.
+- First active slice: implement market-vs-own-history prompts now using comparison-ready request/result contracts so market A vs market B can be added later without rewriting the assistant boundary.
+- Next follow-up after this slice: add actual peer-market execution on top of the same analytical request contract instead of introducing a second route-local comparison path.
 
 ### Phase 3
 
@@ -72,6 +77,7 @@ Track the full multi-phase convergence effort described by `dev/agent-planning.m
 - React PDF remains the export stack during Phase 1.
 - Placeholder data is allowed only when explicitly flagged and never presented as grounded evidence.
 - NYC borough-specific routes are maintenance-only for now and should only be cleaned up when they block the Texas MVP, shared contracts, or a build path we still need to keep green.
+- Phase 2 begins with market-vs-own-history prompts, but helper interfaces must be comparison-ready so market A vs market B can land as a later slice instead of a redesign.
 - This worklog must be updated whenever related planning or implementation work changes.
 
 ## Concerns
@@ -84,12 +90,12 @@ Track the full multi-phase convergence effort described by `dev/agent-planning.m
 - Full `next build` verification is still surfacing unrelated TypeScript issues elsewhere in the worktree, so Phase 1 cannot be called fully closed until the build baseline is clean or the remaining blockers are explicitly scoped out.
 - The current remaining full-build blockers follow a repeated pattern in older API routes: untyped Supabase query payloads collapse to `never` under stricter checking, so more legacy routes may still need explicit local row types before the build baseline is fully clean.
 - Because the product focus is now Texas-first, not every legacy NYC-only route should be treated as a mandatory convergence blocker if it does not affect shared Texas workflows or deployment-critical validation.
+- The targeted PDF adapter test still hits sandbox `spawn EPERM` in this environment even though the other targeted Phase 2 test files pass, so release-level verification should rerun that test outside this sandbox before treating the full targeted suite as environment-clean.
 
 ## Open Questions
 
-- Which existing chart surface should be the first adapter target after the agent UI path: imported data, report charts, or both?
-- What is the minimum citation footer that is useful in the live assistant without making the panel visually noisy?
-- Which analytical prompt should serve as the first fully supported charted agent response?
+- Which exact router helper boundary is the cleanest fit for history-first prompts: one generic comparison helper, or a thinner history helper plus a later comparison wrapper?
+- What should the default history windows be for rent, unemployment, and permits when the user does not specify one?
 
 ## Change Log
 
@@ -108,3 +114,7 @@ Track the full multi-phase convergence effort described by `dev/agent-planning.m
 - Typed aggregate and analyze-route Supabase payloads during the ongoing full-build cleanup, leaving `app/api/borough/route.ts` as the next identified blocker in the same legacy inference pattern.
 - Recorded the Texas-first priority decision: borough cleanup is now deferred unless it blocks shared convergence work or a build path that still matters to the Texas MVP.
 - Marked Phase 1 complete for the Texas-first scope after a fresh verification pass: 11 targeted Phase 1 tests passed and lint reported 0 errors with only existing warnings.
+- Wrote the first Phase 2 design slice in `docs/superpowers/specs/2026-04-18-agent-convergence-phase2-history-design.md`, covering router-first history prompts now and comparison-ready contracts for later market A vs market B support.
+- Replaced the route-local Texas county / metro history parser shim in `/api/agent` with shared area-name normalization and canonical Texas area keys, while keeping explicit non-Texas prompts rejected.
+- Tightened `/api/agent` history parsing so explicit Texas prompts like `Harris County, TX` and `Austin metro area, TX` resolve to canonical shared keys and labels, while space-delimited non-Texas prompts like `Cook County Illinois` and `Miami metro area Florida` are rejected instead of being coerced to Texas.
+- Verified the first Phase 2 slice with passing router, agent-response, chart-contract, and imported-chart-bridge tests plus lint with 0 errors; the remaining PDF adapter test still hits sandbox `spawn EPERM` and needs an unsandboxed rerun for a fully clean targeted verification set.

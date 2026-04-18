@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { buildMetroAreaKey } from '@/lib/area-keys';
 import type { MasterDataRow } from '@/lib/data/types';
 import { normalizeBigQueryDateLike, warmMonthsRetention } from '@/lib/data/types';
+import type { AnalyticalComparisonRequest } from '@/lib/data/market-data-router';
 
 type BigQueryModuleExports = typeof import('@/lib/data/bigquery');
 type BigQueryTablesModuleExports = typeof import('@/lib/data/bigquery-tables');
@@ -594,6 +595,22 @@ test('merges and sorts warm and cold rows by time period', async () => {
   assert.deepStrictEqual(rows.map((row) => row.time_period), ['2023-01-01', '2024-01-01']);
 });
 
+test('normalizes since windows with UTC date math for date-only values', async () => {
+  const { normalizeAnalyticalTimeWindow } = await loadMarketDataRouterModule();
+
+  const normalized = normalizeAnalyticalTimeWindow(
+    {
+      mode: 'since',
+      startDate: '2024-04-30',
+    },
+    new Date('2024-05-01T00:30:00.000Z')
+  );
+
+  assert.strictEqual(normalized.startDate, '2024-04-30');
+  assert.strictEqual(normalized.monthsBack, 1);
+  assert.strictEqual(normalized.label, 'Since 2024-04-30');
+});
+
 test('getMetricSeries reads BigQuery first when the request is outside the warm window', async () => {
   const { getMetricSeries } = await loadMarketDataRouterModule();
   const calls: string[] = [];
@@ -677,6 +694,139 @@ test('getMetricSeries merges BigQuery history with warm Postgres rows when the r
   assert.deepStrictEqual(
     rows.map((row) => row.time_period),
     ['2024-01-01', '2025-05-01']
+  );
+});
+
+test('returns a comparison-ready rent ZIP history result', async () => {
+  const { getAnalyticalComparisonForTest } = await loadMarketDataRouterModule();
+  const calls: Array<{ zip: string; startDate: string }> = [];
+
+  const result = await getAnalyticalComparisonForTest(
+    {
+      comparisonMode: 'history',
+      metric: 'rent',
+      subjectMarket: { kind: 'zip', id: '78701', label: '78701' },
+      comparisonMarket: null,
+      timeWindow: { mode: 'relative', unit: 'months', value: 24 },
+    },
+    {
+      now: new Date('2026-04-18T00:00:00.000Z'),
+      fetchRentSeries: async (zip, options) => {
+        calls.push({ zip, startDate: options.startDate });
+        return [
+          { x: '2024-04', y: 2100 },
+          { x: '2025-04', y: 2250 },
+        ];
+      },
+    }
+  );
+
+  assert.deepStrictEqual(calls, [{ zip: '78701', startDate: '2024-04-01' }]);
+  assert.strictEqual(result.metric, 'rent');
+  assert.strictEqual(result.metricLabel, 'Rent');
+  assert.strictEqual(result.timeWindow.startDate, '2024-04-01');
+  assert.strictEqual(result.series[0]?.subject.kind, 'zip');
+  assert.deepStrictEqual(
+    result.series[0]?.points,
+    [
+      { x: '2024-04', y: 2100 },
+      { x: '2025-04', y: 2250 },
+    ]
+  );
+  assert.ok(result.citations.length >= 1);
+});
+
+test('returns a comparison-ready permit county history result', async () => {
+  const { getAnalyticalComparisonForTest } = await loadMarketDataRouterModule();
+  const calls: Array<{ submarketId: string; metricName: string; startDate: string }> = [];
+
+  const result = await getAnalyticalComparisonForTest(
+    {
+      comparisonMode: 'history',
+      metric: 'permit_units',
+      subjectMarket: { kind: 'county', id: 'county:harris-tx', label: 'Harris County, TX' },
+      comparisonMarket: null,
+      timeWindow: { mode: 'relative', unit: 'years', value: 5 },
+    },
+    {
+      now: new Date('2026-04-18T00:00:00.000Z'),
+      fetchMetricSeries: async (args) => {
+        calls.push({
+          submarketId: args.submarketId,
+          metricName: args.metricName,
+          startDate: args.startDate,
+        });
+        return [
+          {
+            submarket_id: 'county:harris-tx',
+            metric_name: 'Permit_Units',
+            metric_value: 1024,
+            time_period: '2021-04-01',
+            data_source: 'Census BPS',
+            visual_bucket: 'TIME_SERIES',
+            created_at: '2026-04-18T00:00:00.000Z',
+          },
+          {
+            submarket_id: 'county:harris-tx',
+            metric_name: 'Permit_Units',
+            metric_value: 1180,
+            time_period: '2025-04-01',
+            data_source: 'Census BPS',
+            visual_bucket: 'TIME_SERIES',
+            created_at: '2026-04-18T00:00:00.000Z',
+          },
+        ];
+      },
+    }
+  );
+
+  assert.deepStrictEqual(calls, [{
+    submarketId: 'county:harris-tx',
+    metricName: 'Permit_Units',
+    startDate: '2021-04-01',
+  }]);
+  assert.strictEqual(result.metric, 'permit_units');
+  assert.strictEqual(result.metricLabel, 'Permit units');
+  assert.strictEqual(result.timeWindow.startDate, '2021-04-01');
+  assert.strictEqual(result.series[0]?.subject.kind, 'county');
+  assert.deepStrictEqual(
+    result.series[0]?.points,
+    [
+      { x: '2021-04-01', y: 1024 },
+      { x: '2025-04-01', y: 1180 },
+    ]
+  );
+  assert.ok(result.citations.length >= 1);
+});
+
+test('rejects a non-null comparison market for history requests', async () => {
+  const { getAnalyticalComparisonForTest } = await loadMarketDataRouterModule();
+
+  await assert.rejects(
+    () =>
+      getAnalyticalComparisonForTest({
+        comparisonMode: 'history',
+        metric: 'rent',
+        subjectMarket: { kind: 'zip', id: '78701', label: '78701' },
+        comparisonMarket: { kind: 'zip', id: '77002', label: '77002' },
+        timeWindow: { mode: 'relative', unit: 'months', value: 12 },
+      }),
+    /comparisonMarket/i
+  );
+});
+
+test('rejects unsupported analytical metrics before querying history', async () => {
+  const { getAnalyticalComparisonForTest } = await loadMarketDataRouterModule();
+  await assert.rejects(
+    () =>
+      getAnalyticalComparisonForTest({
+        comparisonMode: 'history',
+        metric: 'median_income',
+        subjectMarket: { kind: 'zip', id: '78701', label: '78701' },
+        comparisonMarket: null,
+        timeWindow: { mode: 'relative', unit: 'months', value: 12 },
+      } as AnalyticalComparisonRequest),
+    /Unsupported analytical metric/i
   );
 });
 

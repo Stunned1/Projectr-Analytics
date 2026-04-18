@@ -161,6 +161,22 @@ export interface AgentStep {
   action: AgentAction
 }
 
+export type AgentHistoryMetric = 'rent' | 'unemployment_rate' | 'permit_units'
+
+export type AgentHistorySubjectKind = 'zip' | 'county' | 'metro'
+
+export interface AgentHistorySubject {
+  kind: AgentHistorySubjectKind
+  id: string
+  label: string
+}
+
+export interface AgentHistoryTimeWindow {
+  mode: 'relative'
+  unit: 'months' | 'years'
+  value: number
+}
+
 /** Optional row for future server-side tool loops (args/results are previews only). */
 export type AgentTraceToolRow = {
   name: string

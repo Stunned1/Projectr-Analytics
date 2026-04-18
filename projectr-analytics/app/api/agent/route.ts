@@ -5,7 +5,15 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { normalizeAgentTrace } from '@/lib/agent-trace'
-import type { AgentAction, AgentStep, AgentTrace, MapContext } from '@/lib/agent-types'
+import type {
+  AgentAction,
+  AgentHistoryMetric,
+  AgentHistorySubject,
+  AgentHistoryTimeWindow,
+  AgentStep,
+  AgentTrace,
+  MapContext,
+} from '@/lib/agent-types'
 import { classifyAgentRequestIntent, looksAnalyticalPrompt } from '@/lib/agent-intent'
 import {
   humanizeLayerKey,
@@ -16,8 +24,11 @@ import {
 import { buildEdaContextString, buildFallbackEdaResponse, inferEdaTaskType } from '@/lib/eda-assistant'
 import { evaluateAgentRequestPolicy } from '@/lib/agent-request-policy'
 import { GEMINI_NO_EM_DASH_RULE } from '@/lib/gemini-text-rules'
+import { buildCountyAreaKey, buildMetroAreaKey, normalizeCountyDisplayName, normalizeMetroDisplayName } from '@/lib/area-keys'
 import { normalizeScoutChartOutput, type ScoutChartOutput } from '@/lib/scout-chart-output'
+import type { AnalyticalComparisonRequest, AnalyticalComparisonResult } from '@/lib/data/market-data-router'
 import type { MasterDataRow } from '@/lib/data/types'
+import { normalizeUsStateToAbbr, splitTrailingUsState } from '@/lib/us-state-abbr'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -411,6 +422,327 @@ export async function buildRouterBackedChartForTest(
   return buildRouterBackedChart(userMessage, context, fetchMetricSeries)
 }
 
+type HistoryComparisonDependencies = {
+  getAnalyticalComparison?: (request: AnalyticalComparisonRequest) => Promise<AnalyticalComparisonResult>
+}
+
+const HISTORY_METRIC_CONFIG: Record<
+  AgentHistoryMetric,
+  {
+    aliases: RegExp[]
+    defaultWindow: AgentHistoryTimeWindow
+    chartKind: 'line' | 'bar'
+    valueFormat: 'currency' | 'percent' | 'number'
+  }
+> = {
+  rent: {
+    aliases: [/\brent\b/i, /\bzori\b/i, /\brental\b/i],
+    defaultWindow: { mode: 'relative', unit: 'months', value: 24 },
+    chartKind: 'line',
+    valueFormat: 'currency',
+  },
+  unemployment_rate: {
+    aliases: [/\bunemployment\b/i, /\bjobless\b/i, /\blabor\b/i, /\bemployment rate\b/i],
+    defaultWindow: { mode: 'relative', unit: 'months', value: 24 },
+    chartKind: 'line',
+    valueFormat: 'percent',
+  },
+  permit_units: {
+    aliases: [/\bpermit\b/i, /\bpermits\b/i, /\bconstruction\b/i, /\bbuilding permits?\b/i],
+    defaultWindow: { mode: 'relative', unit: 'years', value: 5 },
+    chartKind: 'bar',
+    valueFormat: 'number',
+  },
+}
+
+function hasHistoryIntent(userMessage: string): boolean {
+  return /\b(history|trend|trends|timeline|over time|time series|changed|change)\b/i.test(userMessage)
+}
+
+function detectHistoryMetric(userMessage: string): AgentHistoryMetric | null {
+  const prompt = userMessage.toLowerCase()
+  if (!hasHistoryIntent(prompt)) return null
+
+  for (const [metric, config] of Object.entries(HISTORY_METRIC_CONFIG) as Array<
+    [AgentHistoryMetric, (typeof HISTORY_METRIC_CONFIG)[AgentHistoryMetric]]
+  >) {
+    if (config.aliases.some((pattern) => pattern.test(prompt))) return metric
+  }
+
+  return null
+}
+
+function defaultHistoryWindow(metric: AgentHistoryMetric): AgentHistoryTimeWindow {
+  return HISTORY_METRIC_CONFIG[metric].defaultWindow
+}
+
+function normalizeHistorySubjectName(value: string): string {
+  return value.replace(/,/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+function extractHistorySubjectPhrase(prompt: string, subjectToken: 'county' | 'metro'): string | null {
+  const tokenPattern = subjectToken === 'metro' ? 'metro(?:\\s+area)?' : 'county'
+  const prepositionPattern = new RegExp(`\\b(?:for|in|of|at|about|on|to)\\s+`, 'ig')
+  const extractFromTail = (tail: string): string | null => {
+    const match = tail.match(new RegExp(`^([A-Za-z][A-Za-z\\s.'-]*?\\s+${tokenPattern})\\b`, 'i'))
+    const subject = match?.[1]?.trim() ?? null
+    if (!subject) return null
+
+    const remainder = tail.slice(match[0].length).replace(/^[,\s]+/, '').trim()
+    if (!remainder) return subject
+
+    const stateAbbr = normalizeUsStateToAbbr(remainder)
+    if (!stateAbbr) return subject
+
+    return `${subject}, ${stateAbbr}`
+  }
+
+  for (const preposition of prompt.matchAll(prepositionPattern)) {
+    const tail = prompt.slice((preposition.index ?? 0) + preposition[0].length).trim()
+    const subject = extractFromTail(tail)
+    if (subject) return subject
+  }
+
+  return extractFromTail(prompt.trim())
+}
+
+function resolveHistorySubjectMarket(
+  userMessage: string,
+  context: MapContext | null | undefined
+): AgentHistorySubject | null {
+  const prompt = userMessage.trim()
+
+  const countyPhrase = extractHistorySubjectPhrase(prompt, 'county')
+  if (countyPhrase) {
+    const parsed = splitTrailingUsState(countyPhrase)
+    if (parsed.stateAbbr && parsed.stateAbbr !== 'TX') return null
+
+    const countyBaseName = normalizeHistorySubjectName(parsed.name).replace(/\s+county$/i, '').trim()
+    const countyName = normalizeCountyDisplayName(countyBaseName)
+    if (!countyName) return null
+
+    return {
+      kind: 'county',
+      id: buildCountyAreaKey(countyBaseName, 'TX'),
+      label: `${countyName}, TX`,
+    }
+  }
+
+  const metroPhrase = extractHistorySubjectPhrase(prompt, 'metro')
+  if (metroPhrase) {
+    const parsed = splitTrailingUsState(metroPhrase)
+    if (parsed.stateAbbr && parsed.stateAbbr !== 'TX') return null
+
+    const metroName = normalizeMetroDisplayName(normalizeHistorySubjectName(parsed.name))
+    if (!metroName) return null
+
+    return {
+      kind: 'metro',
+      id: buildMetroAreaKey(metroName, 'TX'),
+      label: `${metroName}, TX`,
+    }
+  }
+
+  const zip = prompt.match(/\b\d{5}\b/)?.[0] ?? context?.zip?.trim() ?? null
+  if (zip) {
+    const label = context?.label?.trim() || context?.eda?.geographyLabel?.trim() || zip
+    return { kind: 'zip', id: zip, label }
+  }
+
+  return null
+}
+
+function buildHistoryComparisonRequest(
+  metric: AgentHistoryMetric,
+  subjectMarket: AgentHistorySubject
+): AnalyticalComparisonRequest {
+  return {
+    comparisonMode: 'history',
+    metric,
+    subjectMarket,
+    comparisonMarket: null,
+    timeWindow: defaultHistoryWindow(metric),
+  }
+}
+
+function buildHistoryChartFromComparison(comparison: AnalyticalComparisonResult): ScoutChartOutput {
+  const series = comparison.series.map((entry) => ({
+    key: entry.key,
+    label: entry.label,
+    color: '#D76B3D',
+    points: entry.points.map((point) => ({ x: point.x, y: point.y })),
+  }))
+
+  return normalizeScoutChartOutput({
+    kind: HISTORY_METRIC_CONFIG[comparison.metric].chartKind,
+    title: `${comparison.series[0]?.label ?? 'Market'} ${comparison.metricLabel.toLowerCase()} history`,
+    subtitle: 'Historical series from the shared market-data router',
+    summary: `Grounded ${comparison.metricLabel.toLowerCase()} history for ${comparison.series[0]?.label ?? 'the selected market'}.`,
+    placeholder: false,
+    confidenceLabel: 'router-backed history',
+    xAxis: { key: 'period', label: 'Period' },
+    yAxis: { label: comparison.metricLabel, valueFormat: HISTORY_METRIC_CONFIG[comparison.metric].valueFormat },
+    series,
+    citations: comparison.citations,
+  })
+}
+
+function buildHistoryTrace(comparison: AnalyticalComparisonResult): AgentTrace {
+  const subjectLabel = comparison.series[0]?.label ?? 'the selected market'
+  const firstPoint = comparison.series[0]?.points[0] ?? null
+  const lastPoint = comparison.series[0]?.points[comparison.series[0]?.points.length - 1] ?? null
+
+  return {
+    summary: `${comparison.metricLabel} history for ${subjectLabel}`,
+    taskType: 'spot_trends',
+    methodology:
+      'Scout normalized the history request, delegated the historical read to the comparison-ready market-data router, and rendered the returned series without inventing any intermediate values.',
+    keyFindings: [
+      `${comparison.series[0]?.points.length ?? 0} historical points were returned for ${subjectLabel}.`,
+      firstPoint && lastPoint
+        ? `${comparison.metricLabel} moved from ${firstPoint.y} to ${lastPoint.y} across ${comparison.timeWindow.label}.`
+        : `${comparison.metricLabel} history was available from the router.`,
+    ],
+    evidence: [
+      `Metric: ${comparison.metricLabel}.`,
+      `Window: ${comparison.timeWindow.label}.`,
+      comparison.citations[0]?.label ? `Source: ${comparison.citations[0].label}.` : 'Source: router-backed historical series.',
+    ],
+    caveats: ['Only rent, unemployment rate, and permit history are supported in this bounded path.'],
+    nextQuestions: ['Ask for another ZIP, county, or metro if you want a comparison against a different market.'],
+    citations: comparison.citations,
+  }
+}
+
+function buildUnsupportedHistoryPayload(message: string): AgentPipelineResult {
+  return {
+    message,
+    action: { type: 'none' as const },
+    trace: {
+      summary: 'Unsupported history request',
+      taskType: 'explain_metric',
+      methodology:
+        'Scout recognized a history-style prompt, but the bounded history lane only supports rent, unemployment rate, and permit units.',
+      keyFindings: ['No history chart was generated.'],
+      evidence: ['The requested metric is outside the supported history metric set.'],
+      caveats: ['Try rent, unemployment rate, or permit history instead.'],
+      nextQuestions: ['Ask for a supported history metric on the current ZIP, county, or metro.'],
+    },
+    chart: null,
+  }
+}
+
+async function maybeBuildHistoryChartedResponse(
+  userMessage: string,
+  context: MapContext | null,
+  dependencies: HistoryComparisonDependencies = {}
+): Promise<AgentPipelineResult | null> {
+  if (!hasHistoryIntent(userMessage)) return null
+
+  const metric = detectHistoryMetric(userMessage)
+  if (!metric) {
+    return buildUnsupportedHistoryPayload(
+      'That history metric is not supported yet. Scout only handles rent, unemployment rate, and permit units for now.'
+    )
+  }
+
+  const subjectMarket = resolveHistorySubjectMarket(userMessage, context)
+  if (!subjectMarket) {
+    return {
+      message: 'I could not identify which ZIP, county, or metro to use for that history request.',
+      action: { type: 'none' as const },
+      trace: {
+        summary: 'History request missing a resolvable geography',
+        taskType: 'explain_metric',
+        methodology:
+          'Scout found a supported history metric, but no grounded subject geography could be resolved from the prompt or current workspace.',
+        keyFindings: ['No chart was generated.'],
+        evidence: ['The route needs a ZIP, county, or metro to send the request to the history router.'],
+        caveats: ['Try naming the geography directly or load the market first.'],
+        nextQuestions: ['Ask for rent history on a ZIP like 78701.', 'Ask for permit history for a Texas county like Harris County, TX.'],
+      },
+      chart: null,
+    }
+  }
+
+  if (metric === 'rent' && subjectMarket.kind !== 'zip') {
+    return {
+      message: 'Rent history is only supported for ZIP subjects right now. Try a ZIP like 78701.',
+      action: { type: 'none' as const },
+      trace: {
+        summary: 'Rent history requires a ZIP subject',
+        taskType: 'explain_metric',
+        methodology:
+          'Scout recognized a rent-history prompt but the bounded router path only supports rent at ZIP granularity.',
+        keyFindings: ['No chart was generated.'],
+        evidence: [`Resolved subject kind: ${subjectMarket.kind}.`],
+        caveats: ['Rent history needs a ZIP subject in the current router contract.'],
+        nextQuestions: ['Ask for rent history on a ZIP code.', 'Ask for permit or unemployment history on a county or metro.'],
+      },
+      chart: null,
+    }
+  }
+
+  const fetchAnalyticalComparison =
+    dependencies.getAnalyticalComparison ?? (async (request: AnalyticalComparisonRequest) => {
+      const { getAnalyticalComparison } = await import('@/lib/data/market-data-router')
+      return getAnalyticalComparison(request)
+    })
+
+  try {
+    const comparison = await fetchAnalyticalComparison(buildHistoryComparisonRequest(metric, subjectMarket))
+    const chart = buildHistoryChartFromComparison(comparison)
+    return {
+      message: `Here is the ${comparison.timeWindow.label.toLowerCase()} ${comparison.metricLabel.toLowerCase()} history for ${comparison.series[0]?.label ?? subjectMarket.label}.`,
+      action: { type: 'none' as const },
+      trace: buildHistoryTrace(comparison),
+      chart,
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unable to build a grounded history response.'
+
+    if (/unsupported analytical metric/i.test(message)) {
+      return buildUnsupportedHistoryPayload(
+        'That history metric is not supported yet. Scout only handles rent, unemployment rate, and permit units for now.'
+      )
+    }
+
+    if (/insufficient historical data/i.test(message)) {
+      return {
+        message,
+        action: { type: 'none' as const },
+        trace: {
+          summary: 'Insufficient historical data',
+          taskType: 'spot_trends',
+          methodology:
+            'Scout delegated the request to the router, but the router did not return enough historical points to chart.',
+          keyFindings: ['No chart was generated.'],
+          evidence: [message],
+          caveats: ['Try a broader time window or a subject with more persisted history.'],
+          nextQuestions: ['Ask for a longer history window.', 'Try a ZIP, county, or metro with more persisted rows.'],
+        },
+        chart: null,
+      }
+    }
+
+    return {
+      message: 'I could not complete that history request from the current grounded data.',
+      action: { type: 'none' as const },
+      trace: {
+        summary: 'History request could not be completed',
+        taskType: 'spot_trends',
+        methodology:
+          'Scout normalized the history request, but the router call failed before a grounded series could be returned.',
+        keyFindings: ['No chart was generated.'],
+        evidence: [message],
+        caveats: ['Try again with a clearer geography or a supported metric.'],
+        nextQuestions: ['Ask for rent, unemployment rate, or permit history on the active market.'],
+      },
+      chart: null,
+    }
+  }
+}
+
 function maybeBuildFallbackChart(userMessage: string, context: MapContext | null): ScoutChartOutput | null {
   const prompt = userMessage.toLowerCase()
   const wantsTrend = /\b(trend|over time|history|timeline)\b/.test(prompt)
@@ -469,6 +801,14 @@ export function buildFallbackChartedResponseForTest(userMessage: string, context
     trace: attachTraceCitations(fallback.trace, chart),
     chart,
   }
+}
+
+export async function buildHistoryChartedResponseForTest(
+  userMessage: string,
+  context: MapContext | null,
+  dependencies: HistoryComparisonDependencies = {}
+) {
+  return maybeBuildHistoryChartedResponse(userMessage, context, dependencies)
 }
 
 function buildDefaultMapControlMessage(action: AgentAction): string {
@@ -775,6 +1115,11 @@ async function runAgentPipeline(context: MapContext | null, userMessage: string)
     }
 
     return unresolvedMapControlPayload()
+  }
+
+  const history = await maybeBuildHistoryChartedResponse(userMessage, context)
+  if (history) {
+    return history
   }
 
   const fallback = buildFallbackEdaResponse(userMessage, context)
