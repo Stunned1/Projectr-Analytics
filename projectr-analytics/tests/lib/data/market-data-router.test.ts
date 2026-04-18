@@ -6,9 +6,11 @@ import type { MasterDataRow } from '@/lib/data/types';
 import { normalizeBigQueryDateLike, warmMonthsRetention } from '@/lib/data/types';
 
 type BigQueryModuleExports = typeof import('@/lib/data/bigquery');
+type BigQueryTablesModuleExports = typeof import('@/lib/data/bigquery-tables');
 type BigQueryMasterDataModuleExports = typeof import('@/lib/data/bigquery-master-data');
 type PostgresMasterDataModuleExports = typeof import('@/lib/data/postgres-master-data');
 type MarketDataRouterModuleExports = typeof import('@/lib/data/market-data-router');
+type CycleLoadDataModuleExports = typeof import('@/lib/cycle/load-data');
 
 const require = createRequire(import.meta.url);
 const NodeModule = require('node:module') as {
@@ -17,9 +19,11 @@ const NodeModule = require('node:module') as {
 const originalModuleLoad = NodeModule._load;
 
 let bigQueryModulePromise: Promise<BigQueryModuleExports> | null = null;
+let bigQueryTablesModulePromise: Promise<BigQueryTablesModuleExports> | null = null;
 let bigQueryMasterDataModulePromise: Promise<BigQueryMasterDataModuleExports> | null = null;
 let postgresMasterDataModulePromise: Promise<PostgresMasterDataModuleExports> | null = null;
 let marketDataRouterModulePromise: Promise<MarketDataRouterModuleExports> | null = null;
+let cycleLoadDataModulePromise: Promise<CycleLoadDataModuleExports> | null = null;
 
 async function loadBigQueryModule(): Promise<BigQueryModuleExports> {
   if (!bigQueryModulePromise) {
@@ -53,6 +57,23 @@ async function loadBigQueryMasterDataModule(): Promise<BigQueryMasterDataModuleE
   }
 
   return bigQueryMasterDataModulePromise;
+}
+
+async function loadBigQueryTablesModule(): Promise<BigQueryTablesModuleExports> {
+  if (!bigQueryTablesModulePromise) {
+    NodeModule._load = function patchedModuleLoad(request: string, parent: unknown, isMain: boolean) {
+      if (request === 'server-only') {
+        return {};
+      }
+
+      return originalModuleLoad.call(this, request, parent, isMain);
+    };
+    bigQueryTablesModulePromise = import('@/lib/data/bigquery-tables').finally(() => {
+      NodeModule._load = originalModuleLoad;
+    });
+  }
+
+  return bigQueryTablesModulePromise;
 }
 
 async function loadPostgresMasterDataModule(): Promise<PostgresMasterDataModuleExports> {
@@ -111,6 +132,35 @@ async function loadMarketDataRouterModule(): Promise<MarketDataRouterModuleExpor
   }
 
   return marketDataRouterModulePromise;
+}
+
+async function loadCycleLoadDataModule(): Promise<CycleLoadDataModuleExports> {
+  if (!cycleLoadDataModulePromise) {
+    const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const originalAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    process.env.NEXT_PUBLIC_SUPABASE_URL ??= 'https://example.supabase.co';
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??=
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV4YW1wbGUiLCJyb2xlIjoiYW5vbiIsImlhdCI6MCwiZXhwIjoyNTMyOTk5OTk5fQ.signature';
+
+    NodeModule._load = function patchedModuleLoad(request: string, parent: unknown, isMain: boolean) {
+      if (request === 'server-only') {
+        return {};
+      }
+
+      return originalModuleLoad.call(this, request, parent, isMain);
+    };
+    cycleLoadDataModulePromise = import('@/lib/cycle/load-data')
+      .finally(() => {
+        NodeModule._load = originalModuleLoad;
+        if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+        else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+
+        if (originalAnonKey === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+        else process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = originalAnonKey;
+      });
+  }
+
+  return cycleLoadDataModulePromise;
 }
 
 test('market data router test harness is wired', () => {
@@ -174,7 +224,6 @@ test('reads BigQuery router config from env', async () => {
     projectId: process.env.BIGQUERY_PROJECT_ID,
     fallbackProjectId: process.env.GOOGLE_CLOUD_PROJECT,
     datasetId: process.env.BIGQUERY_DATASET_ID,
-    tableId: process.env.BIGQUERY_TABLE_ID,
     location: process.env.BIGQUERY_LOCATION,
     warmMonths: process.env.MARKET_DATA_WARM_RETENTION_MONTHS,
   };
@@ -183,19 +232,17 @@ test('reads BigQuery router config from env', async () => {
     process.env.BIGQUERY_PROJECT_ID = 'scout-dev';
     process.env.GOOGLE_CLOUD_PROJECT = 'ignored-fallback';
     process.env.BIGQUERY_DATASET_ID = 'market_router';
-    process.env.BIGQUERY_TABLE_ID = 'master_data';
     process.env.BIGQUERY_LOCATION = 'US';
     process.env.MARKET_DATA_WARM_RETENTION_MONTHS = '9';
 
     assert.deepStrictEqual(getBigQueryReadConfig(), {
       projectId: 'scout-dev',
       datasetId: 'market_router',
-      tableId: 'master_data',
       location: 'US',
       warmRetentionMonths: 9,
       isConfigured: true,
     });
-    assert.strictEqual(getBigQueryTablePath(), 'scout-dev.market_router.master_data');
+    assert.strictEqual(getBigQueryTablePath('master_data'), 'scout-dev.market_router.master_data');
   } finally {
     for (const [key, value] of Object.entries(original)) {
       if (value === undefined) {
@@ -205,9 +252,7 @@ test('reads BigQuery router config from env', async () => {
             ? 'GOOGLE_CLOUD_PROJECT'
             : key === 'datasetId'
               ? 'BIGQUERY_DATASET_ID'
-              : key === 'tableId'
-                ? 'BIGQUERY_TABLE_ID'
-                : key === 'location'
+              : key === 'location'
                   ? 'BIGQUERY_LOCATION'
                   : 'MARKET_DATA_WARM_RETENTION_MONTHS'];
       } else {
@@ -217,9 +262,7 @@ test('reads BigQuery router config from env', async () => {
             ? 'GOOGLE_CLOUD_PROJECT'
             : key === 'datasetId'
               ? 'BIGQUERY_DATASET_ID'
-              : key === 'tableId'
-                ? 'BIGQUERY_TABLE_ID'
-                : key === 'location'
+              : key === 'location'
                   ? 'BIGQUERY_LOCATION'
                   : 'MARKET_DATA_WARM_RETENTION_MONTHS'] = value;
       }
@@ -233,7 +276,6 @@ test('treats ADC-backed BigQuery config as configured without an explicit projec
     projectId: process.env.BIGQUERY_PROJECT_ID,
     fallbackProjectId: process.env.GOOGLE_CLOUD_PROJECT,
     datasetId: process.env.BIGQUERY_DATASET_ID,
-    tableId: process.env.BIGQUERY_TABLE_ID,
     credentialsPath: process.env.GOOGLE_APPLICATION_CREDENTIALS,
   };
 
@@ -241,18 +283,16 @@ test('treats ADC-backed BigQuery config as configured without an explicit projec
     delete process.env.BIGQUERY_PROJECT_ID;
     delete process.env.GOOGLE_CLOUD_PROJECT;
     process.env.BIGQUERY_DATASET_ID = 'market_router';
-    process.env.BIGQUERY_TABLE_ID = 'master_data';
     process.env.GOOGLE_APPLICATION_CREDENTIALS = 'C:\\keys\\scout.json';
 
     assert.deepStrictEqual(getBigQueryReadConfig(), {
       projectId: null,
       datasetId: 'market_router',
-      tableId: 'master_data',
       location: 'US',
       warmRetentionMonths: 12,
       isConfigured: true,
     });
-    assert.strictEqual(getBigQueryTablePath(), null);
+    assert.strictEqual(getBigQueryTablePath('master_data'), null);
   } finally {
     if (original.projectId === undefined) delete process.env.BIGQUERY_PROJECT_ID;
     else process.env.BIGQUERY_PROJECT_ID = original.projectId;
@@ -263,11 +303,28 @@ test('treats ADC-backed BigQuery config as configured without an explicit projec
     if (original.datasetId === undefined) delete process.env.BIGQUERY_DATASET_ID;
     else process.env.BIGQUERY_DATASET_ID = original.datasetId;
 
-    if (original.tableId === undefined) delete process.env.BIGQUERY_TABLE_ID;
-    else process.env.BIGQUERY_TABLE_ID = original.tableId;
-
     if (original.credentialsPath === undefined) delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
     else process.env.GOOGLE_APPLICATION_CREDENTIALS = original.credentialsPath;
+  }
+});
+
+test('builds logical BigQuery table identifiers from the shared registry', async () => {
+  const { BIGQUERY_TABLES, getBigQueryTableIdentifier } = await loadBigQueryTablesModule();
+  const originalProjectId = process.env.BIGQUERY_PROJECT_ID;
+  const originalDatasetId = process.env.BIGQUERY_DATASET_ID;
+
+  try {
+    process.env.BIGQUERY_PROJECT_ID = 'scout-dev';
+    process.env.BIGQUERY_DATASET_ID = 'market_router';
+
+    assert.strictEqual(BIGQUERY_TABLES.masterData, 'master_data');
+    assert.strictEqual(getBigQueryTableIdentifier(BIGQUERY_TABLES.masterData), '`scout-dev.market_router.master_data`');
+  } finally {
+    if (originalProjectId === undefined) delete process.env.BIGQUERY_PROJECT_ID;
+    else process.env.BIGQUERY_PROJECT_ID = originalProjectId;
+
+    if (originalDatasetId === undefined) delete process.env.BIGQUERY_DATASET_ID;
+    else process.env.BIGQUERY_DATASET_ID = originalDatasetId;
   }
 });
 
@@ -275,12 +332,10 @@ test('creates a BigQuery client through an injected module loader', async () => 
   const { getBigQueryClient } = await loadBigQueryModule();
   const originalProjectId = process.env.BIGQUERY_PROJECT_ID;
   const originalDatasetId = process.env.BIGQUERY_DATASET_ID;
-  const originalTableId = process.env.BIGQUERY_TABLE_ID;
 
   try {
     process.env.BIGQUERY_PROJECT_ID = 'scout-dev';
     process.env.BIGQUERY_DATASET_ID = 'market_router';
-    process.env.BIGQUERY_TABLE_ID = 'master_data';
 
     const seen: Array<{ projectId: string | undefined }> = [];
     class FakeBigQuery {
@@ -301,9 +356,6 @@ test('creates a BigQuery client through an injected module loader', async () => 
 
     if (originalDatasetId === undefined) delete process.env.BIGQUERY_DATASET_ID;
     else process.env.BIGQUERY_DATASET_ID = originalDatasetId;
-
-    if (originalTableId === undefined) delete process.env.BIGQUERY_TABLE_ID;
-    else process.env.BIGQUERY_TABLE_ID = originalTableId;
   }
 });
 
@@ -408,13 +460,12 @@ test('fetchLatestRowsForSubmarkets reads BigQuery per submarket instead of apply
   const querySubmarkets: string[] = [];
   const originalProjectId = process.env.BIGQUERY_PROJECT_ID;
   const originalDatasetId = process.env.BIGQUERY_DATASET_ID;
-  const originalTableId = process.env.BIGQUERY_TABLE_ID;
   process.env.BIGQUERY_PROJECT_ID = 'scout-dev';
   process.env.BIGQUERY_DATASET_ID = 'market_router';
-  process.env.BIGQUERY_TABLE_ID = 'master_data';
   const client = {
-    query({ params }: { params: { submarketId?: string; submarketIds?: string[]; rowLimit: number } }) {
+    query({ query, params }: { query: string; params: { submarketId?: string; submarketIds?: string[]; rowLimit: number } }) {
       assert.strictEqual(params.rowLimit, 1);
+      assert.match(query, /market_router\.master_data/);
       if (params.submarketId) {
         querySubmarkets.push(params.submarketId);
         return Promise.resolve([
@@ -468,9 +519,6 @@ test('fetchLatestRowsForSubmarkets reads BigQuery per submarket instead of apply
 
     if (originalDatasetId === undefined) delete process.env.BIGQUERY_DATASET_ID;
     else process.env.BIGQUERY_DATASET_ID = originalDatasetId;
-
-    if (originalTableId === undefined) delete process.env.BIGQUERY_TABLE_ID;
-    else process.env.BIGQUERY_TABLE_ID = originalTableId;
   }
 });
 
@@ -677,4 +725,72 @@ test('upsertOperationalRows respects ignore conflict mode for client-upload styl
     onConflict: 'submarket_id,metric_name,time_period,data_source',
     ignoreDuplicates: true,
   }]);
+});
+
+test('loadCycleRawInputs pulls historical permit and unemployment series through the router when enabled', async () => {
+  const { loadCycleRawInputs } = await loadCycleLoadDataModule();
+  const seriesCalls: Array<{ metricName: string; startDate: string; dataSource: string | readonly string[] | undefined }> = [];
+
+  const result = await loadCycleRawInputs('77002', {
+    now: new Date('2026-04-18T00:00:00.000Z'),
+    historicalSeriesEnabled: true,
+    getRowsForSubmarket: async () => [{
+      metric_name: 'Vacancy_Rate',
+      metric_value: 7.1,
+      data_source: 'Census ACS',
+      time_period: '2026-01-01',
+      created_at: '2026-04-18T00:00:00.000Z',
+    }],
+    getMetricSeries: async ({ metricName, startDate, dataSource }) => {
+      seriesCalls.push({ metricName, startDate, dataSource });
+      if (metricName === 'Unemployment_Rate') {
+        return [{
+          submarket_id: '77002',
+          metric_name: 'Unemployment_Rate',
+          metric_value: 4.2,
+          time_period: '2024-01-01',
+          data_source: 'FRED',
+          visual_bucket: 'TIME_SERIES',
+          created_at: '2026-04-18T00:00:00.000Z',
+        }];
+      }
+
+      if (metricName === 'Permit_Units') {
+        return [{
+          submarket_id: '77002',
+          metric_name: 'Permit_Units',
+          metric_value: 120,
+          time_period: '2022-01-01',
+          data_source: 'Census BPS',
+          visual_bucket: 'TIME_SERIES',
+          created_at: '2026-04-18T00:00:00.000Z',
+        }];
+      }
+
+      return [];
+    },
+    fetchZoriMonthly: async () => [],
+    fetchZillowSnapshot: async () => ({
+      zori_growth_12m: 2.4,
+      zori_latest: 1835,
+    }),
+  });
+
+  assert.deepStrictEqual(seriesCalls, [
+    { metricName: 'Unemployment_Rate', startDate: '2023-04-01', dataSource: 'FRED' },
+    { metricName: 'Permit_Units', startDate: '2020-01-01', dataSource: 'Census BPS' },
+  ]);
+  assert.deepStrictEqual(
+    result.masterRows
+      .map((row) => ({ metric_name: row.metric_name, time_period: row.time_period, data_source: row.data_source }))
+      .sort((a, b) => a.metric_name.localeCompare(b.metric_name)),
+    [
+      { metric_name: 'Permit_Units', time_period: '2022-01-01', data_source: 'Census BPS' },
+      { metric_name: 'Unemployment_Rate', time_period: '2024-01-01', data_source: 'FRED' },
+      { metric_name: 'Vacancy_Rate', time_period: '2026-01-01', data_source: 'Census ACS' },
+    ]
+      .sort((a, b) => a.metric_name.localeCompare(b.metric_name))
+  );
+  assert.strictEqual(result.zoriGrowthYoy, 2.4);
+  assert.strictEqual(result.zoriLatest, 1835);
 });

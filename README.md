@@ -92,8 +92,7 @@ Copy `.env.local` and fill in:
 FRED_API_KEY
 CENSUS_API_KEY
 BIGQUERY_PROJECT_ID             # optional; overrides GOOGLE_CLOUD_PROJECT for server-side market-data router reads, but ADC-backed environments may omit it
-BIGQUERY_DATASET_ID             # optional until the market-data router is wired to live reads
-BIGQUERY_TABLE_ID               # optional until the market-data router is wired to live reads
+BIGQUERY_DATASET_ID             # optional until BigQuery-backed historical reads are wired locally; adapters choose their own table names from the shared registry
 BIGQUERY_LOCATION               # optional; defaults to US
 MARKET_DATA_WARM_RETENTION_MONTHS # optional; defaults to 12 months
 GOOGLE_APPLICATION_CREDENTIALS  # optional standard GCP service-account JSON path for server-side BigQuery auth; ADC also works
@@ -110,6 +109,7 @@ TRANSITLAND_API_KEY=             # free at transit.land/sign-up (Developer API, 
 ```
 
 BigQuery router reads use standard Google Cloud server credentials. If you want to exercise the helper locally, authenticate with Application Default Credentials or point `GOOGLE_APPLICATION_CREDENTIALS` at a service-account JSON before calling it.
+For a direct local probe, run `npm run check:bigquery` inside `projectr-analytics`; it prints the resolved dataset-scoped BigQuery config, the logical table identifiers, and performs a `LIMIT 1` query against the shared `master_data` table.
 
 ### First-time data setup
 1. Download Zillow CSVs (see section below) into `zillow-csv's/` at repo root
@@ -186,6 +186,11 @@ _04.17.2026_
 - Aggregate area loads now run aggregate, cycle, transit, and trends fetches in parallel, and obvious metro-style searches try `/api/metro` before `/api/city` to avoid an unnecessary extra round trip on Texas-style metro queries.
 - Added `/api/permits/texas`, which scopes official TREC place-level residential permit activity to Texas city / county / metro searches, caches hot responses, and resolves place centroids from `zip_metro_lookup` before falling back to Google geocoding.
 - Added a shared CSV import decision-model contract in `lib/upload/import-decision-model.ts` and wired `/api/normalize` to request and parse richer Gemini interpretations, including mapability classification, detected schema, field mappings, confidence, fallback visualization, and user-facing explanation fields.
+
+_04.18.2026_
+- BigQuery config is now dataset-scoped instead of relying on one global `BIGQUERY_TABLE_ID`, and the shared table registry lets each adapter target its own BigQuery table while keeping the master-data router on `master_data`.
+- Added `npm run check:bigquery`, a local BigQuery probe that prints the resolved config plus logical table identifiers and runs a cheap `LIMIT 1` reachability query against the shared `master_data` table.
+- Cycle analysis and report generation now privately pull longer `Unemployment_Rate` and `Permit_Units` series through the shared market-data router when BigQuery history is configured, while preserving the existing behavior when the cold-history path is unavailable.
 - Added a deterministic shared upload parser that now emits canonical headers, raw parsed rows, file metadata, sample rows, and early malformed-file rejection, and wired `/api/normalize` to consume that parser instead of reparsing uploads inline.
 - `/api/normalize` now finalizes Gemini import triage against deterministic parser evidence, falls back to structural heuristics when Gemini is unavailable, and only geo-resolves uploads that actually expose mappable location fields.
 - `/api/agent` is now a bounded EDA assistant with deterministic market/upload summaries, metric explanations, and a direct map-control lane for explicit search, layer, tilt, and panel requests instead of the old default multi-step reasoning flow.

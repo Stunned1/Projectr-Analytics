@@ -2,6 +2,7 @@ import 'server-only'
 
 import { expandAreaKeyCandidates } from '@/lib/area-keys'
 import { getBigQueryClient, getBigQueryReadConfig, type BigQueryClientLike } from './bigquery'
+import { BIGQUERY_TABLES, getBigQueryTableIdentifier } from './bigquery-tables'
 import type { MasterDataRow, VisualBucket } from './types'
 import { normalizeBigQueryDateLike } from './types'
 
@@ -99,17 +100,6 @@ function normalizeVisualBucket(value: unknown): VisualBucket {
   return normalized && VALID_VISUAL_BUCKETS.has(normalized) ? normalized : 'TABULAR'
 }
 
-function bigQueryTableIdentifier(): string {
-  const config = getBigQueryReadConfig()
-  if (!config.isConfigured) {
-    throw new Error('BigQuery master-data table is not configured')
-  }
-
-  return config.projectId
-    ? `\`${config.projectId}.${config.datasetId}.${config.tableId}\``
-    : `\`${config.datasetId}.${config.tableId}\``
-}
-
 function queryLocation(): string {
   return getBigQueryReadConfig().location
 }
@@ -185,7 +175,7 @@ export async function fetchLatestRowsForSubmarket(
   const rows = await runBigQueryQuery(
     `
       SELECT submarket_id, metric_name, metric_value, time_period, data_source, visual_bucket, created_at
-      FROM ${bigQueryTableIdentifier()}
+      FROM ${getBigQueryTableIdentifier(BIGQUERY_TABLES.masterData)}
       WHERE submarket_id = @submarketId
       QUALIFY ROW_NUMBER() OVER (
         PARTITION BY submarket_id, metric_name
@@ -236,7 +226,7 @@ async function readBigQueryRowsForSubmarket(
   return runBigQueryQuery(
     `
       SELECT submarket_id, metric_name, metric_value, time_period, data_source, visual_bucket, created_at
-      FROM ${bigQueryTableIdentifier()}
+      FROM ${getBigQueryTableIdentifier(BIGQUERY_TABLES.masterData)}
       WHERE submarket_id = @submarketId
       ORDER BY time_period DESC, created_at DESC
       LIMIT @rowLimit
@@ -265,7 +255,7 @@ export async function fetchAreaRows(
   return runBigQueryQuery(
     `
       SELECT submarket_id, metric_name, metric_value, time_period, data_source, visual_bucket, created_at
-      FROM ${bigQueryTableIdentifier()}
+      FROM ${getBigQueryTableIdentifier(BIGQUERY_TABLES.masterData)}
       WHERE submarket_id IN UNNEST(@submarketIds)
       ORDER BY submarket_id ASC, time_period DESC, created_at DESC
       LIMIT @rowLimit
@@ -299,7 +289,7 @@ export async function fetchMetricSeriesFromBigQuery(
   const rows = await runBigQueryQuery(
     `
       SELECT submarket_id, metric_name, metric_value, time_period, data_source, visual_bucket, created_at
-      FROM ${bigQueryTableIdentifier()}
+      FROM ${getBigQueryTableIdentifier(BIGQUERY_TABLES.masterData)}
       WHERE submarket_id = @submarketId
         AND metric_name = @metricName
         AND time_period IS NOT NULL

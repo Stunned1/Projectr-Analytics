@@ -14,7 +14,6 @@ export interface BigQueryModule {
 export interface BigQueryReadConfig {
   projectId: string | null
   datasetId: string
-  tableId: string
   location: string
   warmRetentionMonths: number
   isConfigured: boolean
@@ -43,24 +42,22 @@ function clientOptions() {
 export function getBigQueryReadConfig(): BigQueryReadConfig {
   const projectId = readEnv('BIGQUERY_PROJECT_ID') ?? readEnv('GOOGLE_CLOUD_PROJECT') ?? null
   const datasetId = readEnv('BIGQUERY_DATASET_ID') ?? ''
-  const tableId = readEnv('BIGQUERY_TABLE_ID') ?? ''
   const location = readEnv('BIGQUERY_LOCATION') ?? 'US'
 
   return {
     projectId,
     datasetId,
-    tableId,
     location,
     warmRetentionMonths: warmMonthsRetention(),
     // ADC-backed environments may not provide an explicit project env up front.
-    isConfigured: Boolean(datasetId && tableId),
+    isConfigured: Boolean(datasetId),
   }
 }
 
-export function getBigQueryTablePath(): string | null {
+export function getBigQueryTablePath(tableId: string): string | null {
   const config = getBigQueryReadConfig()
   if (!config.isConfigured || !config.projectId) return null
-  return `${config.projectId}.${config.datasetId}.${config.tableId}`
+  return `${config.projectId}.${config.datasetId}.${tableId}`
 }
 
 export async function getBigQueryClient(

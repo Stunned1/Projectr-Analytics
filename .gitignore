@@ -10,3 +10,5 @@ nyc_permits.jsonl
 projectr_master_data.jsonl
 zillow_zori_monthly.jsonl
 .worktrees/
+projectr-analytics/.next-dev.out.log
+projectr-analytics/.next-dev.err.log
