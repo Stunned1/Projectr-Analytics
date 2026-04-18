@@ -13,8 +13,8 @@ Track the full multi-phase convergence effort described by `dev/agent-planning.m
 
 ## Current Focus
 
-- Run final verification and documentation updates for the first implemented Phase 1 vertical slice.
-- Record the current placeholder scope and the next follow-up needed for router-backed real chart data.
+- Verify the shared-chart adoption in the report/PDF path and keep reducing bespoke chart payload construction.
+- Keep tightening which analytical prompts and export surfaces receive real shared-contract charts versus explicitly flagged fallbacks.
 - Keep this worklog updated as each planning or implementation change lands.
 
 ## Completed
@@ -30,14 +30,17 @@ Track the full multi-phase convergence effort described by `dev/agent-planning.m
 - Added `projectr-analytics/components/ScoutChartCard.tsx` and rendered chart output inside the live assistant terminal flow.
 - Bridged imported-data chart previews onto the shared chart contract through `projectr-analytics/lib/client-upload-presentation.ts`.
 - Added targeted Phase 1 tests for the chart contract, agent response shape, and imported-data bridge.
+- Added the first router-backed chart path for active-ZIP unemployment or permit trend prompts in `/api/agent`, while leaving rent-trend prompts on the explicit placeholder path for now.
+- Added a grounded rent-trend chart path in `/api/agent` that reuses the persisted Zillow monthly series helper for active ZIP prompts.
+- Added `projectr-analytics/lib/report/scout-chart-pdf-adapter.ts` so the market report PDF now derives its rent, permit, and search-trends charts from the shared chart contract before rendering them through the existing React PDF chart components.
 
 ## Remaining By Phase
 
 ### Phase 1
 
-- Replace the temporary placeholder chart series in `/api/agent` with router-backed historical data for at least one real analytical prompt.
-- Decide whether the next shared-contract adapter after imported-data previews should be report/PDF charts or another live analysis surface.
 - Add broader verification for the new chart card if we want explicit component-level coverage beyond the current contract and bridge tests.
+- Reduce placeholder fallbacks further so only unsupported or insufficient-data trend prompts use them.
+- Decide whether the next shared-contract adapter after the market PDF should be the case-brief PDF or another live analysis surface.
 
 ### Phase 2
 
@@ -72,6 +75,7 @@ Track the full multi-phase convergence effort described by `dev/agent-planning.m
 - The current agent contract and persisted UI flow must remain backward-compatible while chart and citation fields are introduced.
 - Available external data sources may lag behind integration work, so some Phase 1 contract paths may need temporary placeholders.
 - The current `/api/agent` chart payload is intentionally placeholder-backed for trend-style prompts; the next pass needs router-backed real series before the feature should be treated as analyst-ready evidence.
+- `/api/agent` now has grounded rent and unemployment/permit chart paths for active ZIP prompts, but unsupported trend requests still use the explicit placeholder fallback when there is no wired historical source or not enough stored data.
 
 ## Open Questions
 
@@ -88,3 +92,6 @@ Track the full multi-phase convergence effort described by `dev/agent-planning.m
 - Added the Phase 1 implementation plan in `docs/superpowers/plans/2026-04-18-agent-convergence-phase1.md` and began inline execution in this worktree.
 - Implemented the first Phase 1 vertical slice: shared chart contract, optional charted `/api/agent` responses, assistant-terminal chart rendering, and imported-data chart bridging.
 - Verified the targeted Phase 1 tests for the chart contract, agent response shape, and imported-data bridge after installing dependencies in this worktree.
+- Added and verified the first real router-backed chart response in `/api/agent` for active-ZIP unemployment or permit trend prompts.
+- Added and verified a grounded Zillow monthly rent-trend chart response in `/api/agent` for active-ZIP rent prompts.
+- Added and verified a report-side shared-chart adapter so the market PDF chart inputs now flow through `ScoutChartOutput` before React PDF rendering.

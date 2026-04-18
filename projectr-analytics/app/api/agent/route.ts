@@ -17,6 +17,7 @@ import { buildEdaContextString, buildFallbackEdaResponse, inferEdaTaskType } fro
 import { evaluateAgentRequestPolicy } from '@/lib/agent-request-policy'
 import { GEMINI_NO_EM_DASH_RULE } from '@/lib/gemini-text-rules'
 import { normalizeScoutChartOutput, type ScoutChartOutput } from '@/lib/scout-chart-output'
+import type { MasterDataRow } from '@/lib/data/types'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -222,6 +223,192 @@ type AgentPipelineResult = {
   steps?: AgentStep[]
   trace: AgentTrace
   chart?: ScoutChartOutput | null
+}
+
+type MetricSeriesFetcher = (args: {
+  submarketId: string
+  metricName: string
+  startDate: string
+  dataSource?: string | readonly string[]
+  limit?: number
+}) => Promise<MasterDataRow[]>
+
+type ZoriMonthlyFetcher = (zip: string, maxMonths?: number) => Promise<Array<{ date: string; value: number }>>
+
+type RouterChartIntent = {
+  metricName: string
+  dataSource: string | readonly string[]
+  titleMetric: string
+  yAxisLabel: string
+}
+
+function inferRouterChartIntent(userMessage: string): RouterChartIntent | null {
+  const prompt = userMessage.toLowerCase()
+  const wantsTrend = /\b(trend|over time|history|timeline)\b/.test(prompt)
+  if (!wantsTrend) return null
+
+  if (/\bunemployment|employment|labor\b/.test(prompt)) {
+    return {
+      metricName: 'Unemployment_Rate',
+      dataSource: 'FRED',
+      titleMetric: 'unemployment',
+      yAxisLabel: 'Unemployment rate',
+    }
+  }
+
+  if (/\bpermit|permits|construction\b/.test(prompt)) {
+    return {
+      metricName: 'Permit_Units',
+      dataSource: 'Census BPS',
+      titleMetric: 'permits',
+      yAxisLabel: 'Permit units',
+    }
+  }
+
+  return null
+}
+
+function wantsRentTrend(userMessage: string): boolean {
+  const prompt = userMessage.toLowerCase()
+  return /\b(trend|over time|history|timeline)\b/.test(prompt) && /\b(rent|rents|zori)\b/.test(prompt)
+}
+
+async function defaultMetricSeriesFetcher(args: {
+  submarketId: string
+  metricName: string
+  startDate: string
+  dataSource?: string | readonly string[]
+  limit?: number
+}) {
+  const { getMetricSeries } = await import('@/lib/data/market-data-router')
+  return getMetricSeries(args)
+}
+
+async function defaultZoriMonthlyFetcher(zip: string, maxMonths = 24) {
+  const { fetchZoriMonthlyForZip } = await import('@/lib/report/fetch-zori-series')
+  return fetchZoriMonthlyForZip(zip, maxMonths)
+}
+
+async function buildRentTrendChart(
+  userMessage: string,
+  context: MapContext | null,
+  fetchZoriMonthly: ZoriMonthlyFetcher = defaultZoriMonthlyFetcher
+): Promise<ScoutChartOutput | null> {
+  const zip = context?.zip?.trim()
+  if (!zip || !wantsRentTrend(userMessage)) return null
+
+  const series = await fetchZoriMonthly(zip, 24)
+  if (series.length < 2) return null
+
+  const label = context?.label ?? zip
+
+  return normalizeScoutChartOutput({
+    kind: 'line',
+    title: `${label} rent trend`,
+    subtitle: 'Monthly Zillow Research history',
+    summary: 'Grounded rent history from the persisted Zillow monthly series.',
+    placeholder: false,
+    confidenceLabel: 'zillow monthly history',
+    xAxis: { key: 'period', label: 'Period' },
+    yAxis: { label: 'ZORI', valueFormat: 'currency' },
+    series: [
+      {
+        key: 'zori',
+        label: 'ZORI',
+        color: '#D76B3D',
+        points: series.map((point) => ({ x: point.date, y: point.value })),
+      },
+    ],
+    citations: [
+      {
+        id: `zori-monthly-${zip}`,
+        label: 'Zillow Research',
+        sourceType: 'internal_dataset',
+        scope: zip,
+        note: 'Monthly ZORI series from zillow_zori_monthly.',
+        periodLabel: `${series[0]!.date} to ${series[series.length - 1]!.date}`,
+      },
+    ],
+  })
+}
+
+export async function buildRentTrendChartForTest(
+  userMessage: string,
+  context: MapContext | null,
+  fetchZoriMonthly: ZoriMonthlyFetcher
+) {
+  return buildRentTrendChart(userMessage, context, fetchZoriMonthly)
+}
+
+async function buildRouterBackedChart(
+  userMessage: string,
+  context: MapContext | null,
+  fetchMetricSeries: MetricSeriesFetcher = defaultMetricSeriesFetcher
+): Promise<ScoutChartOutput | null> {
+  const intent = inferRouterChartIntent(userMessage)
+  const submarketId = context?.zip?.trim()
+  if (!intent || !submarketId) return null
+
+  const rows = await fetchMetricSeries({
+    submarketId,
+    metricName: intent.metricName,
+    dataSource: intent.dataSource,
+    startDate: '2024-01-01',
+    limit: 60,
+  })
+
+  const points = rows
+    .filter((row) => row.time_period && row.metric_value != null)
+    .map((row) => ({
+      x: row.time_period!.slice(0, 7),
+      y: row.metric_value as number,
+      source: row.data_source,
+    }))
+
+  if (points.length < 2) return null
+
+  const sourceLabel = points[0]?.source ?? (Array.isArray(intent.dataSource) ? intent.dataSource[0] : intent.dataSource)
+  const label = context?.label ?? submarketId
+
+  return normalizeScoutChartOutput({
+    kind: 'line',
+    title: `${label} ${intent.titleMetric} trend`,
+    subtitle: 'Historical series from the shared market-data router',
+    summary: `Grounded ${intent.titleMetric} history for the active ZIP from the shared analytical read path.`,
+    placeholder: false,
+    confidenceLabel: 'router-backed series',
+    xAxis: { key: 'period', label: 'Period' },
+    yAxis: {
+      label: intent.yAxisLabel,
+      valueFormat: intent.metricName === 'Unemployment_Rate' ? 'percent' : 'number',
+    },
+    series: [
+      {
+        key: intent.metricName,
+        label: intent.yAxisLabel,
+        color: '#D76B3D',
+        points: points.map(({ x, y }) => ({ x, y })),
+      },
+    ],
+    citations: [
+      {
+        id: `${intent.metricName.toLowerCase()}-${submarketId}`,
+        label: sourceLabel,
+        sourceType: 'internal_dataset',
+        scope: submarketId,
+        note: `${intent.metricName} returned through market-data-router.`,
+        periodLabel: `${points[0]!.x} to ${points[points.length - 1]!.x}`,
+      },
+    ],
+  })
+}
+
+export async function buildRouterBackedChartForTest(
+  userMessage: string,
+  context: MapContext | null,
+  fetchMetricSeries: MetricSeriesFetcher
+) {
+  return buildRouterBackedChart(userMessage, context, fetchMetricSeries)
 }
 
 function maybeBuildFallbackChart(userMessage: string, context: MapContext | null): ScoutChartOutput | null {
@@ -594,7 +781,10 @@ async function runAgentPipeline(context: MapContext | null, userMessage: string)
   const taskType = inferEdaTaskType(userMessage, context)
 
   if (!process.env.GEMINI_API_KEY) {
-    const chart = maybeBuildFallbackChart(userMessage, context)
+    const chart =
+      (await buildRentTrendChart(userMessage, context)) ??
+      (await buildRouterBackedChart(userMessage, context)) ??
+      maybeBuildFallbackChart(userMessage, context)
     return {
       message: fallback.message,
       action: { type: 'none' as const },
@@ -607,7 +797,10 @@ async function runAgentPipeline(context: MapContext | null, userMessage: string)
 
   try {
     const contextStr = buildEdaContextString(userMessage, context)
-    const chart = maybeBuildFallbackChart(userMessage, context)
+    const chart =
+      (await buildRentTrendChart(userMessage, context)) ??
+      (await buildRouterBackedChart(userMessage, context)) ??
+      maybeBuildFallbackChart(userMessage, context)
     const result = await model.generateContent(
       `${contextStr}\n\nDETERMINISTIC FALLBACK TRACE (use as the minimum evidence floor; you may rephrase but not contradict it):\n${JSON.stringify(
         {
@@ -636,7 +829,10 @@ async function runAgentPipeline(context: MapContext | null, userMessage: string)
       chart,
     }
   } catch {
-    const chart = maybeBuildFallbackChart(userMessage, context)
+    const chart =
+      (await buildRentTrendChart(userMessage, context)) ??
+      (await buildRouterBackedChart(userMessage, context)) ??
+      maybeBuildFallbackChart(userMessage, context)
     return {
       message: fallback.message,
       action: { type: 'none' as const },

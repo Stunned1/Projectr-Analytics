@@ -13,6 +13,13 @@ import { CycleSignalTilesPdf, CycleWheelPdf } from './pdf-cycle-visual'
 import { PdfTrendArrow, trendKindToVariant, signalIndicatorToVariant } from './pdf-trend-arrow'
 import type { ZoriSeriesSource } from './fetch-zori-series'
 import { METHODOLOGY_PDF_ROWS } from '@/lib/metric-definitions'
+import {
+  buildPdfBarRowsFromScoutChart,
+  buildPdfSeriesFromScoutChart,
+  buildPermitUnitsChart,
+  buildSearchTrendsChart,
+  buildZoriTrendChart,
+} from './scout-chart-pdf-adapter'
 
 /** A4 content width (595.28pt − 40pt padding × 2). Fixed pt width fixes @react-pdf Text wrap. */
 const PDF_CONTENT_WIDTH_PT = 515
@@ -322,11 +329,15 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
     },
   ]
 
-  const permitBars = payload.permits.by_year.map((y) => ({ label: y.year, value: y.units }))
-
+  const zoriChart = buildZoriTrendChart(zoriSeries, payload.marketLabel, zoriSeriesSource)
+  const permitChart = buildPermitUnitsChart(payload.permits.by_year)
   const trends12 = [...trendsSeries]
     .sort((a, b) => a.date.localeCompare(b.date))
     .slice(-12)
+  const trendsChart = buildSearchTrendsChart(trends12, payload.trends.keyword_scope)
+  const pdfZoriSeries = buildPdfSeriesFromScoutChart(zoriChart)
+  const pdfPermitBars = buildPdfBarRowsFromScoutChart(permitChart)
+  const pdfTrendsSeries = buildPdfSeriesFromScoutChart(trendsChart)
 
   return (
     <Document title={`Scout Brief - ${payload.marketLabel}`} author="Scout">
@@ -614,10 +625,10 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
         <Text style={styles.sectionTitle}>
           Rent trajectory (ZORI - {zoriSeriesSource === 'zillow_monthly' ? 'monthly, Zillow Research' : 'modeled from latest + YoY'})
         </Text>
-        <SparklinePdf data={zoriSeries} width={PDF_CONTENT_WIDTH_PT} height={68} />
+        <SparklinePdf data={pdfZoriSeries} width={PDF_CONTENT_WIDTH_PT} height={68} />
 
         <Text style={styles.sectionTitle}>Permit acceleration (Census BPS, county)</Text>
-        <BarChartPdf bars={permitBars} width={PDF_CONTENT_WIDTH_PT} height={108} />
+        <BarChartPdf bars={pdfPermitBars} width={PDF_CONTENT_WIDTH_PT} height={108} />
       </Page>
 
       {/* Data page 2 - trends + data footnotes (avoids chart stack overflow) */}
@@ -631,7 +642,7 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
         <Text style={{ fontSize: 7, color: muted, marginBottom: 4, width: PDF_CONTENT_WIDTH_PT }} wrap>
           {payload.trends.keyword_scope}
         </Text>
-        <SparklinePdf data={trends12} width={PDF_CONTENT_WIDTH_PT} height={68} color="#64748b" />
+        <SparklinePdf data={pdfTrendsSeries} width={PDF_CONTENT_WIDTH_PT} height={68} color="#64748b" />
 
         <Text style={[styles.foot, { marginTop: 14, width: PDF_CONTENT_WIDTH_PT }]} wrap hyphenationCallback={(word) => [word]}>
           FRED uses the first ZIP&apos;s county; the employment row prefers a computed employment rate when labor-force

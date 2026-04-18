@@ -196,6 +196,8 @@ _04.18.2026_
 - `/api/agent` is now a bounded EDA assistant with deterministic market/upload summaries, metric explanations, and a direct map-control lane for explicit search, layer, tilt, and panel requests instead of the old default multi-step reasoning flow.
 - `/api/agent` now routes prompts through a shared intent classifier before choosing either the bounded EDA lane or the explicit map-control lane, keeping blocked/off-topic prompts, direct map commands, and analysis requests on one contract.
 - Added the Phase 1 Scout chart and citation contract, extended `/api/agent` plus its NDJSON stream to return optional chart payloads with trace citations, and kept the response backward-compatible for text-only flows.
+- `/api/agent` now uses the shared market-data router to return grounded unemployment or permit trend charts for active ZIP prompts, while unsupported trend requests still fall back to explicitly flagged placeholder series.
+- `/api/agent` now also reuses the persisted `zillow_zori_monthly` history for grounded active-ZIP rent trend charts instead of treating rent trends as placeholder-only responses.
 
 **Bug Fixes**
 
@@ -284,6 +286,7 @@ _04.16.2026_
 
 _04.18.2026_
 - Added a shared `recharts`-based Scout chart card with citation footer rendering in the live assistant terminal and bridged imported-data chart previews onto the same chart contract.
+- The market report PDF now routes its rent, permit, and search-trends chart inputs through the shared Scout chart contract before rendering them with the existing React PDF chart components.
 
 ## Known Bugs
 
