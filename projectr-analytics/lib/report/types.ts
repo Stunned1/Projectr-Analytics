@@ -14,6 +14,7 @@ export interface MapLayersSnapshot {
   amenityHeatmap: boolean
   floodRisk: boolean
   nycPermits: boolean
+  permitH3: boolean
   clientData: boolean
   choroplethMetric: ChoroplethMetric
 }

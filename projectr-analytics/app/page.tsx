@@ -609,6 +609,7 @@ const DEFAULT_MAP_LAYERS: MapLayersSnapshot = {
   amenityHeatmap: false,
   floodRisk: false,
   nycPermits: false,
+  permitH3: false,
   clientData: false,
   choroplethMetric: 'zori',
 }
@@ -988,6 +989,7 @@ export default function Home() {
         amenityHeatmap: mapLayersSnapshot.amenityHeatmap,
         floodRisk: mapLayersSnapshot.floodRisk,
         permits: mapLayersSnapshot.nycPermits,
+        permitH3: mapLayersSnapshot.permitH3,
         clientData: mapLayersSnapshot.clientData,
       }
       const activeLayerKeys = Object.entries(contextLayers)

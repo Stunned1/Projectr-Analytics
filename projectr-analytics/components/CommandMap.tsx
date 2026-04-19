@@ -6,8 +6,10 @@ import { APIProvider, Map, useMap } from '@vis.gl/react-google-maps'
 import { GoogleMapsOverlay } from '@deck.gl/google-maps'
 import { GeoJsonLayer, ScatterplotLayer, ColumnLayer, PathLayer } from '@deck.gl/layers'
 import { HeatmapLayer } from '@deck.gl/aggregation-layers'
+import { H3HexagonLayer } from '@deck.gl/geo-layers'
 import type { Layer, PickingInfo } from '@deck.gl/core'
 import type { GeoJSON, Feature, FeatureCollection, Geometry } from 'geojson'
+import { latLngToCell } from 'h3-js'
 import { Layers } from 'lucide-react'
 import { dedupedFetchJson } from '@/lib/request-cache'
 import type { Site } from '@/lib/sites-store'
@@ -128,6 +130,7 @@ export interface LayerState {
   amenityHeatmap: boolean
   floodRisk: boolean
   nycPermits: boolean
+  permitH3: boolean
   pois: boolean
   momentum: boolean
   clientData: boolean
@@ -148,6 +151,7 @@ const DEFAULT_LAYER_STATE: LayerState = {
   amenityHeatmap: false,
   floodRisk: false,
   nycPermits: false,
+  permitH3: false,
   pois: false,
   momentum: false,
   clientData: true,
@@ -170,6 +174,7 @@ const LAYER_DOT_INDICATORS: Array<{
   { key: 'amenityHeatmap', color: '#facc15', label: 'Amenity' },
   { key: 'floodRisk', color: '#f87171', label: 'Flood' },
   { key: 'nycPermits', color: '#D76B3D', label: 'Permits' },
+  { key: 'permitH3', color: '#f59e0b', label: 'Permits H3' },
   { key: 'pois', color: '#f59e0b', label: 'POIs' },
   { key: 'momentum', color: '#d946ef', label: 'Momentum' },
   { key: 'clientData', color: '#D76B3D', label: 'Client markers', needsClientMarkers: true },
@@ -287,6 +292,12 @@ interface TexasRawPermitResponse {
   permits: TexasRawPermitPayload[]
 }
 
+type AustinPermitH3Cell = {
+  hex: string
+  count: number
+  weight: number
+}
+
 const TEXAS_RAW_PERMIT_FILTER_META = [
   { key: 'new_construction' as const, label: 'New', color: '#D76B3D' },
   { key: 'major_renovation' as const, label: 'Major Reno', color: '#60a5fa' },
@@ -382,6 +393,47 @@ function getTexasRawPermitElevation(permit: TexasRawPermitPayload): number {
     Math.log10(squareFeet + 1) * 14 +
     units * 10
   )
+}
+
+function getAustinPermitH3Resolution(zoom: number): number {
+  if (zoom >= 12) return 10
+  if (zoom >= 10.75) return 9
+  return 8
+}
+
+function buildAustinPermitH3Cells(
+  permits: TexasRawPermitPayload[],
+  resolution: number
+): AustinPermitH3Cell[] {
+  const byHex = new globalThis.Map<string, AustinPermitH3Cell>()
+
+  for (const permit of permits) {
+    if (!Number.isFinite(permit.lat) || !Number.isFinite(permit.lng)) continue
+    const hex = latLngToCell(permit.lat, permit.lng, resolution)
+    const existing = byHex.get(hex)
+    if (existing) {
+      existing.count += 1
+      existing.weight += getTexasRawPermitWeight(permit.category)
+      continue
+    }
+    byHex.set(hex, {
+      hex,
+      count: 1,
+      weight: getTexasRawPermitWeight(permit.category),
+    })
+  }
+
+  return Array.from(byHex.values())
+}
+
+function getAustinPermitH3FillColor(cell: AustinPermitH3Cell): [number, number, number, number] {
+  const intensity = Math.min(Math.log2(cell.count + 1) / 3, 1)
+  return [
+    Math.round(70 + intensity * 145),
+    Math.round(28 + intensity * 79),
+    Math.round(16 + intensity * 45),
+    Math.round(120 + intensity * 110),
+  ]
 }
 
 function formatPermitDate(value: string | null | undefined): string | null {
@@ -843,6 +895,12 @@ function CommandMap({
     }).toString()
   }, [activeStateAbbr, texasPermitScope])
   const usingTexasRawPermits = !nycFeatureAvailable && texasRawPermitData.length > 0
+  const usingAustinTexasRawPermits = useMemo(
+    () =>
+      usingTexasRawPermits &&
+      (texasRawPermitData[0]?.source_city?.trim().toLowerCase() ?? null) === 'austin',
+    [texasRawPermitData, usingTexasRawPermits]
+  )
   const texasRawPermitExactCount = useMemo(
     () =>
       texasRawPermitData.filter((permit) => permit.location_precision === 'source_coordinates').length,
@@ -900,9 +958,12 @@ function CommandMap({
     if (!permitFeatureAvailable) {
       merged.nycPermits = false
     }
+    if (!merged.nycPermits || !usingAustinTexasRawPermits) {
+      merged.permitH3 = false
+    }
     delete merged.permits
     return merged as LayerState
-  }, [localLayers, agentLayerOverrides, nycFeatureAvailable, permitFeatureAvailable])
+  }, [localLayers, agentLayerOverrides, nycFeatureAvailable, permitFeatureAvailable, usingAustinTexasRawPermits])
   const momentumEnabled = Boolean(effectiveLayers.momentum)
   const momentumZips = useMemo(
     () =>
@@ -1796,7 +1857,40 @@ function CommandMap({
           const texasRawPermit3DZoomThreshold = 13
 
           if (mapZoom < texasRawPermit3DZoomThreshold || exactRawPermits.length === 0) {
-            if (rawHeatData.length > 0) {
+            if (effectiveLayers.permitH3 && usingAustinTexasRawPermits && rawPermits.length > 0) {
+              const h3Cells = buildAustinPermitH3Cells(
+                rawPermits,
+                getAustinPermitH3Resolution(mapZoom)
+              )
+              if (h3Cells.length > 0) {
+                result.push(
+                  new H3HexagonLayer({
+                    id: 'austin-raw-permit-h3',
+                    data: h3Cells,
+                    pickable: true,
+                    stroked: true,
+                    filled: true,
+                    extruded: false,
+                    getHexagon: (d: AustinPermitH3Cell) => d.hex,
+                    getFillColor: (d: AustinPermitH3Cell) => getAustinPermitH3FillColor(d),
+                    getLineColor: [255, 230, 180, 190],
+                    lineWidthMinPixels: 1,
+                    onHover: (info: PickingInfo) => {
+                      const cell = info.object as AustinPermitH3Cell | undefined
+                      if (cell) {
+                        setTooltipStable({
+                          x: info.x,
+                          y: info.y,
+                          text: `Austin H3 cell · ${cell.count.toLocaleString()} filings`,
+                        })
+                      } else {
+                        setTooltipStable(null)
+                      }
+                    },
+                  })
+                )
+              }
+            } else if (rawHeatData.length > 0) {
               result.push(
                 new HeatmapLayer({
                   id: 'texas-raw-permit-heatmap',
@@ -2050,7 +2144,7 @@ function CommandMap({
     }
 
     return result
-  }, [visiblePrimaryBoundary, visibleNeighborBoundaries, visibleCityBoundaries, aggregateBoundaryGeoJson, boroughBoundary, transitStops, transitRoutes, parcelData, parcelColorMode, tractData, amenityPoints, poiPoints, floodData, nycPermitData, texasRawPermitData, texasPermitActivity, permitHeatPoints, permitTypeFilter, texasRawPermitCategoryFilter, agentPermitFilter, mapZoom, momentumScores, effectiveLayers, colorScale, primaryMetricValue, effectiveMetric, zip, setTooltipStable, uploadedMarkers, shortlistSites, analysisSites, nycFeatureAvailable, texasPermitAvailable, usingTexasRawPermits, onUploadedMarkerSelect])
+  }, [visiblePrimaryBoundary, visibleNeighborBoundaries, visibleCityBoundaries, aggregateBoundaryGeoJson, boroughBoundary, transitStops, transitRoutes, parcelData, parcelColorMode, tractData, amenityPoints, poiPoints, floodData, nycPermitData, texasRawPermitData, texasPermitActivity, permitHeatPoints, permitTypeFilter, texasRawPermitCategoryFilter, agentPermitFilter, mapZoom, momentumScores, effectiveLayers, colorScale, primaryMetricValue, effectiveMetric, zip, setTooltipStable, uploadedMarkers, shortlistSites, analysisSites, nycFeatureAvailable, texasPermitAvailable, usingTexasRawPermits, usingAustinTexasRawPermits, onUploadedMarkerSelect])
 
   const handleToggle = useCallback((key: keyof LayerState) => {
     const nextKey =
@@ -2433,6 +2527,13 @@ function CommandMap({
                 color: '#D76B3D',
                 showWhen: permitFeatureAvailable,
               },
+              {
+                key: 'permitH3' as const,
+                label: 'Permits H3',
+                color: '#f59e0b',
+                title: 'Austin only: show true H3 permit cells below the 3D zoom threshold.',
+                showWhen: usingAustinTexasRawPermits,
+              },
               { key: 'pois' as const, label: 'POIs', color: '#f59e0b' },
               { key: 'momentum' as const, label: 'Momentum', color: '#a78bfa' },
               { key: 'clientData' as const, label: 'Client', color: '#D76B3D', showWhen: !!uploadedMarkers?.length },
@@ -2593,14 +2694,22 @@ function CommandMap({
                 })}
               </div>
               <p className="text-[10px] leading-relaxed text-zinc-400 mt-1.5">
-                {texasRawPermitExactCount === texasRawPermitData.length
+                {usingAustinTexasRawPermits
+                  ? effectiveLayers.permitH3
+                    ? 'Austin raw permits are grouped into true H3 cells below zoom 13 and switch back to 3D pins when you zoom in.'
+                    : 'Austin raw permits keep the default heatmap below zoom 13; enable Permits H3 to inspect true H3 cells.'
+                  : texasRawPermitExactCount === texasRawPermitData.length
                   ? 'Raw permits are geocoded to address points and support 3D pins when you zoom in.'
                   : texasRawPermitExactCount > 0
                     ? `${texasRawPermitExactCount.toLocaleString()} permits are geocoded to address points; ${texasRawPermitApproximateCount.toLocaleString()} still fall back to ZIP centroids until the address cache is warmed.`
                     : 'Houston raw permits are still using ZIP-centroid fallbacks because the address geocode cache is not warm yet.'}
               </p>
               <p className="text-[9px] text-zinc-600 mt-1.5">
-                {texasRawPermitData.length.toLocaleString()} permits loaded · {mapZoom < 13 || usingApproximateOnlyTexasRawPermits ? `Heatmap · zoom ${Math.round(mapZoom)}` : `3D pins · zoom ${Math.round(mapZoom)}`}
+                {texasRawPermitData.length.toLocaleString()} permits loaded · {mapZoom < 13 || usingApproximateOnlyTexasRawPermits
+                  ? usingAustinTexasRawPermits && effectiveLayers.permitH3
+                    ? `H3 cells · zoom ${Math.round(mapZoom)}`
+                    : `Heatmap · zoom ${Math.round(mapZoom)}`
+                  : `3D pins · zoom ${Math.round(mapZoom)}`}
                 {mapZoom < 13 && texasRawPermitExactCount > 0 && <span className="text-zinc-700"> (zoom in for 3D)</span>}
               </p>
             </div>
