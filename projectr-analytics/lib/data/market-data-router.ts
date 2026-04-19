@@ -19,6 +19,8 @@ import {
 } from './bigquery-master-data'
 import { fetchZoriMonthlyForZip, type ZoriMonthlyPoint } from '../report/fetch-zori-series'
 import { normalizeBigQueryDateLike, warmMonthsRetention, type MasterDataRow } from './types'
+import { selectSpecializedHistorySource } from './source-registry'
+import type { TexasPermitHistorySeries } from './bigquery-eda-history'
 
 export interface MarketDataSeriesArgs {
   submarketId: string
@@ -99,6 +101,17 @@ export interface AnalyticalComparisonCitation {
   periodLabel?: string | null
 }
 
+export interface AnalyticalComparisonDebugEntry {
+  subject: AnalyticalSubject
+  selectedSourceId: string | null
+  selectedSourceLabel: string | null
+  specializedRowsFound: number
+  fallbackUsed: boolean
+  finalSourceId: string
+  finalSourceLabel: string
+  finalPointCount: number
+}
+
 export interface AnalyticalComparisonResult {
   comparisonMode: AnalyticalComparisonMode
   metric: AnalyticalMetric
@@ -106,6 +119,9 @@ export interface AnalyticalComparisonResult {
   timeWindow: NormalizedAnalyticalTimeWindow
   series: AnalyticalComparisonSeries[]
   citations: AnalyticalComparisonCitation[]
+  debug?: {
+    historySources: AnalyticalComparisonDebugEntry[]
+  }
 }
 
 export type AnalyticalMetricSeriesFetcher = (
@@ -117,6 +133,11 @@ export interface AnalyticalComparisonDependencies {
   now?: Date
   fetchMetricSeries?: AnalyticalMetricSeriesFetcher
   fetchRentSeries?: (zip: string, options: { startDate: string; maxMonths: number }) => Promise<AnalyticalComparisonPoint[]>
+  fetchSpecializedHistorySeries?: (
+    metric: AnalyticalMetric,
+    subject: AnalyticalSubject,
+    timeWindow: NormalizedAnalyticalTimeWindow
+  ) => Promise<TexasPermitHistorySeries | null>
 }
 
 interface AnalyticalMetricConfig {
@@ -223,13 +244,15 @@ function buildComparisonCitation(
   metric: AnalyticalMetric,
   subject: AnalyticalSubject,
   config: AnalyticalMetricConfig,
-  points: AnalyticalComparisonPoint[]
+  points: AnalyticalComparisonPoint[],
+  sourceLabelOverride?: string | null,
+  citationIdOverride?: string | null
 ): AnalyticalComparisonCitation {
   const firstPoint = points[0]?.x ?? null
   const lastPoint = points[points.length - 1]?.x ?? null
   return {
-    id: `${metric}:${subject.kind}:${subject.id}`,
-    label: config.sourceLabel,
+    id: citationIdOverride?.trim() || `${metric}:${subject.kind}:${subject.id}`,
+    label: sourceLabelOverride?.trim() || config.sourceLabel,
     sourceType: config.sourceType,
     note: `Historical series for ${subject.label}`,
     periodLabel: firstPoint && lastPoint ? `${firstPoint} to ${lastPoint}` : null,
@@ -251,25 +274,78 @@ async function defaultFetchRentSeries(
     .map((row) => ({ x: row.date, y: row.value }))
 }
 
+async function defaultFetchSpecializedHistorySeries(
+  metric: AnalyticalMetric,
+  subject: AnalyticalSubject,
+  timeWindow: NormalizedAnalyticalTimeWindow
+): Promise<TexasPermitHistorySeries | null> {
+  const specializedSource = selectSpecializedHistorySource(metric, subject, {
+    mode: timeWindow.mode,
+    startDate: timeWindow.startDate,
+  })
+  if (!specializedSource) return null
+
+  if (specializedSource.id === 'texas_permits') {
+    const { fetchTexasPermitHistorySeries } = await import('./bigquery-eda-history')
+    return fetchTexasPermitHistorySeries({
+      subject,
+      startDate: timeWindow.startDate,
+    })
+  }
+
+  return null
+}
+
+interface HistoricalSeriesResult {
+  points: AnalyticalComparisonPoint[]
+  sourceLabelOverride?: string | null
+  citationIdOverride?: string | null
+  selectedSourceId?: string | null
+  selectedSourceLabel?: string | null
+  specializedRowsFound?: number
+  fallbackUsed?: boolean
+}
+
 async function getHistoricalSeriesForMetric(
   metric: AnalyticalMetric,
   subject: AnalyticalSubject,
   timeWindow: NormalizedAnalyticalTimeWindow,
   dependencies: AnalyticalComparisonDependencies = {}
-): Promise<AnalyticalComparisonPoint[]> {
+): Promise<HistoricalSeriesResult> {
   const config = ANALYTICAL_METRIC_CONFIG[metric]
+  const specializedSource = selectSpecializedHistorySource(metric, subject, {
+    mode: timeWindow.mode,
+    startDate: timeWindow.startDate,
+  })
   if (metric === 'rent') {
     if (subject.kind !== 'zip') {
       throw new Error(`Rent history requires a ZIP subject, received ${subject.kind}`)
     }
 
     const fetchRentSeries = dependencies.fetchRentSeries ?? defaultFetchRentSeries
-    return normalizeComparisonPoints(
-      await fetchRentSeries(subject.id, {
-        startDate: timeWindow.startDate,
-        maxMonths: Math.max(timeWindow.monthsBack + 2, config.defaultWindowMonths),
-      })
-    )
+    return {
+      points: normalizeComparisonPoints(
+        await fetchRentSeries(subject.id, {
+          startDate: timeWindow.startDate,
+          maxMonths: Math.max(timeWindow.monthsBack + 2, config.defaultWindowMonths),
+        })
+      ),
+    }
+  }
+
+  const fetchSpecializedHistorySeries =
+    dependencies.fetchSpecializedHistorySeries ?? defaultFetchSpecializedHistorySeries
+  const specializedSeries = await fetchSpecializedHistorySeries(metric, subject, timeWindow)
+  if (specializedSeries && specializedSeries.points.length > 0) {
+    return {
+      points: normalizeComparisonPoints(specializedSeries.points),
+      sourceLabelOverride: specializedSeries.sourceLabel,
+      citationIdOverride: specializedSeries.sourceId,
+      selectedSourceId: specializedSeries.sourceId,
+      selectedSourceLabel: specializedSeries.sourceLabel,
+      specializedRowsFound: specializedSeries.points.length,
+      fallbackUsed: false,
+    }
   }
 
   const fetchMetricSeries = dependencies.fetchMetricSeries ?? getMetricSeries
@@ -279,14 +355,20 @@ async function getHistoricalSeriesForMetric(
     startDate: timeWindow.startDate,
   })
 
-  return normalizeComparisonPoints(
-    rows
-      .filter((row) => row.time_period != null && row.metric_value != null)
-      .map((row) => ({
-        x: row.time_period as string,
-        y: Number(row.metric_value),
-      }))
-  )
+  return {
+    points: normalizeComparisonPoints(
+      rows
+        .filter((row) => row.time_period != null && row.metric_value != null)
+        .map((row) => ({
+          x: row.time_period as string,
+          y: Number(row.metric_value),
+        }))
+    ),
+    selectedSourceId: specializedSource?.id ?? null,
+    selectedSourceLabel: specializedSource?.tableOrEndpoint ?? null,
+    specializedRowsFound: 0,
+    fallbackUsed: specializedSource != null,
+  }
 }
 
 export async function getAnalyticalComparison(
@@ -321,7 +403,15 @@ export async function getAnalyticalComparison(
   const comparisonSubjects = comparison ? [subject, comparison] : [subject]
   const series = await Promise.all(
     comparisonSubjects.map(async (candidate) => {
-      const points = await getHistoricalSeriesForMetric(metric, candidate, timeWindow, dependencies)
+      const {
+        points,
+        sourceLabelOverride,
+        citationIdOverride,
+        selectedSourceId,
+        selectedSourceLabel,
+        specializedRowsFound,
+        fallbackUsed,
+      } = await getHistoricalSeriesForMetric(metric, candidate, timeWindow, dependencies)
       if (points.length === 0) {
         throw new Error(`Insufficient historical data for ${candidate.label}`)
       }
@@ -331,8 +421,26 @@ export async function getAnalyticalComparison(
         label: candidate.label,
         subject: candidate,
         points,
+        sourceLabelOverride,
+        citationIdOverride,
+        selectedSourceId,
+        selectedSourceLabel,
+        specializedRowsFound,
+        fallbackUsed,
       } satisfies AnalyticalComparisonSeries
+        & {
+          sourceLabelOverride?: string | null
+          citationIdOverride?: string | null
+          selectedSourceId?: string | null
+          selectedSourceLabel?: string | null
+          specializedRowsFound?: number
+          fallbackUsed?: boolean
+        }
     })
+  )
+
+  const citations = series.map((entry) =>
+    buildComparisonCitation(metric, entry.subject, config, entry.points, entry.sourceLabelOverride, entry.citationIdOverride)
   )
 
   return {
@@ -341,7 +449,19 @@ export async function getAnalyticalComparison(
     metricLabel: config.metricLabel,
     timeWindow,
     series,
-    citations: series.map((entry) => buildComparisonCitation(metric, entry.subject, config, entry.points)),
+    citations,
+    debug: {
+      historySources: series.map((entry, index) => ({
+        subject: entry.subject,
+        selectedSourceId: entry.selectedSourceId ?? null,
+        selectedSourceLabel: entry.selectedSourceLabel ?? null,
+        specializedRowsFound: entry.specializedRowsFound ?? 0,
+        fallbackUsed: entry.fallbackUsed ?? false,
+        finalSourceId: citations[index]?.id ?? `${metric}:${entry.subject.kind}:${entry.subject.id}`,
+        finalSourceLabel: citations[index]?.label ?? config.sourceLabel,
+        finalPointCount: entry.points.length,
+      })),
+    },
   }
 }
 

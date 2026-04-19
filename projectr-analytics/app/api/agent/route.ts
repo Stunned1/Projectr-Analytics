@@ -5,8 +5,11 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { normalizeAgentTrace } from '@/lib/agent-trace'
+import { validateAgentGroundingPayloadWithService } from '@/lib/agent-grounding-validator'
 import type {
   AgentAction,
+  AgentDriveTimeEvidenceResult,
+  AgentDriveTimeQuery,
   AgentHistoryMetric,
   AgentHistorySubject,
   AgentHistoryTimeWindow,
@@ -24,11 +27,22 @@ import {
 import { buildEdaContextString, buildFallbackEdaResponse, inferEdaTaskType } from '@/lib/eda-assistant'
 import { evaluateAgentRequestPolicy } from '@/lib/agent-request-policy'
 import { GEMINI_NO_EM_DASH_RULE } from '@/lib/gemini-text-rules'
+import { retrievePublicMacroEvidence } from '@/lib/agent-public-grounding'
+import { retrieveInternalEvidence, type AgentInternalEvidenceResult } from '@/lib/agent-internal-grounding'
 import { buildCountyAreaKey, buildMetroAreaKey, normalizeCountyDisplayName, normalizeMetroDisplayName } from '@/lib/area-keys'
-import { normalizeScoutChartOutput, type ScoutChartOutput } from '@/lib/scout-chart-output'
+import { normalizeScoutChartOutput, type ScoutChartCitation, type ScoutChartOutput } from '@/lib/scout-chart-output'
 import type { AnalyticalComparisonRequest, AnalyticalComparisonResult } from '@/lib/data/market-data-router'
 import type { MasterDataRow } from '@/lib/data/types'
 import { normalizeUsStateToAbbr, splitTrailingUsState } from '@/lib/us-state-abbr'
+import type {
+  AgentInternalProvenanceQuery,
+  AgentPublicMacroEvidenceResult,
+  AgentPlaceGroundingQuery,
+  AgentPublicMacroMetric,
+  AgentPublicMacroQuery,
+} from '@/lib/agent-types'
+import type { AgentPlaceGroundingEvidenceResult } from '@/lib/agent-types'
+import { retrieveDriveTimeGrounding } from '@/lib/agent-drive-time-grounding'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -67,6 +81,9 @@ STYLE RULES:
 - No markdown.
 - No prose outside JSON.
 - Do not invent rows, metrics, benchmarks, or causal claims.
+- When a quantitative claim is grounded, tag the claim with a source label in the message text using the format [source: Source Label].
+- Also mention the source label in the trace evidence or methodology when it is available.
+- Do not present uncited quantitative claims as grounded facts.
 
 ${GEMINI_NO_EM_DASH_RULE}`
 
@@ -234,6 +251,82 @@ type AgentPipelineResult = {
   steps?: AgentStep[]
   trace: AgentTrace
   chart?: ScoutChartOutput | null
+}
+
+type AgentCitation = ScoutChartOutput['citations'][number]
+
+function getCanonicalEvidenceCitations(result: AgentPipelineResult): AgentCitation[] {
+  return result.chart?.citations?.length ? result.chart.citations : result.trace.citations ?? []
+}
+
+function hasSyntheticEvidenceSignal(result: AgentPipelineResult, citations: readonly AgentCitation[]): boolean {
+  return (
+    result.chart?.placeholder === true ||
+    citations.some((citation) => citation.placeholder === true || citation.sourceType === 'placeholder')
+  )
+}
+
+const SOURCE_TAGGED_SENTENCE_PATTERN = /\[source:[^\]]+\]/i
+const QUANTITATIVE_SENTENCE_PATTERN =
+  /\$[\d,]+|\b\d{1,3}(?:,\d{3})+(?:\.\d+)?\b|\b\d+(?:\.\d+)?%|\b\d+(?:\.\d+)?\s*(?:hours?|hrs?|minutes?|mins?|mi|miles?)\b|\b-?\d{1,3}\.\d{2,}\s*,\s*-?\d{1,3}\.\d{2,}\b/
+
+function tagQuantitativeClaims(message: string, citations: readonly AgentCitation[]): string {
+  const sourceLabels = Array.from(
+    new Set(
+      citations
+        .map((citation) => citation.label.trim())
+        .filter((label) => label.length > 0)
+    )
+  )
+  if (sourceLabels.length === 0) return message
+
+  const sourceTag = `[source: ${sourceLabels.slice(0, 2).join('; ')}]`
+  return message.replace(/[^.!?]+[.!?]?/g, (sentence) => {
+    if (!QUANTITATIVE_SENTENCE_PATTERN.test(sentence) || SOURCE_TAGGED_SENTENCE_PATTERN.test(sentence)) {
+      return sentence
+    }
+
+    const trimmed = sentence.trimEnd()
+    const punctuationMatch = trimmed.match(/[.!?]$/)
+    const punctuation = punctuationMatch?.[0] ?? null
+    if (!punctuation) return `${trimmed} ${sourceTag}`
+    return `${trimmed.slice(0, -1)} ${sourceTag}${punctuation}`
+  })
+}
+
+async function finalizeAgentPipelineResult(result: AgentPipelineResult): Promise<AgentPipelineResult> {
+  const citations = getCanonicalEvidenceCitations(result)
+  const taggedMessage = tagQuantitativeClaims(result.message, citations)
+  const grounding = await validateAgentGroundingPayloadWithService({
+    message: taggedMessage,
+    trace: result.trace,
+    chart: result.chart,
+    synthetic: hasSyntheticEvidenceSignal(result, citations),
+  })
+  const trace: AgentTrace = {
+    ...result.trace,
+    citations: grounding.normalizedEvidence.citations,
+  }
+
+  if (grounding.validation.status === 'synthetic' || !grounding.validation.suppressGroundedChart) {
+    return {
+      ...result,
+      message: taggedMessage,
+      trace,
+    }
+  }
+
+  const evidenceMessage = grounding.validation.userMessage?.trim() ?? ''
+
+  return {
+    ...result,
+    message: evidenceMessage ? `${taggedMessage} ${evidenceMessage}`.trim() : taggedMessage,
+    chart: null,
+    trace: {
+      ...trace,
+      caveats: evidenceMessage ? [...(trace.caveats ?? []), evidenceMessage] : trace.caveats,
+    },
+  }
 }
 
 type MetricSeriesFetcher = (args: {
@@ -424,6 +517,10 @@ export async function buildRouterBackedChartForTest(
 
 type HistoryComparisonDependencies = {
   getAnalyticalComparison?: (request: AnalyticalComparisonRequest) => Promise<AnalyticalComparisonResult>
+  getInternalEvidence?: (query: AgentInternalProvenanceQuery) => Promise<AgentInternalEvidenceResult>
+  getPublicMacroEvidence?: (query: AgentPublicMacroQuery) => Promise<AgentPublicMacroEvidenceResult>
+  getPlaceGrounding?: (query: AgentPlaceGroundingQuery) => Promise<AgentPlaceGroundingEvidenceResult>
+  getDriveTimeGrounding?: (query: AgentDriveTimeQuery) => Promise<AgentDriveTimeEvidenceResult>
 }
 
 const HISTORY_METRIC_CONFIG: Record<
@@ -456,7 +553,10 @@ const HISTORY_METRIC_CONFIG: Record<
 }
 
 function hasHistoryIntent(userMessage: string): boolean {
-  return /\b(history|trend|trends|timeline|over time|time series|changed|change)\b/i.test(userMessage)
+  return (
+    /\b(history|trend|trends|timeline|over time|time series|changed|change)\b/i.test(userMessage) ||
+    /\b(?:last|past)\s+\d+\s+(?:year|years|month|months)\b/i.test(userMessage)
+  )
 }
 
 function hasPeerComparisonIntent(userMessage: string): boolean {
@@ -465,7 +565,6 @@ function hasPeerComparisonIntent(userMessage: string): boolean {
 
 function detectHistoryMetric(userMessage: string): AgentHistoryMetric | null {
   const prompt = userMessage.toLowerCase()
-  if (!hasHistoryIntent(prompt)) return null
 
   for (const [metric, config] of Object.entries(HISTORY_METRIC_CONFIG) as Array<
     [AgentHistoryMetric, (typeof HISTORY_METRIC_CONFIG)[AgentHistoryMetric]]
@@ -480,8 +579,32 @@ function defaultHistoryWindow(metric: AgentHistoryMetric): AgentHistoryTimeWindo
   return HISTORY_METRIC_CONFIG[metric].defaultWindow
 }
 
+function resolveExplicitHistoryWindow(
+  userMessage: string,
+  metric: AgentHistoryMetric
+): AgentHistoryTimeWindow {
+  const explicit = userMessage.match(/\b(?:last|past)\s+(\d+)\s+(year|years|month|months)\b/i)
+  if (!explicit) return defaultHistoryWindow(metric)
+
+  const value = Number.parseInt(explicit[1] ?? '', 10)
+  const rawUnit = (explicit[2] ?? '').toLowerCase()
+  if (!Number.isFinite(value) || value <= 0) return defaultHistoryWindow(metric)
+
+  const unit = rawUnit.startsWith('year') ? 'years' : 'months'
+  return {
+    mode: 'relative',
+    unit,
+    value,
+    label: `Last ${value} ${unit}`,
+  }
+}
+
 function normalizeHistorySubjectName(value: string): string {
   return value.replace(/,/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+function trimSubjectLeadIn(value: string): string {
+  return value.replace(/^.*\b(?:in|of|for|about|at|to)\s+/i, '').trim()
 }
 
 function extractHistorySubjectPhrase(prompt: string, subjectToken: 'county' | 'metro'): string | null {
@@ -489,10 +612,15 @@ function extractHistorySubjectPhrase(prompt: string, subjectToken: 'county' | 'm
   const prepositionPattern = new RegExp(`\\b(?:for|in|of|at|about|on|to)\\s+`, 'ig')
   const extractFromTail = (tail: string): string | null => {
     const match = tail.match(new RegExp(`^([A-Za-z][A-Za-z\\s.'-]*?\\s+${tokenPattern})\\b`, 'i'))
-    const subject = match?.[1]?.trim() ?? null
+    const subject = match?.[1] ? trimSubjectLeadIn(match[1]) : null
+    const matchedText = match?.[0] ?? null
     if (!subject) return null
 
-    const remainder = tail.slice(match[0].length).replace(/^[,\s]+/, '').trim()
+    const remainder = tail
+      .slice(matchedText?.length ?? 0)
+      .replace(/^[,\s]+/, '')
+      .replace(/[.,;:!?]+$/g, '')
+      .trim()
     if (!remainder) return subject
 
     const stateAbbr = normalizeUsStateToAbbr(remainder)
@@ -557,21 +685,130 @@ function resolveHistorySubjectMarket(
 }
 
 function splitPeerComparisonChunks(userMessage: string): string[] {
-  return userMessage
-    .split(/\b(?:versus|vs\.?|and)\b/i)
-    .map((chunk) => chunk.trim())
+  const normalized = userMessage.replace(/\s+/g, ' ').trim()
+  const patterns = [
+    /^(?:compare|comparison(?:\s+of)?)\s+(.+?)\s+(?:versus|vs\.?|to|and|with)\s+(.+)$/i,
+    /^(.+?)\s+compared\s+with\s+(.+)$/i,
+  ]
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern)
+    if (!match) continue
+
+    return [match[1], match[2]]
+      .map((chunk) => chunk.trim().replace(/^[,.\s]+|[,.\s]+$/g, ''))
+      .filter(Boolean)
+  }
+
+  return normalized
+    .split(/\b(?:versus|vs\.?|to|and|with)\b/i)
+    .map((chunk) => chunk.trim().replace(/^[,.\s]+|[,.\s]+$/g, ''))
     .filter(Boolean)
 }
 
-function resolvePeerComparisonMarkets(
-  userMessage: string,
+function cleanPeerComparisonChunk(chunk: string): string {
+  return chunk
+    .replace(/^(?:compare|comparison(?:\s+of)?|show me|show)\s+/i, '')
+    .replace(/\b(?:this|current)\s+(?:market|zip|county|metro)\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function hasActiveComparisonMarker(userMessage: string): boolean {
+  return /\b(?:this|current)\s+(?:market|zip|county|metro)\b/i.test(userMessage)
+}
+
+function resolveActiveComparisonSubject(
   context: MapContext | null | undefined
+): AgentHistorySubject | null {
+  if (context?.activeSubject) return context.activeSubject
+
+  const zip = context?.zip?.trim()
+  if (!zip) return null
+
+  return {
+    kind: 'zip',
+    id: zip,
+    label: context?.label?.trim() || context?.eda?.geographyLabel?.trim() || zip,
+  }
+}
+
+function buildMissingActiveComparisonMarketPayload(): AgentPipelineResult {
+  return {
+    message: 'I could not use the current workspace as one side of that comparison because there is no active market loaded.',
+    action: { type: 'none' as const },
+    trace: {
+      summary: 'Comparison request missing an active market',
+      taskType: 'compare_segments',
+      methodology:
+        'Scout recognized an active-vs-explicit comparison prompt, but the current workspace did not provide a usable active market.',
+      keyFindings: ['No comparison chart was generated.'],
+      evidence: ['The bounded active comparison path currently needs an active ZIP in the workspace.'],
+      caveats: ['Load a market first, then ask for the comparison again.'],
+      nextQuestions: ['Load a ZIP like 78701 and ask to compare it with 77002.'],
+    },
+    chart: null,
+  }
+}
+
+function buildUnsupportedComparisonMetricPayload(
+  markets: [AgentHistorySubject, AgentHistorySubject]
+): AgentPipelineResult {
+  const [subjectMarket, comparisonMarket] = markets
+
+  return {
+    message: `I understood the comparison between ${subjectMarket.label} and ${comparisonMarket.label}, but that comparison metric is not supported yet. Scout only handles rent, unemployment rate, and permit units for now.`,
+    action: { type: 'none' as const },
+    trace: {
+      summary: 'Unsupported comparison metric',
+      taskType: 'compare_segments',
+      methodology:
+        'Scout resolved both comparison markets from the prompt first, then stopped because the requested comparison metric is outside the bounded grounded set.',
+      keyFindings: ['No comparison chart was generated.'],
+      evidence: [
+        `Resolved market A: ${subjectMarket.label}.`,
+        `Resolved market B: ${comparisonMarket.label}.`,
+        'Supported grounded comparison metrics currently include rent, unemployment rate, and permit units.',
+      ],
+      caveats: ['Use one of the supported grounded comparison metrics for now.'],
+      nextQuestions: [
+        `Ask to compare rent history for ${subjectMarket.label} and ${comparisonMarket.label}.`,
+        `Ask to compare permit history or unemployment history for ${subjectMarket.label} and ${comparisonMarket.label}.`,
+      ],
+    },
+    chart: null,
+  }
+}
+
+function buildUnresolvedPeerComparisonPayload(): AgentPipelineResult {
+  return {
+    message: 'I could not identify two explicit comparison markets from that prompt.',
+    action: { type: 'none' as const },
+    trace: {
+      summary: 'Comparison request missing two resolvable markets',
+      taskType: 'compare_segments',
+      methodology:
+        'Scout recognized an explicit comparison request, but it could not resolve two supported markets from the prompt.',
+      keyFindings: ['No comparison chart was generated.'],
+      evidence: ['The bounded comparison path needs two explicit ZIP, Texas county, or Texas metro markets.'],
+      caveats: ['Use two explicitly named markets of the same kind for now.'],
+      nextQuestions: [
+        'Ask to compare two ZIPs like 78701 and 77002.',
+        'Ask to compare two Texas counties like Harris County and Travis County.',
+      ],
+    },
+    chart: null,
+  }
+}
+
+function resolvePeerComparisonMarkets(
+  userMessage: string
 ): [AgentHistorySubject, AgentHistorySubject] | null {
   const chunks = splitPeerComparisonChunks(userMessage)
   const subjects: AgentHistorySubject[] = []
 
   for (const chunk of chunks) {
-    const subject = resolveHistorySubjectMarket(chunk, null)
+    const subject = resolveHistorySubjectMarket(cleanPeerComparisonChunk(chunk), null)
     if (!subject) continue
     if (subjects.some((existing) => existing.kind === subject.kind && existing.id === subject.id)) continue
     subjects.push(subject)
@@ -590,29 +827,48 @@ function resolvePeerComparisonMarkets(
     ]
   }
 
-  if (subjects.length === 1 && context?.zip?.trim()) {
-    const activeZip = context.zip.trim()
-    if (subjects[0].kind === 'zip' && subjects[0].id !== activeZip) {
-      return [
-        { kind: 'zip', id: activeZip, label: context.label?.trim() || context.eda?.geographyLabel?.trim() || activeZip },
-        subjects[0],
-      ]
-    }
+  return null
+}
+
+function resolveActiveVsExplicitComparisonMarkets(
+  userMessage: string,
+  context: MapContext | null | undefined
+): [AgentHistorySubject, AgentHistorySubject] | null {
+  if (!hasActiveComparisonMarker(userMessage)) return null
+
+  const activeSubject = resolveActiveComparisonSubject(context)
+  if (!activeSubject) return null
+
+  const cleanedPrompt = userMessage
+    .replace(/\b(?:this|current)\s+(?:market|zip|county|metro)\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  const chunks = splitPeerComparisonChunks(cleanedPrompt)
+  for (const chunk of chunks) {
+    const subject = resolveHistorySubjectMarket(cleanPeerComparisonChunk(chunk), null)
+    if (!subject) continue
+    if (subject.kind !== activeSubject.kind || subject.id === activeSubject.id) continue
+    return [activeSubject, subject]
   }
 
-  return null
+  const explicitZip = Array.from(new Set(userMessage.match(/\b\d{5}\b/g) ?? [])).find((zip) => zip !== activeSubject.id)
+  if (!explicitZip) return null
+
+  return [activeSubject, { kind: 'zip', id: explicitZip, label: explicitZip }]
 }
 
 function buildHistoryComparisonRequest(
   metric: AgentHistoryMetric,
-  subjectMarket: AgentHistorySubject
+  subjectMarket: AgentHistorySubject,
+  timeWindow: AgentHistoryTimeWindow
 ): AnalyticalComparisonRequest {
   return {
     comparisonMode: 'history',
     metric,
     subjectMarket,
     comparisonMarket: null,
-    timeWindow: defaultHistoryWindow(metric),
+    timeWindow,
   }
 }
 
@@ -695,11 +951,190 @@ function buildHistoryTrace(comparison: AnalyticalComparisonResult): AgentTrace {
       `Metric: ${comparison.metricLabel}.`,
       `Window: ${comparison.timeWindow.label}.`,
       comparison.citations[0]?.label ? `Source: ${comparison.citations[0].label}.` : 'Source: router-backed historical series.',
+      ...(comparison.debug?.historySources[0]
+        ? [
+            `Debug source selection: ${comparison.debug.historySources[0].selectedSourceId ?? 'none'} (${comparison.debug.historySources[0].selectedSourceLabel ?? 'n/a'}).`,
+            `Debug specialized rows found: ${comparison.debug.historySources[0].specializedRowsFound}.`,
+            `Debug fallback used: ${comparison.debug.historySources[0].fallbackUsed ? 'yes' : 'no'}.`,
+            `Debug final source: ${comparison.debug.historySources[0].finalSourceId} (${comparison.debug.historySources[0].finalSourceLabel}).`,
+          ]
+        : []),
     ],
     caveats: ['Only rent, unemployment rate, and permit history are supported in this bounded path.'],
     nextQuestions: ['Ask for another ZIP, county, or metro if you want a comparison against a different market.'],
     citations: comparison.citations,
   }
+}
+
+function trimCitationText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function normalizeScoutCitationSourceType(value: unknown): ScoutChartCitation['sourceType'] | null {
+  const normalized = trimCitationText(value)
+  if (
+    normalized === 'internal_dataset' ||
+    normalized === 'public_dataset' ||
+    normalized === 'workspace_upload' ||
+    normalized === 'derived' ||
+    normalized === 'placeholder'
+  ) {
+    return normalized
+  }
+
+  return null
+}
+
+function mergeScoutChartCitationSets(
+  primary: readonly (Partial<ScoutChartCitation> | null | undefined)[],
+  secondary: readonly (Partial<ScoutChartCitation> | null | undefined)[]
+): ScoutChartCitation[] {
+  const merged = new Map<string, Partial<ScoutChartCitation>>()
+
+  for (const citation of primary) {
+    const id = trimCitationText(citation?.id)
+    if (!id) continue
+    merged.set(id, {
+      id,
+      label: trimCitationText(citation?.label),
+      sourceType: normalizeScoutCitationSourceType(citation?.sourceType) ?? 'derived',
+      scope: trimCitationText(citation?.scope) || null,
+      note: trimCitationText(citation?.note) || null,
+      periodLabel: trimCitationText(citation?.periodLabel) || null,
+      placeholder: citation?.placeholder === true,
+    })
+  }
+
+  for (const citation of secondary) {
+    const id = trimCitationText(citation?.id)
+    if (!id) continue
+
+    const existing = merged.get(id)
+    if (!existing) {
+      merged.set(id, {
+        id,
+        label: trimCitationText(citation?.label),
+        sourceType: normalizeScoutCitationSourceType(citation?.sourceType) ?? 'derived',
+        scope: trimCitationText(citation?.scope) || null,
+        note: trimCitationText(citation?.note) || null,
+        periodLabel: trimCitationText(citation?.periodLabel) || null,
+        placeholder: citation?.placeholder === true,
+      })
+      continue
+    }
+
+    merged.set(id, {
+      ...existing,
+      label: trimCitationText(existing.label) || trimCitationText(citation?.label),
+      sourceType:
+        normalizeScoutCitationSourceType(existing.sourceType) ??
+        normalizeScoutCitationSourceType(citation?.sourceType) ??
+        'derived',
+      scope: trimCitationText(existing.scope) || trimCitationText(citation?.scope) || null,
+      note: trimCitationText(existing.note) || trimCitationText(citation?.note) || null,
+      periodLabel: trimCitationText(existing.periodLabel) || trimCitationText(citation?.periodLabel) || null,
+      placeholder: existing.placeholder === true || citation?.placeholder === true,
+    })
+  }
+
+  return Array.from(merged.values()).map((citation) => ({
+    id: trimCitationText(citation.id),
+    label: trimCitationText(citation.label),
+    sourceType: normalizeScoutCitationSourceType(citation.sourceType) ?? 'derived',
+    scope: trimCitationText(citation.scope) || null,
+    note: trimCitationText(citation.note) || null,
+    periodLabel: trimCitationText(citation.periodLabel) || null,
+    placeholder: citation.placeholder === true,
+  }))
+}
+
+function hasCompleteScoutChartCitation(citation: Partial<ScoutChartCitation> | null | undefined): boolean {
+  const sourceType = normalizeScoutCitationSourceType(citation?.sourceType)
+  return (
+    trimCitationText(citation?.id).length > 0 &&
+    trimCitationText(citation?.label).length > 0 &&
+    trimCitationText(citation?.periodLabel).length > 0 &&
+    sourceType !== 'placeholder' &&
+    sourceType != null
+  )
+}
+
+function toAnalyticalComparisonCitations(
+  citations: readonly ScoutChartCitation[]
+): AnalyticalComparisonResult['citations'] {
+  return citations.flatMap((citation) => {
+    const sourceType = normalizeScoutCitationSourceType(citation.sourceType)
+    if (!sourceType || sourceType === 'placeholder') return []
+
+    return [{
+      id: trimCitationText(citation.id),
+      label: trimCitationText(citation.label),
+      sourceType,
+      note: trimCitationText(citation.note) || null,
+      periodLabel: trimCitationText(citation.periodLabel) || null,
+    }]
+  })
+}
+
+function buildInternalEvidenceQuery(
+  comparison: AnalyticalComparisonResult,
+  subject: AgentHistorySubject
+): AgentInternalProvenanceQuery {
+  const sourceIds = comparison.citations
+    .map((citation) => citation.id.trim())
+    .filter((id) => /^(projectr_master_data|projectr_upload|texas_permits):/i.test(id))
+
+  return {
+    taskType: comparison.comparisonMode === 'peer_market' ? 'compare_segments' : 'spot_trends',
+    metric: comparison.metric,
+    subject,
+    ...(sourceIds.length > 0 ? { sourceIds } : {}),
+  }
+}
+
+async function getInternalEvidenceForHistoryComparison(
+  comparison: AnalyticalComparisonResult,
+  dependencies: HistoryComparisonDependencies,
+  fallbackSubject: AgentHistorySubject
+): Promise<AgentInternalEvidenceResult> {
+  const fetchInternalEvidence =
+    dependencies.getInternalEvidence ??
+    (async (query: AgentInternalProvenanceQuery) => retrieveInternalEvidence(query))
+
+  const subjects = comparison.series
+    .map((entry) => entry.subject)
+    .filter(
+      (subject, index, all) =>
+        all.findIndex((candidate) => candidate.kind === subject.kind && candidate.id === subject.id) === index
+    )
+
+  let provenanceResults: AgentInternalEvidenceResult[]
+  try {
+    provenanceResults = await Promise.all(
+      (subjects.length > 0 ? subjects : [fallbackSubject]).map((subject) =>
+        fetchInternalEvidence(buildInternalEvidenceQuery(comparison, subject))
+      )
+    )
+  } catch {
+    return {
+      query: buildInternalEvidenceQuery(comparison, fallbackSubject),
+      records: [],
+      citations: [],
+    }
+  }
+
+  return provenanceResults.reduce<AgentInternalEvidenceResult>(
+    (acc, result) => ({
+      query: acc.query,
+      records: [...acc.records, ...result.records],
+      citations: [...acc.citations, ...result.citations],
+    }),
+    {
+      query: buildInternalEvidenceQuery(comparison, fallbackSubject),
+      records: [],
+      citations: [],
+    }
+  )
 }
 
 function buildUnsupportedHistoryPayload(message: string): AgentPipelineResult {
@@ -720,23 +1155,520 @@ function buildUnsupportedHistoryPayload(message: string): AgentPipelineResult {
   }
 }
 
+function hasPublicMacroIntent(userMessage: string): boolean {
+  return /\b(what(?:'s|\s+is)?|how much(?:\s+is|\s+are)?|tell me|show me|give me|report|estimate|what are)\b/i.test(userMessage)
+}
+
+function detectPublicMacroMetric(userMessage: string): AgentPublicMacroMetric | null {
+  const prompt = userMessage.toLowerCase()
+
+  if (/\bpopulation\b/i.test(prompt)) return 'population'
+  if (/\b(?:median\s+household\s+income|household\s+income)\b/i.test(prompt)) return 'median household income'
+  if (/\b(?:housing\s+cost\s+burden|housing\s+burden|cost\s+burden|rent\s+burden)\b/i.test(prompt)) return 'housing cost burden'
+
+  return null
+}
+
+function buildPublicMacroTrace(result: AgentPublicMacroEvidenceResult): AgentTrace {
+  return {
+    summary: `Public macro ${result.value.label} for ${result.value.scope}`,
+    taskType: 'explain_metric',
+    methodology:
+      'Scout resolved the bounded public macro prompt, fetched the requested public evidence, and rendered the returned value without inventing any data.',
+    keyFindings: [`${result.value.label} for ${result.value.scope} is ${result.value.displayValue}.`],
+    evidence: [
+      `Metric: ${result.value.label}.`,
+      `Scope: ${result.value.scope}.`,
+      `Period: ${result.value.periodLabel}.`,
+      result.value.note ? `Note: ${result.value.note}.` : 'The public macro source returned a bounded cited value.',
+    ],
+    caveats: ['Only population, median household income, and housing cost burden are supported in this bounded public macro lane.'],
+    nextQuestions: ['Ask for another Texas ZIP, county, or metro if you want the same public macro metric elsewhere.'],
+    citations: result.citations,
+  }
+}
+
+function buildUnsupportedPublicMacroPayload(subject: AgentHistorySubject | null): AgentPipelineResult {
+  const subjectLabel = subject?.label ?? 'that geography'
+
+  return {
+    message: `I understood the public macro question for ${subjectLabel}, but that metric is not supported yet. Scout only handles population, median household income, and housing cost burden for now.`,
+    action: { type: 'none' as const },
+    trace: {
+      summary: 'Unsupported public macro metric',
+      taskType: 'explain_metric',
+      methodology:
+        'Scout recognized a public macro prompt, resolved the geography, and stopped because the requested macro metric is outside the bounded public grounding set.',
+      keyFindings: ['No public macro chart was generated.'],
+      evidence: [
+        subject ? `Resolved geography: ${subject.label}.` : 'No Texas geography could be resolved.',
+        'Supported public macro metrics currently include population, median household income, and housing cost burden.',
+      ],
+      caveats: ['Use one of the supported public macro metrics for now.'],
+      nextQuestions: [
+        subject
+          ? `Ask for population, median household income, or housing cost burden for ${subject.label}.`
+          : 'Ask for one of the supported public macro metrics on a Texas ZIP, county, or metro.',
+      ],
+    },
+    chart: null,
+  }
+}
+
+function buildUnresolvedPublicMacroPayload(): AgentPipelineResult {
+  return {
+    message: 'I could not identify a Texas ZIP, county, or metro for that public macro question.',
+    action: { type: 'none' as const },
+    trace: {
+      summary: 'Public macro request missing a resolvable geography',
+      taskType: 'explain_metric',
+      methodology:
+        'Scout recognized a public macro prompt, but the bounded public grounding lane could not resolve a supported Texas geography from the prompt or current workspace.',
+      keyFindings: ['No public macro chart was generated.'],
+      evidence: ['The public macro lane needs a Texas ZIP, county, or metro subject.'],
+      caveats: ['Try naming the geography directly or load the market first.'],
+      nextQuestions: ['Ask for population in Harris County, TX.', 'Ask for median household income in 78701.', 'Ask for housing cost burden in Austin metro.'],
+    },
+    chart: null,
+  }
+}
+
+function buildPublicMacroFailurePayload(subject: AgentHistorySubject | null): AgentPipelineResult {
+  const subjectLabel = subject?.label ?? 'that geography'
+
+  return {
+    message: `I could not verify that public macro fact for ${subjectLabel} from the current grounded data.`,
+    action: { type: 'none' as const },
+    trace: {
+      summary: 'Public macro retrieval failed',
+      taskType: 'explain_metric',
+      methodology:
+        'Scout recognized a supported public macro prompt, but the bounded public grounding adapter failed before it could return a verifiable value.',
+      keyFindings: ['No public macro chart was generated.'],
+      evidence: [`The public macro adapter could not verify the requested fact for ${subjectLabel}.`],
+      caveats: ['Retry the request or ask for a different supported Texas subject.'],
+      nextQuestions: ['Ask again for the same macro fact.', 'Try a different Texas ZIP, county, or metro.'],
+    },
+    chart: null,
+  }
+}
+
+const DRIVE_TIME_PLACE_PATTERN = /\b(?:drive\s*time|travel\s*time|routing|route|directions?|commute)\b/i
+const PLACE_INTENT_PATTERN = /\b(?:where(?:'s|\s+is|\s+are)?|coordinates?|longitude|latitude|lat(?:itude)?|lng|locat(?:ed|ion)|place|map)\b/i
+const DRIVE_TIME_METRO_ALIASES = new Set(['austin', 'dallas', 'houston', 'san antonio'])
+
+function hasPlaceIntent(userMessage: string): boolean {
+  return PLACE_INTENT_PATTERN.test(userMessage)
+}
+
+function looksLikeDriveTimePlacePrompt(userMessage: string): boolean {
+  return DRIVE_TIME_PLACE_PATTERN.test(userMessage)
+}
+
+function cleanPlacePrompt(userMessage: string): string {
+  return userMessage
+    .replace(
+      /^(?:where(?:'s|\s+is|\s+are)?|what(?:'s|\s+is)?\s+the\s+coordinates?(?:\s+for)?|coordinates?(?:\s+for)?|latitude(?:\s+and\s+longitude)?(?:\s+for)?|give me (?:the\s+)?coordinates(?:\s+for)?|give me (?:the\s+)?location(?:\s+of)?|location(?:\s+of)?|locat(?:ed|ion)(?:\s+of|\s+in|\s+at)?|place(?:\s+of)?|map(?:\s+of)?|show me(?:\s+the)?\s+coordinates(?:\s+for)?|show me(?:\s+the)?\s+location(?:\s+of)?)\s+/i,
+      ''
+    )
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function resolvePlaceGroundingSubject(
+  userMessage: string,
+  context: MapContext | null | undefined
+): AgentHistorySubject | null {
+  const explicitSubject = resolveHistorySubjectMarket(cleanPlacePrompt(userMessage), context)
+  if (explicitSubject) return explicitSubject
+
+  if (!hasPlaceIntent(userMessage)) return null
+
+  return resolveActiveComparisonSubject(context)
+}
+
+function splitDriveTimeChunks(userMessage: string): string[] {
+  const normalized = userMessage.replace(/\s+/g, ' ').trim()
+  const patterns = [
+    /(?:drive\s*time|travel\s*time|commute|route|routing|directions?).*?\bfrom\b\s+(.+?)\s+\bto\b\s+(.+)$/i,
+    /(?:drive\s*time|travel\s*time|commute|route|routing|directions?).*?\bbetween\b\s+(.+?)\s+\band\b\s+(.+)$/i,
+    /^(.+?)\s+\bto\b\s+(.+?)\s+(?:drive\s*time|travel\s*time|commute|route|routing|directions?)$/i,
+  ]
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern)
+    if (!match) continue
+
+    return [match[1], match[2]]
+      .map((chunk) => chunk.trim().replace(/^[,.\s]+|[,.\s]+$/g, ''))
+      .filter(Boolean)
+  }
+
+  return []
+}
+
+function cleanDriveTimeChunk(chunk: string): string {
+  return chunk
+    .replace(/^(?:drive\s*time|travel\s*time|commute|route|routing|directions?)\s+(?:from|between)?\s*/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function resolveDriveTimeSubjectChunk(
+  chunk: string,
+  context: MapContext | null | undefined
+): AgentHistorySubject | null {
+  if (/\b(?:this|current)\s+(?:market|zip|county|metro)\b/i.test(chunk)) {
+    return resolveActiveComparisonSubject(context)
+  }
+
+  const explicitSubject = resolveHistorySubjectMarket(cleanDriveTimeChunk(chunk), null)
+  if (explicitSubject) return explicitSubject
+
+  const parsed = splitTrailingUsState(cleanDriveTimeChunk(chunk))
+  if (parsed.stateAbbr && parsed.stateAbbr !== 'TX') return null
+
+  const metroName = normalizeMetroDisplayName(normalizeHistorySubjectName(parsed.name))
+  if (!metroName) return null
+
+  if (!DRIVE_TIME_METRO_ALIASES.has(metroName.toLowerCase())) return null
+
+  return {
+    kind: 'metro',
+    id: buildMetroAreaKey(metroName, 'TX'),
+    label: `${metroName}, TX`,
+  }
+}
+
+function resolveDriveTimeMarkets(
+  userMessage: string,
+  context: MapContext | null | undefined
+): [AgentHistorySubject, AgentHistorySubject] | null {
+  const chunks = splitDriveTimeChunks(userMessage)
+  if (chunks.length >= 2) {
+    const subjects: AgentHistorySubject[] = []
+
+    for (const chunk of chunks) {
+      const subject = resolveDriveTimeSubjectChunk(chunk, context)
+      if (!subject) continue
+      subjects.push(subject)
+      if (subjects.length === 2) break
+    }
+
+    if (subjects.length >= 2) {
+      return [subjects[0], subjects[1]]
+    }
+  }
+
+  return resolveActiveVsExplicitComparisonMarkets(userMessage, context) ?? resolvePeerComparisonMarkets(userMessage)
+}
+
+function buildMissingActiveDriveTimePayload(): AgentPipelineResult {
+  return {
+    message: 'I could not use the current workspace as one side of that drive-time request because there is no active market loaded.',
+    action: { type: 'none' as const },
+    trace: {
+      summary: 'Drive-time request missing an active market',
+      taskType: 'explain_metric',
+      methodology:
+        'Scout recognized an active-vs-explicit drive-time prompt, but the current workspace did not provide a usable active market.',
+      keyFindings: ['No drive-time response was generated.'],
+      evidence: ['The bounded drive-time path needs an active ZIP, county, or metro when the prompt refers to the current market.'],
+      caveats: ['Load a market first, then ask for the drive time again.'],
+      nextQuestions: ['Load a Texas ZIP, county, or metro and retry the drive-time request.'],
+    },
+    chart: null,
+  }
+}
+
+function buildUnresolvedDriveTimePayload(): AgentPipelineResult {
+  return {
+    message: 'I could not identify two Texas ZIP, county, or metro subjects for that drive-time request.',
+    action: { type: 'none' as const },
+    trace: {
+      summary: 'Drive-time request missing two resolvable geographies',
+      taskType: 'explain_metric',
+      methodology:
+        'Scout recognized a drive-time prompt, but the bounded drive-time lane could not resolve two supported Texas subjects from the prompt or current workspace.',
+      keyFindings: ['No drive-time response was generated.'],
+      evidence: ['The drive-time lane needs two Texas ZIP, county, or metro subjects.'],
+      caveats: ['Try naming both geographies directly or load the active market first.'],
+      nextQuestions: ['Ask for the drive time from Austin metro, TX to Dallas metro, TX.', 'Ask for the commute from this market to Dallas metro, TX after loading the market first.'],
+    },
+    chart: null,
+  }
+}
+
+function buildDriveTimeFailurePayload(
+  markets: [AgentHistorySubject, AgentHistorySubject] | null
+): AgentPipelineResult {
+  const scope = markets ? `${markets[0].label} and ${markets[1].label}` : 'those markets'
+
+  return {
+    message: `I could not verify that drive-time estimate for ${scope} from the current grounded data.`,
+    action: { type: 'none' as const },
+    trace: {
+      summary: 'Drive-time grounding retrieval failed',
+      taskType: 'explain_metric',
+      methodology:
+        'Scout recognized a supported drive-time prompt, but the bounded route grounding adapter failed before it could return a verifiable estimate.',
+      keyFindings: ['No drive-time response was generated.'],
+      evidence: [`The drive-time grounding adapter could not verify the requested route estimate for ${scope}.`],
+      caveats: ['Retry the request or ask for a different supported Texas route.'],
+      nextQuestions: ['Ask again for the same drive-time estimate.', 'Try a different Texas ZIP, county, or metro pair.'],
+    },
+    chart: null,
+  }
+}
+
+function buildUnresolvedPlacePayload(): AgentPipelineResult {
+  return {
+    message: 'I could not identify a Texas ZIP, county, or metro for that place question.',
+    action: { type: 'none' as const },
+    trace: {
+      summary: 'Place request missing a resolvable geography',
+      taskType: 'explain_metric',
+      methodology:
+        'Scout recognized a place prompt, but the bounded place grounding lane could not resolve a supported Texas subject from the prompt or current workspace.',
+      keyFindings: ['No place response was generated.'],
+      evidence: ['The place lane needs a Texas ZIP, county, or metro subject.'],
+      caveats: ['Try naming the geography directly or load the market first.'],
+      nextQuestions: ['Ask where Harris County, TX is.', 'Ask for the coordinates of Austin metro, TX.'],
+    },
+    chart: null,
+  }
+}
+
+function buildPlaceFailurePayload(subject: AgentHistorySubject | null): AgentPipelineResult {
+  const subjectLabel = subject?.label ?? 'that geography'
+
+  return {
+    message: `I could not verify that place fact for ${subjectLabel} from the current grounded data.`,
+    action: { type: 'none' as const },
+    trace: {
+      summary: 'Place grounding retrieval failed',
+      taskType: 'explain_metric',
+      methodology:
+        'Scout recognized a supported place prompt, but the bounded place grounding adapter failed before it could return a verifiable value.',
+      keyFindings: ['No place response was generated.'],
+      evidence: [`The place grounding adapter could not verify the requested fact for ${subjectLabel}.`],
+      caveats: ['Retry the request or ask for a different supported Texas subject.'],
+      nextQuestions: ['Ask again for the same place fact.', 'Try a different Texas ZIP, county, or metro.'],
+    },
+    chart: null,
+  }
+}
+
+function buildPlaceTrace(result: AgentPlaceGroundingEvidenceResult): AgentTrace {
+  const coordinates =
+    Number.isFinite(result.value.lat) && Number.isFinite(result.value.lng)
+      ? `${result.value.lat!.toFixed(4)}, ${result.value.lng!.toFixed(4)}`
+      : null
+
+  return {
+    summary: `Place grounding for ${result.value.scope}`,
+    taskType: 'explain_metric',
+    methodology:
+      'Scout resolved the bounded Texas place prompt, fetched the requested place evidence, and returned the place context without inventing any data.',
+    keyFindings: [
+      `${result.value.label} is grounded in ${result.value.scope}.`,
+      coordinates ? `Coordinates: ${coordinates}.` : 'Coordinates were not available from the grounded place record.',
+    ],
+    evidence: [
+      `Place: ${result.value.label}.`,
+      coordinates ? `Coordinates: ${coordinates}.` : 'The place adapter returned a grounded place record.',
+      result.value.periodLabel ? `Period: ${result.value.periodLabel}.` : 'The place adapter returned a bounded cited value.',
+      result.value.note ? `Note: ${result.value.note}.` : 'The place adapter returned a bounded cited value.',
+    ],
+    caveats: ['Only Texas ZIP, county, and metro place prompts are supported in this bounded lane.'],
+    nextQuestions: ['Ask for another Texas ZIP, county, or metro if you want the same place context elsewhere.'],
+    citations: result.citations,
+  }
+}
+
+function buildDriveTimeTrace(result: AgentDriveTimeEvidenceResult): AgentTrace {
+  const distance =
+    Number.isFinite(result.value.distanceMiles) ? `${result.value.distanceMiles!.toFixed(1)} miles (road-factor estimate)` : null
+
+  return {
+    summary: `Drive-time grounding for ${result.value.scope}`,
+    taskType: 'explain_metric',
+    methodology:
+      'Scout resolved the bounded Texas route request, grounded both endpoints through the place adapter, and derived a bounded drive-time estimate without inventing uncited route data.',
+    keyFindings: [
+      `${result.value.label} for ${result.value.scope}: ${result.value.displayValue}.`,
+      distance ? `Estimated route distance: ${distance}.` : 'The route adapter returned a bounded cited estimate.',
+    ],
+    evidence: [
+      `Route: ${result.value.scope}.`,
+      `Estimated drive time: ${result.value.displayValue}.`,
+      distance ? `Estimated route distance: ${distance}.` : 'The route adapter returned a bounded cited estimate.',
+      result.value.periodLabel ? `Period: ${result.value.periodLabel}.` : 'The route adapter returned a bounded cited value.',
+      result.value.note ? `Note: ${result.value.note}.` : 'The route adapter returned a bounded cited value.',
+    ],
+    caveats: ['Drive-time responses use Google Maps computeRoutes when available and otherwise fall back to a bounded Texas estimate; they are not turn-by-turn directions.'],
+    nextQuestions: ['Ask for another Texas ZIP, county, or metro pair if you want the same route context elsewhere.'],
+    citations: result.citations,
+  }
+}
+
+async function maybeBuildDriveTimeGroundingResponse(
+  userMessage: string,
+  context: MapContext | null,
+  dependencies: HistoryComparisonDependencies
+): Promise<AgentPipelineResult | null> {
+  if (!looksLikeDriveTimePlacePrompt(userMessage)) return null
+
+  if (hasActiveComparisonMarker(userMessage) && !resolveActiveComparisonSubject(context)) {
+    return buildMissingActiveDriveTimePayload()
+  }
+
+  const markets = resolveDriveTimeMarkets(userMessage, context)
+  if (!markets) {
+    return buildUnresolvedDriveTimePayload()
+  }
+
+  const fetchDriveTimeGrounding =
+    dependencies.getDriveTimeGrounding ??
+    (async (query: AgentDriveTimeQuery) => retrieveDriveTimeGrounding(query))
+
+  try {
+    const evidence = await fetchDriveTimeGrounding({
+      prompt: userMessage,
+      origin: markets[0],
+      destination: markets[1],
+    })
+
+    return await finalizeAgentPipelineResult({
+      message: `Estimated drive time from ${markets[0].label} to ${markets[1].label}: ${evidence.value.displayValue}.`,
+      action: { type: 'none' as const },
+      trace: buildDriveTimeTrace(evidence),
+      chart: null,
+    })
+  } catch {
+    return buildDriveTimeFailurePayload(markets)
+  }
+}
+
+async function maybeBuildPlaceGroundingResponse(
+  userMessage: string,
+  context: MapContext | null,
+  dependencies: HistoryComparisonDependencies
+): Promise<AgentPipelineResult | null> {
+  if (!hasPlaceIntent(userMessage)) return null
+
+  const subject = resolvePlaceGroundingSubject(userMessage, context)
+  if (!subject) {
+    return buildUnresolvedPlacePayload()
+  }
+
+  const fetchPlaceGrounding =
+    dependencies.getPlaceGrounding ??
+    (async (query: AgentPlaceGroundingQuery) => {
+      const { retrievePlaceGrounding } = await import('@/lib/agent-place-grounding')
+      return retrievePlaceGrounding(query)
+    })
+
+  try {
+    const evidence = await fetchPlaceGrounding({
+      prompt: userMessage,
+      subject,
+      requestType: 'place',
+    })
+    const lat = evidence.value.lat
+    const lng = evidence.value.lng
+    if (typeof lat !== 'number' || !Number.isFinite(lat) || typeof lng !== 'number' || !Number.isFinite(lng)) {
+      return buildPlaceFailurePayload(subject)
+    }
+
+    return await finalizeAgentPipelineResult({
+      message: `Here are the coordinates for ${evidence.value.scope}: ${lat.toFixed(4)}, ${lng.toFixed(4)}.`,
+      action: { type: 'none' as const },
+      trace: buildPlaceTrace(evidence),
+      chart: null,
+    })
+  } catch {
+    return buildPlaceFailurePayload(subject)
+  }
+}
+
+async function maybeBuildPublicMacroResponse(
+  userMessage: string,
+  context: MapContext | null,
+  dependencies: HistoryComparisonDependencies
+): Promise<AgentPipelineResult | null> {
+  if (!hasPublicMacroIntent(userMessage)) return null
+
+  const metric = detectPublicMacroMetric(userMessage)
+  const subject = resolveHistorySubjectMarket(userMessage, context)
+  if (!subject) return buildUnresolvedPublicMacroPayload()
+  if (!metric) return buildUnsupportedPublicMacroPayload(subject)
+
+  const fetchPublicMacroEvidence =
+    dependencies.getPublicMacroEvidence ??
+    (async (query: AgentPublicMacroQuery) => retrievePublicMacroEvidence(query))
+
+  try {
+    const evidence = await fetchPublicMacroEvidence({
+      metric,
+      subject,
+    })
+    const trace = buildPublicMacroTrace(evidence)
+    return await finalizeAgentPipelineResult({
+      message: `Here is the ${evidence.value.label.toLowerCase()} for ${evidence.value.scope}: ${evidence.value.displayValue}.`,
+      action: { type: 'none' as const },
+      trace,
+      chart: null,
+    })
+  } catch {
+    return buildPublicMacroFailurePayload(subject)
+  }
+}
+
 async function maybeBuildHistoryChartedResponse(
   userMessage: string,
   context: MapContext | null,
   dependencies: HistoryComparisonDependencies = {}
 ): Promise<AgentPipelineResult | null> {
-  if (!hasHistoryIntent(userMessage)) return null
+  const wantsPeerComparison = hasPeerComparisonIntent(userMessage)
+  const wantsHistory = hasHistoryIntent(userMessage)
+  if (!wantsHistory && !wantsPeerComparison) {
+    const driveTime = await maybeBuildDriveTimeGroundingResponse(userMessage, context, dependencies)
+    if (driveTime) return driveTime
+
+    const place = await maybeBuildPlaceGroundingResponse(userMessage, context, dependencies)
+    if (place) return place
+
+    const publicMacro = await maybeBuildPublicMacroResponse(userMessage, context, dependencies)
+    if (publicMacro) return publicMacro
+  }
+
+  const explicitPeerMarkets = wantsPeerComparison ? resolvePeerComparisonMarkets(userMessage) : null
+  const activeVsExplicitMarkets =
+    wantsPeerComparison && !explicitPeerMarkets ? resolveActiveVsExplicitComparisonMarkets(userMessage, context) : null
+  const peerMarkets = explicitPeerMarkets ?? activeVsExplicitMarkets
+  const isAnalyticalHistoryRequest = wantsHistory || wantsPeerComparison
+  if (!isAnalyticalHistoryRequest) return null
+
+  if (wantsPeerComparison && !peerMarkets) {
+    if (hasActiveComparisonMarker(userMessage) && !resolveActiveComparisonSubject(context)) {
+      return buildMissingActiveComparisonMarketPayload()
+    }
+    return buildUnresolvedPeerComparisonPayload()
+  }
 
   const metric = detectHistoryMetric(userMessage)
   if (!metric) {
-    return buildUnsupportedHistoryPayload(
-      'That history metric is not supported yet. Scout only handles rent, unemployment rate, and permit units for now.'
-    )
+    return peerMarkets
+      ? buildUnsupportedComparisonMetricPayload(peerMarkets)
+      : buildUnsupportedHistoryPayload(
+          'That history metric is not supported yet. Scout only handles rent, unemployment rate, and permit units for now.'
+        )
   }
 
-  const peerMarkets = hasPeerComparisonIntent(userMessage) ? resolvePeerComparisonMarkets(userMessage, context) : null
   const subjectMarket = peerMarkets?.[0] ?? resolveHistorySubjectMarket(userMessage, context)
   const comparisonMarket = peerMarkets?.[1] ?? null
+  const timeWindow = resolveExplicitHistoryWindow(userMessage, metric)
   if (!subjectMarket) {
     return {
       message: 'I could not identify which ZIP, county, or metro to use for that history request.',
@@ -823,24 +1755,40 @@ async function maybeBuildHistoryChartedResponse(
             metric,
             subjectMarket,
             comparisonMarket,
-            timeWindow: defaultHistoryWindow(metric),
+            timeWindow,
           }
-        : buildHistoryComparisonRequest(metric, subjectMarket)
+        : buildHistoryComparisonRequest(metric, subjectMarket, timeWindow)
     )
-    const chart = buildHistoryChartFromComparison(comparison)
-    const subjectLine =
-      comparison.comparisonMode === 'peer_market' && comparison.series.length >= 2
-        ? `${comparison.series[0]?.label ?? subjectMarket.label} versus ${comparison.series[1]?.label ?? comparisonMarket?.label ?? 'the comparison market'}`
-        : comparison.series[0]?.label ?? subjectMarket.label
-    return {
-      message:
-        comparison.comparisonMode === 'peer_market'
-          ? `Here is the ${comparison.timeWindow.label.toLowerCase()} ${comparison.metricLabel.toLowerCase()} comparison for ${subjectLine}.`
-          : `Here is the ${comparison.timeWindow.label.toLowerCase()} ${comparison.metricLabel.toLowerCase()} history for ${subjectLine}.`,
-      action: { type: 'none' as const },
-      trace: buildHistoryTrace(comparison),
-      chart,
+    const provenance = await getInternalEvidenceForHistoryComparison(comparison, dependencies, subjectMarket)
+    const baseCitations =
+      provenance.citations.length > 0 ? comparison.citations.filter(hasCompleteScoutChartCitation) : comparison.citations
+    const enrichedCitations = mergeScoutChartCitationSets(baseCitations, provenance.citations)
+    const enrichedComparison: AnalyticalComparisonResult = {
+      ...comparison,
+      citations: toAnalyticalComparisonCitations(enrichedCitations),
     }
+    const chart = buildHistoryChartFromComparison(enrichedComparison)
+    const subjectLine =
+      enrichedComparison.comparisonMode === 'peer_market' && enrichedComparison.series.length >= 2
+        ? `${enrichedComparison.series[0]?.label ?? subjectMarket.label} versus ${enrichedComparison.series[1]?.label ?? comparisonMarket?.label ?? 'the comparison market'}`
+        : enrichedComparison.series[0]?.label ?? subjectMarket.label
+    const trace = buildHistoryTrace(enrichedComparison)
+    const provenanceEvidence =
+      provenance.records.length > 0
+        ? [`Internal provenance matched: ${provenance.records.map((record) => record.label).join(', ')}.`]
+        : []
+    return await finalizeAgentPipelineResult({
+      message:
+        enrichedComparison.comparisonMode === 'peer_market'
+          ? `Here is the ${enrichedComparison.timeWindow.label.toLowerCase()} ${enrichedComparison.metricLabel.toLowerCase()} comparison for ${subjectLine}.`
+          : `Here is the ${enrichedComparison.timeWindow.label.toLowerCase()} ${enrichedComparison.metricLabel.toLowerCase()} history for ${subjectLine}.`,
+      action: { type: 'none' as const },
+      trace: {
+        ...trace,
+        evidence: [...(trace.evidence ?? []), ...provenanceEvidence],
+      },
+      chart,
+    })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to build a grounded history response.'
 
@@ -1273,12 +2221,12 @@ async function runAgentPipeline(context: MapContext | null, userMessage: string)
       (await buildRentTrendChart(userMessage, context)) ??
       (await buildRouterBackedChart(userMessage, context)) ??
       maybeBuildFallbackChart(userMessage, context)
-    return {
+    return finalizeAgentPipelineResult({
       message: fallback.message,
       action: { type: 'none' as const },
       trace: attachTraceCitations(fallback.trace, chart),
       chart,
-    }
+    })
   }
 
   const model = getGeminiJsonModel(SYSTEM_PROMPT)
@@ -1310,23 +2258,23 @@ async function runAgentPipeline(context: MapContext | null, userMessage: string)
       null
     )
 
-    return {
+    return finalizeAgentPipelineResult({
       message: parsed.message?.trim() || fallback.message,
       action: { type: 'none' as const },
       trace: attachTraceCitations(mergeTrace(normalized, fallback.trace), chart),
       chart,
-    }
+    })
   } catch {
     const chart =
       (await buildRentTrendChart(userMessage, context)) ??
       (await buildRouterBackedChart(userMessage, context)) ??
       maybeBuildFallbackChart(userMessage, context)
-    return {
+    return finalizeAgentPipelineResult({
       message: fallback.message,
       action: { type: 'none' as const },
       trace: attachTraceCitations(fallback.trace, chart),
       chart,
-    }
+    })
   }
 }
 

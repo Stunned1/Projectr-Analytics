@@ -9,6 +9,7 @@ import type { AnalyticalComparisonRequest } from '@/lib/data/market-data-router'
 type BigQueryModuleExports = typeof import('@/lib/data/bigquery');
 type BigQueryTablesModuleExports = typeof import('@/lib/data/bigquery-tables');
 type BigQueryMasterDataModuleExports = typeof import('@/lib/data/bigquery-master-data');
+type BigQueryEdaHistoryModuleExports = typeof import('@/lib/data/bigquery-eda-history');
 type PostgresMasterDataModuleExports = typeof import('@/lib/data/postgres-master-data');
 type MarketDataRouterModuleExports = typeof import('@/lib/data/market-data-router');
 type CycleLoadDataModuleExports = typeof import('@/lib/cycle/load-data');
@@ -22,6 +23,7 @@ const originalModuleLoad = NodeModule._load;
 let bigQueryModulePromise: Promise<BigQueryModuleExports> | null = null;
 let bigQueryTablesModulePromise: Promise<BigQueryTablesModuleExports> | null = null;
 let bigQueryMasterDataModulePromise: Promise<BigQueryMasterDataModuleExports> | null = null;
+let bigQueryEdaHistoryModulePromise: Promise<BigQueryEdaHistoryModuleExports> | null = null;
 let postgresMasterDataModulePromise: Promise<PostgresMasterDataModuleExports> | null = null;
 let marketDataRouterModulePromise: Promise<MarketDataRouterModuleExports> | null = null;
 let cycleLoadDataModulePromise: Promise<CycleLoadDataModuleExports> | null = null;
@@ -58,6 +60,23 @@ async function loadBigQueryMasterDataModule(): Promise<BigQueryMasterDataModuleE
   }
 
   return bigQueryMasterDataModulePromise;
+}
+
+async function loadBigQueryEdaHistoryModule(): Promise<BigQueryEdaHistoryModuleExports> {
+  if (!bigQueryEdaHistoryModulePromise) {
+    NodeModule._load = function patchedModuleLoad(request: string, parent: unknown, isMain: boolean) {
+      if (request === 'server-only') {
+        return {};
+      }
+
+      return originalModuleLoad.call(this, request, parent, isMain);
+    };
+    bigQueryEdaHistoryModulePromise = import('@/lib/data/bigquery-eda-history').finally(() => {
+      NodeModule._load = originalModuleLoad;
+    });
+  }
+
+  return bigQueryEdaHistoryModulePromise;
 }
 
 async function loadBigQueryTablesModule(): Promise<BigQueryTablesModuleExports> {
@@ -319,6 +338,11 @@ test('builds logical BigQuery table identifiers from the shared registry', async
     process.env.BIGQUERY_DATASET_ID = 'market_router';
 
     assert.strictEqual(BIGQUERY_TABLES.masterData, 'master_data');
+    assert.strictEqual(BIGQUERY_TABLES.dimGeography, 'dim_geography');
+    assert.strictEqual(BIGQUERY_TABLES.dimMetrics, 'dim_metrics');
+    assert.strictEqual(BIGQUERY_TABLES.factHistoricalData, 'fact_historical_data');
+    assert.strictEqual(BIGQUERY_TABLES.texasPermits, 'texas_permits');
+    assert.strictEqual(BIGQUERY_TABLES.trerc, 'trerc');
     assert.strictEqual(getBigQueryTableIdentifier(BIGQUERY_TABLES.masterData), '`scout-dev.market_router.master_data`');
   } finally {
     if (originalProjectId === undefined) delete process.env.BIGQUERY_PROJECT_ID;
@@ -736,20 +760,95 @@ test('returns a comparison-ready rent ZIP history result', async () => {
   assert.ok(result.citations.length >= 1);
 });
 
+test('fetchTexasPermitHistorySeries joins the warehouse dimensions for Texas permit history', async () => {
+  const { fetchTexasPermitHistorySeries } = await loadBigQueryEdaHistoryModule();
+  const originalProjectId = process.env.BIGQUERY_PROJECT_ID;
+  const originalDatasetId = process.env.BIGQUERY_DATASET_ID;
+  process.env.BIGQUERY_PROJECT_ID = 'scout-dev';
+  process.env.BIGQUERY_DATASET_ID = 'market_router';
+
+  const seen: Array<{ query: string; params: Record<string, unknown> }> = [];
+  const client = {
+    query(options: { query: string; params: Record<string, unknown> }) {
+      seen.push(options);
+      return Promise.resolve([[
+        {
+          time_period: '2016-04-01',
+          metric_value: '700',
+          source_label: 'TREC Building Permits',
+        },
+        {
+          time_period: '2026-04-01',
+          metric_value: '980',
+          source_label: 'TREC Building Permits',
+        },
+      ]]);
+    },
+  };
+
+  try {
+    const result = await fetchTexasPermitHistorySeries(
+      {
+        subject: { kind: 'county', id: 'county:TX:travis-county', label: 'Travis County, TX' },
+        startDate: '2016-04-01',
+      },
+      { client: client as never }
+    );
+
+    assert.strictEqual(seen.length, 1);
+    assert.match(seen[0]!.query, /market_router\.texas_permits/);
+    assert.match(seen[0]!.query, /market_router\.dim_geography/);
+    assert.match(seen[0]!.query, /market_router\.dim_metrics/);
+    assert.deepStrictEqual(seen[0]!.params, {
+      geoType: 'county',
+      subjectLabels: ['travis county, tx', 'travis county', 'travis'],
+      startDate: '2016-04-01',
+    });
+    assert.strictEqual(result?.sourceId, 'texas_permits:warehouse');
+    assert.strictEqual(result?.sourceLabel, 'TREC Building Permits');
+    assert.deepStrictEqual(result?.points, [
+      { x: '2016-04-01', y: 700 },
+      { x: '2026-04-01', y: 980 },
+    ]);
+  } finally {
+    if (originalProjectId === undefined) delete process.env.BIGQUERY_PROJECT_ID;
+    else process.env.BIGQUERY_PROJECT_ID = originalProjectId;
+
+    if (originalDatasetId === undefined) delete process.env.BIGQUERY_DATASET_ID;
+    else process.env.BIGQUERY_DATASET_ID = originalDatasetId;
+  }
+});
+
 test('returns a comparison-ready permit county history result', async () => {
   const { getAnalyticalComparisonForTest } = await loadMarketDataRouterModule();
   const calls: Array<{ submarketId: string; metricName: string; startDate: string }> = [];
+  const specializedCalls: Array<{ metric: string; subjectId: string; startDate: string }> = [];
 
   const result = await getAnalyticalComparisonForTest(
     {
       comparisonMode: 'history',
       metric: 'permit_units',
-      subjectMarket: { kind: 'county', id: 'county:harris-tx', label: 'Harris County, TX' },
+      subjectMarket: { kind: 'county', id: 'county:TX:harris-county', label: 'Harris County, TX' },
       comparisonMarket: null,
       timeWindow: { mode: 'relative', unit: 'years', value: 5 },
     },
     {
       now: new Date('2026-04-18T00:00:00.000Z'),
+      fetchSpecializedHistorySeries: async (metric, subject, timeWindow) => {
+        specializedCalls.push({
+          metric,
+          subjectId: subject.id,
+          startDate: timeWindow.startDate,
+        });
+        return {
+          sourceId: 'texas_permits:warehouse',
+          sourceLabel: 'TREC Building Permits',
+          points: [
+            { x: '2021-04-01', y: 1024 },
+            { x: '2025-04-01', y: 1180 },
+          ],
+        };
+      },
       fetchMetricSeries: async (args) => {
         calls.push({
           submarketId: args.submarketId,
@@ -780,14 +879,19 @@ test('returns a comparison-ready permit county history result', async () => {
     }
   );
 
-  assert.deepStrictEqual(calls, [{
-    submarketId: 'county:harris-tx',
-    metricName: 'Permit_Units',
+  assert.deepStrictEqual(specializedCalls, [{
+    metric: 'permit_units',
+    subjectId: 'county:TX:harris-county',
     startDate: '2021-04-01',
   }]);
+  assert.deepStrictEqual(calls, []);
   assert.strictEqual(result.metric, 'permit_units');
   assert.strictEqual(result.metricLabel, 'Permit units');
   assert.strictEqual(result.timeWindow.startDate, '2021-04-01');
+  assert.strictEqual(result.debug?.historySources[0]?.selectedSourceId, 'texas_permits:warehouse');
+  assert.strictEqual(result.debug?.historySources[0]?.specializedRowsFound, 2);
+  assert.strictEqual(result.debug?.historySources[0]?.fallbackUsed, false);
+  assert.strictEqual(result.debug?.historySources[0]?.finalSourceId, 'texas_permits:warehouse');
   assert.strictEqual(result.series[0]?.subject.kind, 'county');
   assert.deepStrictEqual(
     result.series[0]?.points,
@@ -796,7 +900,64 @@ test('returns a comparison-ready permit county history result', async () => {
       { x: '2025-04-01', y: 1180 },
     ]
   );
-  assert.ok(result.citations.length >= 1);
+  assert.strictEqual(result.citations[0]?.id, 'texas_permits:warehouse');
+  assert.strictEqual(result.citations[0]?.label, 'TREC Building Permits');
+});
+
+test('falls back to shared metric history when the specialized Texas permit source has no rows', async () => {
+  const { getAnalyticalComparisonForTest } = await loadMarketDataRouterModule();
+  const sharedCalls: Array<{ submarketId: string; metricName: string; startDate: string }> = [];
+
+  const result = await getAnalyticalComparisonForTest(
+    {
+      comparisonMode: 'history',
+      metric: 'permit_units',
+      subjectMarket: { kind: 'county', id: 'county:TX:harris-county', label: 'Harris County, TX' },
+      comparisonMarket: null,
+      timeWindow: { mode: 'relative', unit: 'years', value: 5 },
+    },
+    {
+      now: new Date('2026-04-18T00:00:00.000Z'),
+      fetchSpecializedHistorySeries: async () => null,
+      fetchMetricSeries: async (args) => {
+        sharedCalls.push({
+          submarketId: args.submarketId,
+          metricName: args.metricName,
+          startDate: args.startDate,
+        });
+        return [
+          {
+            submarket_id: 'county:TX:harris-county',
+            metric_name: 'Permit_Units',
+            metric_value: 1024,
+            time_period: '2021-04-01',
+            data_source: 'Census BPS',
+            visual_bucket: 'TIME_SERIES',
+            created_at: '2026-04-18T00:00:00.000Z',
+          },
+          {
+            submarket_id: 'county:TX:harris-county',
+            metric_name: 'Permit_Units',
+            metric_value: 1180,
+            time_period: '2025-04-01',
+            data_source: 'Census BPS',
+            visual_bucket: 'TIME_SERIES',
+            created_at: '2026-04-18T00:00:00.000Z',
+          },
+        ];
+      },
+    }
+  );
+
+  assert.deepStrictEqual(sharedCalls, [{
+    submarketId: 'county:TX:harris-county',
+    metricName: 'Permit_Units',
+    startDate: '2021-04-01',
+  }]);
+  assert.strictEqual(result.debug?.historySources[0]?.selectedSourceId, 'texas_permits');
+  assert.strictEqual(result.debug?.historySources[0]?.specializedRowsFound, 0);
+  assert.strictEqual(result.debug?.historySources[0]?.fallbackUsed, true);
+  assert.strictEqual(result.citations[0]?.label, 'Census BPS / Projectr master data');
 });
 
 test('rejects a non-null comparison market for history requests', async () => {
