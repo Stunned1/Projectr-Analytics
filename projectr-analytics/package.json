@@ -16,7 +16,8 @@
     "ingest:texas:demographics": "tsx scripts/ingest-texas-demographics.ts",
     "populate:centroids": "tsx scripts/populate-centroids.ts",
     "ingest:permits": "tsx scripts/ingest-permits.ts",
-    "warm:demo": "tsx scripts/warm-demo-zips.ts"
+    "warm:demo": "tsx scripts/warm-demo-zips.ts",
+    "warm:houston:permits": "tsx scripts/warm-houston-permit-geocodes.ts"
   },
   "dependencies": {
     "@deck.gl/aggregation-layers": "^9.2.11",

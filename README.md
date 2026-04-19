@@ -115,7 +115,7 @@ For Texas statewide ZIP/ZCTA coverage seeding, run `npm run load:texas:zctas -- 
 ### First-time data setup
 1. Download Zillow CSVs (see section below) into `zillow-csv's/` at repo root
 2. `cd projectr-analytics && npm install`
-3. In Supabase SQL Editor, run migrations under `projectr-analytics/supabase/migrations/`: `20260411120000_zip_geocode_cache.sql` (ZIP geocode cache), `20260411180000_zillow_zori_monthly.sql` (monthly ZORI for PDF charts), `20260411190000_saved_sites.sql` (analyst shortlist; requires Auth), and `20260411200000_saved_sites_aggregate.sql` (multi-area shortlist replay)
+3. In Supabase SQL Editor, run migrations under `projectr-analytics/supabase/migrations/`: `20260411120000_zip_geocode_cache.sql` (ZIP geocode cache), `20260411180000_zillow_zori_monthly.sql` (monthly ZORI for PDF charts), `20260411190000_saved_sites.sql` (analyst shortlist; requires Auth), `20260411200000_saved_sites_aggregate.sql` (multi-area shortlist replay), and `20260419090000_address_geocode_cache.sql` (persistent forward-geocode cache for uploads and Houston raw permits)
 4. `npm run ingest:zillow` - loads Zillow data into Supabase
 5. `npm run populate:centroids` - run 6-7 times until "All centroids already populated" (geocodes ~7,661 ZIPs)
 6. `npm run ingest:permits` - ingests NYC DOB building permits into `nyc_permits` table (all 5 boroughs, NB/A1/A2/DM, 2022+); takes ~10-20 min
@@ -123,6 +123,7 @@ For Texas statewide ZIP/ZCTA coverage seeding, run `npm run load:texas:zctas -- 
 8. Optional Texas source loads: run the official-source fetchers directly with `npm run ingest:texas:housing -- --fetch [--scope county|metro|both] [--match houston,harris] [--limit 5]`, `npm run ingest:texas:permits -- --fetch [--scope county|metro|both]`, and `npm run ingest:texas:demographics -- --fetch [--dataset estimates|projections] [--scope county|metro|both] [--scenario High|Mid|Low]`; `--file <path>` still works as a manual fallback for local exports.
 9. `npm run dev`
 10. Optional before demos/recordings: with `npm run dev` running, `npm run warm:demo` - warms cache for ZIPs 77002, 75201, and 78701 via market/transit/trends/cycle APIs (`WARM_BASE_URL` overrides default `http://127.0.0.1:3000`).
+11. Optional before Houston permit demos: run `npm run warm:houston:permits -- --limit 500` first, then rerun without `--limit` when you want the full recent archive geocoded into `address_geocode_cache` for point rendering instead of ZIP-centroid fallbacks.
 
 ### Known setup issues
 - **Shortlist / `saved_sites`** - enable **Anonymous sign-ins** under Supabase Authentication → Providers (or use email/OAuth); the app calls `signInAnonymously()` when there is no session so `saved_sites` inserts satisfy RLS.
@@ -212,6 +213,10 @@ _04.18.2026_
 - Full-build verification now type-checks through the shared chart card, router adapters, Texas ingest helpers, and lazy Supabase client creation instead of failing earlier on eager client initialization or stale write-row aliases.
 - Phase 1 agent/chart convergence is now considered complete for the Texas-first scope after the shared chart contract, live assistant rendering, imported-data bridge, and market PDF adapter all passed the targeted verification set.
 
+_04.19.2026_
+- Added a persistent `address_geocode_cache` plus `npm run warm:houston:permits`, so Houston raw permits can graduate from ZIP-centroid-only fallbacks to Austin-style point rendering without re-geocoding the same addresses on every request.
+- `lib/texas-raw-permits.ts` now resolves cached Houston address points before falling back to canonical ZIP centroids, and only spends a bounded live-geocode budget on cold misses during route requests.
+
 **Bug Fixes**
 
 _4.11.2026_
@@ -264,6 +269,9 @@ _04.18.2026_
 - The Texas ZCTA loader now prefers Census-resolved county names over polluted lookup labels like `TX`, and the rebuilt `texas_zcta_dim` BigQuery table no longer carries poisoned county names.
 - `market`, `aggregate`, `neighbors`, and metro benchmark flows now resolve Texas ZIP metadata through one shared canonical ZIP-context helper, so metro labels, origin centroids, and peer ZIP sets stop diverging by route.
 
+_04.19.2026_
+- `scripts/warm-houston-permit-geocodes.ts` now shims `server-only` in its Node entrypoint, so `npm run warm:houston:permits` executes the documented Houston geocode warm instead of crashing before the cache fill starts.
+
 **Map & Visualization**
 
 _4.8.2026_
@@ -308,6 +316,10 @@ _04.16.2026_
 
 _04.18.2026_
 - Added a shared `recharts`-based Scout chart card with citation footer rendering in the live assistant terminal and bridged imported-data chart previews onto the same chart contract.
+
+_04.19.2026_
+- Houston raw permit searches now render true 3D pins for address-geocoded records and reserve heatmap fallbacks for unresolved ZIP-centroid rows, so the map stops pretending every Houston record has parcel-level precision.
+- Texas raw permit 3D columns now use stronger category-based fallback heights when row-level valuation, square footage, and unit counts are missing, so Houston’s address-geocoded permits no longer render as near-flat stubs.
 - The market report PDF now routes its rent, permit, and search-trends chart inputs through the shared Scout chart contract before rendering them with the existing React PDF chart components.
 - City and county searches now render a real Census outer polygon beneath the ZIP choropleth and keep the outline on top, so aggregate area views retain a coherent shell even where individual ZIP coverage is thin or missing.
 - City searches no longer draw legal municipal boundary overlays by default after Houston-style annexation geometry proved too noisy for the product, while county searches keep their outer boundary shell.
@@ -354,7 +366,7 @@ _04.18.2026_
 - **Reloaded upload EDA can still fall back to sampled rows** - Imported datasets persist full rows in IndexedDB, but the assistant may still analyze the raw-table sample after a reload until the larger working-row payload is rehydrated into the current session.
 - **County choropleths still depend on available ZIP coverage** - County searches now draw the outer county polygon as a first-class overlay, but counties with thin Zillow coverage can still show only a sparse set of filled ZIPs inside that shell until we add broader county-to-ZIP market coverage or a separate county-level metric fill.
 - **Full Texas TREC backfills are network-heavy** - The new direct TREC fetch mode removes manual export prep, but statewide county + metro backfills still make hundreds of remote requests; use `--scope`, `--match`, and `--limit` for fast QA seeds until we add scheduled/background ingest orchestration.
-- **Texas raw permits currently only work in Austin** - Austin is the only Texas market with a wired row-level permit feed in Scout today because the Austin Open Data source exposes usable permit records that can be normalized into the shared raw-permit schema for New Building, Demolition, and Major Renovation views. Dallas, Houston, San Antonio, Fort Worth, and the rest of Texas still fall back to TREC place-level monthly permit activity because they do not yet have shared, normalized raw permit adapters in this repo.
+- **Houston raw permit point coverage depends on the address geocode cache** - Houston’s weekly permit workbooks expose addresses but not source coordinates, so Scout only renders Austin-style point pins for rows already resolved into `address_geocode_cache`; cold misses still fall back to ZIP centroids until `npm run warm:houston:permits` fills the cache.
 - **Derived city market footprints are not implemented yet** - City searches now intentionally skip legal municipal outlines because places like Houston are visually noisy, but Scout does not yet build a cleaner ZIP-union or market-footprint shell as a replacement.
 - **Sandboxed PDF adapter verification** - `tests/lib/report/scout-chart-pdf-adapter.test.ts` can hit `spawn EPERM` under the current sandbox even though the other targeted convergence tests pass; rerun that file outside the sandbox before treating the full targeted verification set as environment-clean.
 
@@ -406,7 +418,7 @@ npm run ingest:zillow
 
 - **Texas parcel polygons outside NYC-style workflows** — TxGIO parcel coverage is optional, county-scoped, and not normalized into the default MVP path. Wiring parcel polygons across Texas cleanly would require county-on-demand ingest, spatial tiling, and a separate shared parcel contract so statewide loads do not wreck latency.
 
-- **Statewide raw Texas permit records** — Texas now has a live place-level permit activity layer, but Austin is the only city with parcel / filing-level raw permit records wired into the shared map flow. The broader statewide raw-permit pass is still deferred because the current TREC source is aggregated by place-month, and adding Dallas, Houston, San Antonio, Fort Worth, or county-on-demand raw records would require city-specific source validation plus new normalization adapters.
+- **Statewide raw Texas permit records** — Texas now has a live place-level permit activity layer plus city-specific raw adapters for Austin and Houston, but the broader statewide raw-permit pass is still deferred because Houston still depends on a warmed address cache and the remaining major cities would require their own source validation, coordinate strategy, and normalization adapters.
 
 - **Shortlist attachments (CSV + agent chat)** — Would require `saved_sites` JSONB column(s) or a sibling table, size limits, and UI to “attach workspace” on save plus restore flow (rehydrate markers store + optional transcript). Blocked on schema/auth product decisions.
 

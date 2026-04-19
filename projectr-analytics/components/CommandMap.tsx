@@ -254,6 +254,7 @@ interface TexasPermitActivityResponse {
 }
 
 type TexasRawPermitCategory = 'new_construction' | 'major_renovation' | 'demolition'
+type TexasRawPermitLocationPrecision = 'source_coordinates' | 'zip_centroid'
 
 interface TexasRawPermitPayload {
   id: string
@@ -275,6 +276,7 @@ interface TexasRawPermitPayload {
   square_feet: number | null
   housing_units: number | null
   source_url: string | null
+  location_precision?: TexasRawPermitLocationPrecision
 }
 
 interface TexasRawPermitResponse {
@@ -352,6 +354,34 @@ function getTexasRawPermitFillColor(
     case 'demolition':
       return [220, 80, 80, 230]
   }
+}
+
+function getTexasRawPermitFallbackElevation(category: TexasRawPermitCategory): number {
+  switch (category) {
+    case 'new_construction':
+      return 96
+    case 'major_renovation':
+      return 72
+    case 'demolition':
+      return 56
+  }
+}
+
+function getTexasRawPermitElevation(permit: TexasRawPermitPayload): number {
+  const valuation = Math.max(permit.valuation ?? 0, 0)
+  const squareFeet = Math.max(permit.square_feet ?? 0, 0)
+  const units = Math.max(permit.housing_units ?? 0, 0)
+
+  if (valuation === 0 && squareFeet === 0 && units === 0) {
+    return getTexasRawPermitFallbackElevation(permit.category)
+  }
+
+  return (
+    16 +
+    Math.log10(valuation + 1) * 22 +
+    Math.log10(squareFeet + 1) * 14 +
+    units * 10
+  )
 }
 
 function formatPermitDate(value: string | null | undefined): string | null {
@@ -813,6 +843,14 @@ function CommandMap({
     }).toString()
   }, [activeStateAbbr, texasPermitScope])
   const usingTexasRawPermits = !nycFeatureAvailable && texasRawPermitData.length > 0
+  const texasRawPermitExactCount = useMemo(
+    () =>
+      texasRawPermitData.filter((permit) => permit.location_precision === 'source_coordinates').length,
+    [texasRawPermitData]
+  )
+  const texasRawPermitApproximateCount = texasRawPermitData.length - texasRawPermitExactCount
+  const usingApproximateOnlyTexasRawPermits =
+    texasRawPermitData.length > 0 && texasRawPermitExactCount === 0
   const cityBoundaryKey = useMemo(
     () => (cityZips?.length ? cityZips.map((z) => z.zip).join(',') : null),
     [cityZips]
@@ -1123,7 +1161,7 @@ function CommandMap({
       if (texasRawPermitQuery) {
         try {
           const rawData = await dedupedFetchJson<TexasRawPermitResponse>(`/api/permits/texas/raw?${texasRawPermitQuery}`, {
-            ttlMs: 15 * 60 * 1000,
+            ttlMs: 60 * 1000,
           })
           if (cancelled) return
           const permits = rawData.permits ?? []
@@ -1752,9 +1790,12 @@ function CommandMap({
             : texasRawPermitData
           const rawHeatData =
             activeTexasRawCategories == null ? permitHeatPoints : buildTexasRawPermitHeatPoints(rawPermits)
+          const exactRawPermits = rawPermits.filter(
+            (permit) => permit.location_precision === 'source_coordinates'
+          )
           const texasRawPermit3DZoomThreshold = 13
 
-          if (mapZoom < texasRawPermit3DZoomThreshold) {
+          if (mapZoom < texasRawPermit3DZoomThreshold || exactRawPermits.length === 0) {
             if (rawHeatData.length > 0) {
               result.push(
                 new HeatmapLayer({
@@ -1776,26 +1817,16 @@ function CommandMap({
                 })
               )
             }
-          } else if (rawPermits.length > 0) {
+          } else if (exactRawPermits.length > 0) {
             result.push(
               new ColumnLayer({
                 id: 'texas-raw-permits-3d',
-                data: rawPermits,
+                data: exactRawPermits,
                 diskResolution: 6,
                 radius: 10,
                 extruded: true,
                 getPosition: (d: TexasRawPermitPayload) => [d.lng, d.lat],
-                getElevation: (d: TexasRawPermitPayload) => {
-                  const valuation = Math.max(d.valuation ?? 0, 0)
-                  const squareFeet = Math.max(d.square_feet ?? 0, 0)
-                  const units = Math.max(d.housing_units ?? 0, 0)
-                  return (
-                    16 +
-                    Math.log10(valuation + 1) * 22 +
-                    Math.log10(squareFeet + 1) * 14 +
-                    units * 10
-                  )
-                },
+                getElevation: (d: TexasRawPermitPayload) => getTexasRawPermitElevation(d),
                 getFillColor: (d: TexasRawPermitPayload) => getTexasRawPermitFillColor(d.category),
                 getLineColor: [255, 230, 180, 220],
                 lineWidthMinPixels: 1,
@@ -2562,11 +2593,15 @@ function CommandMap({
                 })}
               </div>
               <p className="text-[10px] leading-relaxed text-zinc-400 mt-1.5">
-                Austin raw building permits are filtered to new construction, demolition, and major renovation only.
+                {texasRawPermitExactCount === texasRawPermitData.length
+                  ? 'Raw permits are geocoded to address points and support 3D pins when you zoom in.'
+                  : texasRawPermitExactCount > 0
+                    ? `${texasRawPermitExactCount.toLocaleString()} permits are geocoded to address points; ${texasRawPermitApproximateCount.toLocaleString()} still fall back to ZIP centroids until the address cache is warmed.`
+                    : 'Houston raw permits are still using ZIP-centroid fallbacks because the address geocode cache is not warm yet.'}
               </p>
               <p className="text-[9px] text-zinc-600 mt-1.5">
-                {texasRawPermitData.length.toLocaleString()} permits loaded · {mapZoom < 13 ? `Heatmap · zoom ${Math.round(mapZoom)}` : `3D · zoom ${Math.round(mapZoom)}`}
-                {mapZoom < 13 && <span className="text-zinc-700"> (zoom in for 3D)</span>}
+                {texasRawPermitData.length.toLocaleString()} permits loaded · {mapZoom < 13 || usingApproximateOnlyTexasRawPermits ? `Heatmap · zoom ${Math.round(mapZoom)}` : `3D pins · zoom ${Math.round(mapZoom)}`}
+                {mapZoom < 13 && texasRawPermitExactCount > 0 && <span className="text-zinc-700"> (zoom in for 3D)</span>}
               </p>
             </div>
             <div className="mx-3 h-px bg-border/70" />
