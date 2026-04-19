@@ -3,6 +3,7 @@ import 'server-only'
 import { getBigQueryClient } from './bigquery'
 import { BIGQUERY_TABLES, getBigQueryTableIdentifier } from './bigquery-tables'
 import type { AnalyticalSubject, AnalyticalComparisonPoint } from './market-data-router'
+import { normalizeBigQueryDateLike } from './types'
 
 export interface TexasPermitHistorySeries {
   sourceId: string
@@ -11,8 +12,19 @@ export interface TexasPermitHistorySeries {
 }
 
 interface BigQueryQueryClient {
-  query: (options: { query: string; params: Record<string, unknown> }) => Promise<[Array<Record<string, unknown>>]>
+  query: (options: {
+    query: string
+    params: Record<string, unknown>
+    types?: Record<string, unknown>
+  }) => Promise<[Array<Record<string, unknown>>]>
 }
+
+const TEXAS_METRO_WAREHOUSE_ALIASES = new Map<string, string[]>([
+  ['austin', ['Austin-Round Rock-Georgetown', 'Austin-Round Rock']],
+  ['houston', ['Houston-The Woodlands-Sugar Land', 'Houston-Pasadena-The Woodlands']],
+  ['dallas', ['Dallas-Fort Worth-Arlington', 'Dallas-Plano-Irving']],
+  ['san antonio', ['San Antonio-New Braunfels']],
+])
 
 function buildSubjectLabelAliases(subject: AnalyticalSubject): string[] {
   const aliases = new Set<string>()
@@ -31,6 +43,12 @@ function buildSubjectLabelAliases(subject: AnalyticalSubject): string[] {
     if (withoutState) aliases.add(withoutState)
     const base = withoutState.replace(/\s+metro(?:\s+area)?$/i, '').trim()
     if (base) aliases.add(base)
+
+    const warehouseAliases = TEXAS_METRO_WAREHOUSE_ALIASES.get(base.toLowerCase()) ?? []
+    for (const alias of warehouseAliases) {
+      aliases.add(alias)
+      aliases.add(`${alias}, TX`)
+    }
   }
 
   return Array.from(aliases)
@@ -48,39 +66,40 @@ export async function fetchTexasPermitHistorySeries(
   const client = dependencies.client ?? ((await getBigQueryClient()) as unknown as BigQueryQueryClient)
   const permitsTable = getBigQueryTableIdentifier(BIGQUERY_TABLES.texasPermits)
   const geographyTable = getBigQueryTableIdentifier(BIGQUERY_TABLES.dimGeography)
-  const metricsTable = getBigQueryTableIdentifier(BIGQUERY_TABLES.dimMetrics)
+  const subjectLabels = buildSubjectLabelAliases(args.subject).map((value) => value.toLowerCase())
 
   const [rows] = await client.query({
     query: `
       SELECT
         permits.time_period AS time_period,
-        CAST(permits.metric_value AS FLOAT64) AS metric_value,
-        COALESCE(metrics.data_source, 'TREC Building Permits') AS source_label
+        SUM(CAST(permits.metric_value AS FLOAT64)) AS metric_value,
+        'TREC Building Permits' AS source_label
       FROM ${permitsTable} AS permits
       INNER JOIN ${geographyTable} AS geography
-        ON permits.geo_id = geography.geo_id
-      INNER JOIN ${metricsTable} AS metrics
-        ON permits.metric_id = metrics.metric_id
+        ON (
+          (LOWER(@geoType) = 'county' AND SAFE_CAST(geography.fips_code AS INT64) = permits.geo_id)
+          OR (LOWER(@geoType) != 'county' AND geography.geo_id = permits.geo_id)
+        )
       WHERE LOWER(geography.geo_type) = LOWER(@geoType)
         AND LOWER(geography.display_name) IN UNNEST(@subjectLabels)
         AND permits.time_period >= @startDate
-        AND LOWER(metrics.metric_id) = 'permit_units'
+        AND permits.metric_id IN ('Permit_Single_Family_Units', 'Permit_Multi_Family_Units')
+      GROUP BY permits.time_period
       ORDER BY permits.time_period ASC
     `,
     params: {
       geoType: args.subject.kind,
-      subjectLabels: buildSubjectLabelAliases(args.subject).map((value) => value.toLowerCase()),
+      subjectLabels,
       startDate: args.startDate,
+    },
+    types: {
+      subjectLabels: ['STRING'],
     },
   })
 
   const points = rows
     .map((row) => {
-      const x = typeof row.time_period === 'string'
-        ? row.time_period
-        : row.time_period instanceof Date
-          ? row.time_period.toISOString().slice(0, 10)
-          : null
+      const x = normalizeBigQueryDateLike(row.time_period)
       const y = Number(row.metric_value)
       if (!x || !Number.isFinite(y)) return null
       return { x, y }

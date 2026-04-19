@@ -5,7 +5,10 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { normalizeAgentTrace } from '@/lib/agent-trace'
-import { validateAgentGroundingPayloadWithService } from '@/lib/agent-grounding-validator'
+import {
+  validateAgentGroundingPayloadWithService,
+  type AgentGroundingValidation,
+} from '@/lib/agent-grounding-validator'
 import type {
   AgentAction,
   AgentDriveTimeEvidenceResult,
@@ -43,6 +46,7 @@ import type {
 } from '@/lib/agent-types'
 import type { AgentPlaceGroundingEvidenceResult } from '@/lib/agent-types'
 import { retrieveDriveTimeGrounding } from '@/lib/agent-drive-time-grounding'
+import type { TexasRawPermitResult } from '@/lib/texas-raw-permits'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -253,6 +257,15 @@ type AgentPipelineResult = {
   chart?: ScoutChartOutput | null
 }
 
+type GroundingValidationPayload = {
+  message: string
+  trace: AgentTrace
+  chart?: ScoutChartOutput | null
+  synthetic: boolean
+}
+
+type GroundingValidationFn = (payload: GroundingValidationPayload) => Promise<AgentGroundingValidation>
+
 type AgentCitation = ScoutChartOutput['citations'][number]
 
 function getCanonicalEvidenceCitations(result: AgentPipelineResult): AgentCitation[] {
@@ -294,10 +307,17 @@ function tagQuantitativeClaims(message: string, citations: readonly AgentCitatio
   })
 }
 
-async function finalizeAgentPipelineResult(result: AgentPipelineResult): Promise<AgentPipelineResult> {
+async function finalizeAgentPipelineResult(
+  result: AgentPipelineResult,
+  dependencies: {
+    validateGroundingPayload?: GroundingValidationFn
+  } = {}
+): Promise<AgentPipelineResult> {
   const citations = getCanonicalEvidenceCitations(result)
   const taggedMessage = tagQuantitativeClaims(result.message, citations)
-  const grounding = await validateAgentGroundingPayloadWithService({
+  const validateGroundingPayload =
+    dependencies.validateGroundingPayload ?? validateAgentGroundingPayloadWithService
+  const grounding = await validateGroundingPayload({
     message: taggedMessage,
     trace: result.trace,
     chart: result.chart,
@@ -317,6 +337,21 @@ async function finalizeAgentPipelineResult(result: AgentPipelineResult): Promise
   }
 
   const evidenceMessage = grounding.validation.userMessage?.trim() ?? ''
+
+  if (
+    grounding.validation.status === 'citation_incomplete' &&
+    grounding.normalizedEvidence.status === 'grounded' &&
+    result.chart
+  ) {
+    return {
+      ...result,
+      message: evidenceMessage ? `${taggedMessage} ${evidenceMessage}`.trim() : taggedMessage,
+      trace: {
+        ...trace,
+        caveats: evidenceMessage ? [...(trace.caveats ?? []), evidenceMessage] : trace.caveats,
+      },
+    }
+  }
 
   return {
     ...result,
@@ -521,6 +556,8 @@ type HistoryComparisonDependencies = {
   getPublicMacroEvidence?: (query: AgentPublicMacroQuery) => Promise<AgentPublicMacroEvidenceResult>
   getPlaceGrounding?: (query: AgentPlaceGroundingQuery) => Promise<AgentPlaceGroundingEvidenceResult>
   getDriveTimeGrounding?: (query: AgentDriveTimeQuery) => Promise<AgentDriveTimeEvidenceResult>
+  getTexasRawPermits?: (scope: { city: string; state?: string | null }) => Promise<TexasRawPermitResult | null>
+  validateGroundingPayload?: GroundingValidationFn
 }
 
 const HISTORY_METRIC_CONFIG: Record<
@@ -554,7 +591,7 @@ const HISTORY_METRIC_CONFIG: Record<
 
 function hasHistoryIntent(userMessage: string): boolean {
   return (
-    /\b(history|trend|trends|timeline|over time|time series|changed|change)\b/i.test(userMessage) ||
+    /\b(history|trend|trends|timeline|over time|time series|changed|change|monthly|month-by-month)\b/i.test(userMessage) ||
     /\b(?:last|past)\s+\d+\s+(?:year|years|month|months)\b/i.test(userMessage)
   )
 }
@@ -638,6 +675,257 @@ function extractHistorySubjectPhrase(prompt: string, subjectToken: 'county' | 'm
   return extractFromTail(prompt.trim())
 }
 
+const HISTORY_TEXAS_CITY_TO_METRO = new Map<string, string>([
+  ['austin', 'Austin'],
+  ['houston', 'Houston'],
+  ['dallas', 'Dallas'],
+  ['san antonio', 'San Antonio'],
+])
+
+const HISTORY_TEXAS_CITY_TO_COUNTY_PROXY = new Map<string, string>([
+  ['austin', 'Travis County'],
+  ['houston', 'Harris County'],
+  ['dallas', 'Dallas County'],
+  ['san antonio', 'Bexar County'],
+])
+
+const AUSTIN_MONTHLY_HISTORY_START_DATE = '2024-01-01'
+
+function resolveTexasCityHistorySubject(prompt: string): AgentHistorySubject | null {
+  const parsed = resolveTexasCityHistoryName(prompt)
+  if (!parsed) return null
+
+  const cityKey = parsed.cityKey
+  const metroName = HISTORY_TEXAS_CITY_TO_METRO.get(cityKey)
+  if (!metroName) return null
+
+  return {
+    kind: 'metro',
+    id: buildMetroAreaKey(metroName, 'TX'),
+    label: `${metroName}, TX`,
+  }
+}
+
+function resolveTexasCityHistoryCountyProxy(prompt: string): AgentHistorySubject | null {
+  const parsed = resolveTexasCityHistoryName(prompt)
+  if (!parsed) return null
+
+  const cityKey = parsed.cityKey
+  const countyName = HISTORY_TEXAS_CITY_TO_COUNTY_PROXY.get(cityKey)
+  if (!countyName) return null
+
+  const countyBaseName = countyName.replace(/\s+county$/i, '').trim()
+  const cityDisplay = parsed.cityDisplay
+  return {
+    kind: 'county',
+    id: buildCountyAreaKey(countyBaseName, 'TX'),
+    label: `${cityDisplay}, TX (${countyName} proxy)`,
+  }
+}
+
+function resolveTexasCityHistoryName(
+  prompt: string
+): { cityKey: string; cityDisplay: string } | null {
+  const normalizedPrompt = prompt.replace(/\s+/g, ' ').trim()
+  for (const [cityKey, cityDisplay] of HISTORY_TEXAS_CITY_TO_METRO.entries()) {
+    const pattern = new RegExp(`\\b${cityKey.replace(/\s+/g, '\\s+')}(?:\\s*,\\s*(?:tx|texas))?\\b`, 'i')
+    if (pattern.test(normalizedPrompt)) {
+      return { cityKey, cityDisplay }
+    }
+  }
+
+  return null
+}
+
+function resolveAustinMonthlyPermitWindow(userMessage: string): AgentHistoryTimeWindow | null {
+  const explicit = userMessage.match(/\b(?:last|past)\s+(\d+)\s+(year|years|month|months)\b/i)
+  if (!explicit) {
+    return {
+      mode: 'relative',
+      unit: 'months',
+      value: 24,
+      label: 'Last 24 months',
+    }
+  }
+
+  const value = Number.parseInt(explicit[1] ?? '', 10)
+  const rawUnit = (explicit[2] ?? '').toLowerCase()
+  if (!Number.isFinite(value) || value <= 0) return null
+  if (rawUnit.startsWith('year')) return null
+
+  return {
+    mode: 'relative',
+    unit: 'months',
+    value,
+    label: `Last ${value} months`,
+  }
+}
+
+function normalizeAustinMonthlyTimeWindow(timeWindow: AgentHistoryTimeWindow): { startDate: string; label: string } {
+  if (timeWindow.mode !== 'relative' || timeWindow.unit !== 'months') {
+    throw new Error('Austin monthly permit history requires a monthly relative window.')
+  }
+
+  const now = new Date()
+  const startDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - timeWindow.value, 1))
+  const isoDate = `${startDate.getUTCFullYear()}-${String(startDate.getUTCMonth() + 1).padStart(2, '0')}-01`
+  return {
+    startDate: isoDate,
+    label: timeWindow.label ?? `Last ${timeWindow.value} months`,
+  }
+}
+
+function bucketAustinPermitsByMonth(
+  raw: TexasRawPermitResult,
+  startDate: string
+): Array<{ x: string; y: number }> {
+  const counts = new Map<string, number>()
+  const startMonth = startDate.slice(0, 7)
+
+  for (const permit of raw.permits) {
+    const issueDate = typeof permit.issue_date === 'string' ? permit.issue_date.trim() : ''
+    const month = issueDate.match(/^(\d{4}-\d{2})/)?.[1] ?? null
+    if (!month || month < startMonth) continue
+    counts.set(month, (counts.get(month) ?? 0) + 1)
+  }
+
+  return Array.from(counts.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([x, y]) => ({ x, y }))
+}
+
+async function maybeBuildAustinMonthlyPermitHistoryResponse(
+  userMessage: string,
+  metric: AgentHistoryMetric,
+  comparisonMarket: AgentHistorySubject | null,
+  dependencies: HistoryComparisonDependencies
+): Promise<AgentPipelineResult | null> {
+  const city = resolveTexasCityHistoryName(userMessage)
+  if (!city || city.cityKey !== 'austin' || metric !== 'permit_units' || comparisonMarket) return null
+
+  const timeWindow = resolveAustinMonthlyPermitWindow(userMessage)
+  if (!timeWindow) {
+    return {
+      message: 'Austin permit history is currently limited to monthly raw permit data since January 2024. Try a monthly window like the last 12 months.',
+      action: { type: 'none' as const },
+      trace: {
+        summary: 'Austin permit history is monthly-only for now',
+        taskType: 'spot_trends',
+        methodology:
+          'Scout recognized an Austin-specific permit-history request, but the bounded Austin path currently supports only monthly raw-permit aggregation from the live Austin Open Data source.',
+        keyFindings: ['No chart was generated.'],
+        evidence: ['Austin raw permit history is served only as monthly event counts from January 2024 onward.'],
+        caveats: ['Annual or multi-year Austin city permit history is not wired yet.'],
+        nextQuestions: ['Ask for monthly permit activity in Austin.', 'Ask for the last 12 months of permit data for Austin, Texas.'],
+      },
+      chart: null,
+    }
+  }
+
+  const normalizedWindow = normalizeAustinMonthlyTimeWindow(timeWindow)
+  if (normalizedWindow.startDate < AUSTIN_MONTHLY_HISTORY_START_DATE) {
+    return {
+      message: 'Austin permit history is currently limited to monthly raw permit data since January 2024. Try a shorter monthly window.',
+      action: { type: 'none' as const },
+      trace: {
+        summary: 'Austin permit history is monthly-only for now',
+        taskType: 'spot_trends',
+        methodology:
+          'Scout recognized an Austin-specific permit-history request, but the bounded Austin path only has raw monthly permit events beginning in January 2024.',
+        keyFindings: ['No chart was generated.'],
+        evidence: [`Requested window begins before ${AUSTIN_MONTHLY_HISTORY_START_DATE}.`],
+        caveats: ['Austin monthly history cannot answer windows earlier than January 2024 yet.'],
+        nextQuestions: ['Ask for the last 12 months of permit data for Austin, Texas.', 'Ask for monthly permit activity in Austin.'],
+      },
+      chart: null,
+    }
+  }
+
+  const fetchTexasRawPermits =
+    dependencies.getTexasRawPermits ??
+    (async (scope: { city: string; state?: string | null }) => {
+      const { getTexasRawPermits } = await import('@/lib/texas-raw-permits')
+      return getTexasRawPermits(scope)
+    })
+
+  const raw = await fetchTexasRawPermits({ city: 'Austin', state: 'TX' })
+  if (!raw) {
+    throw new Error('Austin raw permits are unavailable for the current request.')
+  }
+
+  const points = bucketAustinPermitsByMonth(raw, normalizedWindow.startDate)
+  if (points.length < 2) {
+    return {
+      message: 'Austin raw permits did not return enough monthly history to chart for that window.',
+      action: { type: 'none' as const },
+      trace: {
+        summary: 'Insufficient Austin monthly permit history',
+        taskType: 'spot_trends',
+        methodology:
+          'Scout aggregated monthly Austin raw permit events from the live Austin Open Data feed, but the requested window did not produce enough monthly buckets to chart.',
+        keyFindings: ['No chart was generated.'],
+        evidence: [`Monthly buckets returned: ${points.length}.`],
+        caveats: ['Austin monthly history only reflects raw permit events available from January 2024 onward.'],
+        nextQuestions: ['Ask for the last 12 months of permit data for Austin, Texas.', 'Ask for monthly permit activity in Austin.'],
+      },
+      chart: null,
+    }
+  }
+
+  const firstPoint = points[0]
+  const lastPoint = points[points.length - 1]
+  const citation: ScoutChartCitation = {
+    id: 'austin_raw_permits:monthly',
+    label: 'City of Austin Open Data building permits',
+    sourceType: 'public_dataset',
+    scope: 'Austin, TX',
+    note: 'Monthly permit counts aggregated from live Austin raw permit events.',
+    periodLabel: `${firstPoint.x} to ${lastPoint.x}`,
+  }
+
+  return finalizeAgentPipelineResult({
+    message: `Here is the ${normalizedWindow.label.toLowerCase()} monthly permit activity history for Austin, TX.`,
+    action: { type: 'none' as const },
+    trace: {
+      summary: 'Monthly permit activity history for Austin, TX',
+      taskType: 'spot_trends',
+      methodology:
+        'Scout aggregated live Austin raw permit events by issue month from the City of Austin Open Data feed and charted the monthly counts directly.',
+      keyFindings: [
+        `${points.length} monthly buckets were returned for Austin, TX.`,
+        `Monthly permit counts moved from ${firstPoint.y} to ${lastPoint.y} across ${normalizedWindow.label}.`,
+      ],
+      evidence: [
+        'Metric: Monthly permit count.',
+        `Window: ${normalizedWindow.label}.`,
+        'Source: City of Austin Open Data building permits.',
+      ],
+      caveats: ['Austin monthly history is currently limited to live raw permit events beginning in January 2024.'],
+      nextQuestions: ['Ask for another monthly Austin window.', 'Ask to compare the Austin monthly pattern against recent raw permit events.'],
+      citations: [citation],
+    },
+    chart: normalizeScoutChartOutput({
+      kind: 'bar',
+      title: 'Austin, TX monthly permit activity',
+      subtitle: 'Monthly counts from City of Austin Open Data raw permits',
+      summary: 'Grounded monthly Austin permit activity aggregated from live raw permit events.',
+      placeholder: false,
+      confidenceLabel: 'austin monthly raw permits',
+      xAxis: { key: 'period', label: 'Month' },
+      yAxis: { label: 'Permit count', valueFormat: 'number' },
+      series: [
+        {
+          key: 'austin:monthly_permits',
+          label: 'Austin, TX',
+          color: '#D76B3D',
+          points,
+        },
+      ],
+      citations: [citation],
+    }),
+  }, dependencies)
+}
+
 function resolveHistorySubjectMarket(
   userMessage: string,
   context: MapContext | null | undefined
@@ -674,6 +962,9 @@ function resolveHistorySubjectMarket(
       label: `${metroName}, TX`,
     }
   }
+
+  const texasCitySubject = resolveTexasCityHistorySubject(prompt)
+  if (texasCitySubject) return texasCitySubject
 
   const zip = prompt.match(/\b\d{5}\b/)?.[0] ?? context?.zip?.trim() ?? null
   if (zip) {
@@ -1666,6 +1957,14 @@ async function maybeBuildHistoryChartedResponse(
         )
   }
 
+  const austinMonthlyResponse = await maybeBuildAustinMonthlyPermitHistoryResponse(
+    userMessage,
+    metric,
+    peerMarkets?.[1] ?? null,
+    dependencies
+  )
+  if (austinMonthlyResponse) return austinMonthlyResponse
+
   const subjectMarket = peerMarkets?.[0] ?? resolveHistorySubjectMarket(userMessage, context)
   const comparisonMarket = peerMarkets?.[1] ?? null
   const timeWindow = resolveExplicitHistoryWindow(userMessage, metric)
@@ -1747,19 +2046,19 @@ async function maybeBuildHistoryChartedResponse(
       return getAnalyticalComparison(request)
     })
 
-  try {
+  const runHistoryComparison = async (currentSubjectMarket: AgentHistorySubject) => {
     const comparison = await fetchAnalyticalComparison(
       comparisonMarket
         ? {
             comparisonMode: 'peer_market',
             metric,
-            subjectMarket,
+            subjectMarket: currentSubjectMarket,
             comparisonMarket,
             timeWindow,
           }
-        : buildHistoryComparisonRequest(metric, subjectMarket, timeWindow)
+        : buildHistoryComparisonRequest(metric, currentSubjectMarket, timeWindow)
     )
-    const provenance = await getInternalEvidenceForHistoryComparison(comparison, dependencies, subjectMarket)
+    const provenance = await getInternalEvidenceForHistoryComparison(comparison, dependencies, currentSubjectMarket)
     const baseCitations =
       provenance.citations.length > 0 ? comparison.citations.filter(hasCompleteScoutChartCitation) : comparison.citations
     const enrichedCitations = mergeScoutChartCitationSets(baseCitations, provenance.citations)
@@ -1770,14 +2069,15 @@ async function maybeBuildHistoryChartedResponse(
     const chart = buildHistoryChartFromComparison(enrichedComparison)
     const subjectLine =
       enrichedComparison.comparisonMode === 'peer_market' && enrichedComparison.series.length >= 2
-        ? `${enrichedComparison.series[0]?.label ?? subjectMarket.label} versus ${enrichedComparison.series[1]?.label ?? comparisonMarket?.label ?? 'the comparison market'}`
-        : enrichedComparison.series[0]?.label ?? subjectMarket.label
+        ? `${enrichedComparison.series[0]?.label ?? currentSubjectMarket.label} versus ${enrichedComparison.series[1]?.label ?? comparisonMarket?.label ?? 'the comparison market'}`
+        : enrichedComparison.series[0]?.label ?? currentSubjectMarket.label
     const trace = buildHistoryTrace(enrichedComparison)
     const provenanceEvidence =
       provenance.records.length > 0
         ? [`Internal provenance matched: ${provenance.records.map((record) => record.label).join(', ')}.`]
         : []
-    return await finalizeAgentPipelineResult({
+
+    return finalizeAgentPipelineResult({
       message:
         enrichedComparison.comparisonMode === 'peer_market'
           ? `Here is the ${enrichedComparison.timeWindow.label.toLowerCase()} ${enrichedComparison.metricLabel.toLowerCase()} comparison for ${subjectLine}.`
@@ -1788,9 +2088,46 @@ async function maybeBuildHistoryChartedResponse(
         evidence: [...(trace.evidence ?? []), ...provenanceEvidence],
       },
       chart,
-    })
+    }, dependencies)
+  }
+
+  const countyProxySubject =
+    !comparisonMarket && metric !== 'rent' ? resolveTexasCityHistoryCountyProxy(userMessage) : null
+
+  try {
+    return await runHistoryComparison(subjectMarket)
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to build a grounded history response.'
+
+    if (
+      /insufficient historical data/i.test(message) &&
+      countyProxySubject &&
+      countyProxySubject.id !== subjectMarket.id
+    ) {
+      try {
+        return await runHistoryComparison(countyProxySubject)
+      } catch (proxyError) {
+        const proxyMessage =
+          proxyError instanceof Error ? proxyError.message : 'Unable to build a grounded history response.'
+        if (/insufficient historical data/i.test(proxyMessage)) {
+          return {
+            message: proxyMessage,
+            action: { type: 'none' as const },
+            trace: {
+              summary: 'Insufficient historical data',
+              taskType: 'spot_trends',
+              methodology:
+                'Scout delegated the request to the router, retried the city through a bounded county proxy, and still did not receive enough historical points to chart.',
+              keyFindings: ['No chart was generated.'],
+              evidence: [proxyMessage],
+              caveats: ['Try a broader time window or a subject with more persisted history.'],
+              nextQuestions: ['Ask for a longer history window.', 'Try a ZIP, county, or metro with more persisted rows.'],
+            },
+            chart: null,
+          }
+        }
+      }
+    }
 
     if (/unsupported analytical metric/i.test(message)) {
       return buildUnsupportedHistoryPayload(

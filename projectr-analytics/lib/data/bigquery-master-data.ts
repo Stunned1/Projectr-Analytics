@@ -302,9 +302,9 @@ export async function fetchMetricSeriesFromBigQuery(
     {
       submarketId: normalizedSubmarketId,
       metricName: normalizedMetricName,
-      dataSources,
-      startDate: options.startDate,
-      endDate: options.endDate,
+      ...(dataSources.length > 0 ? { dataSources } : {}),
+      ...(options.startDate ? { startDate: options.startDate } : {}),
+      ...(options.endDate ? { endDate: options.endDate } : {}),
       rowLimit: options.limit ?? DEFAULT_SERIES_LIMIT,
     },
     options
