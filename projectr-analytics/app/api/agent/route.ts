@@ -673,6 +673,58 @@ function extractHistorySubjectPhrase(prompt: string, subjectToken: 'county' | 'm
   return extractFromTail(prompt.trim())
 }
 
+const HISTORY_TEXAS_CITY_TO_METRO = new Map<string, string>([
+  ['austin', 'Austin'],
+  ['houston', 'Houston'],
+  ['dallas', 'Dallas'],
+  ['san antonio', 'San Antonio'],
+])
+
+const HISTORY_TEXAS_CITY_TO_COUNTY_PROXY = new Map<string, string>([
+  ['austin', 'Travis County'],
+  ['houston', 'Harris County'],
+  ['dallas', 'Dallas County'],
+  ['san antonio', 'Bexar County'],
+])
+
+function resolveTexasCityHistorySubject(prompt: string): AgentHistorySubject | null {
+  const cityPrompt = trimSubjectLeadIn(prompt).replace(/[.,;:!?]+$/g, '').trim()
+  if (!cityPrompt) return null
+
+  const parsed = splitTrailingUsState(cityPrompt)
+  if (parsed.stateAbbr && parsed.stateAbbr !== 'TX') return null
+
+  const cityKey = normalizeHistorySubjectName(parsed.name).toLowerCase()
+  const metroName = HISTORY_TEXAS_CITY_TO_METRO.get(cityKey)
+  if (!metroName) return null
+
+  return {
+    kind: 'metro',
+    id: buildMetroAreaKey(metroName, 'TX'),
+    label: `${metroName}, TX`,
+  }
+}
+
+function resolveTexasCityHistoryCountyProxy(prompt: string): AgentHistorySubject | null {
+  const cityPrompt = trimSubjectLeadIn(prompt).replace(/[.,;:!?]+$/g, '').trim()
+  if (!cityPrompt) return null
+
+  const parsed = splitTrailingUsState(cityPrompt)
+  if (parsed.stateAbbr && parsed.stateAbbr !== 'TX') return null
+
+  const cityKey = normalizeHistorySubjectName(parsed.name).toLowerCase()
+  const countyName = HISTORY_TEXAS_CITY_TO_COUNTY_PROXY.get(cityKey)
+  if (!countyName) return null
+
+  const countyBaseName = countyName.replace(/\s+county$/i, '').trim()
+  const cityDisplay = normalizeHistorySubjectName(parsed.name)
+  return {
+    kind: 'county',
+    id: buildCountyAreaKey(countyBaseName, 'TX'),
+    label: `${cityDisplay}, TX (${countyName} proxy)`,
+  }
+}
+
 function resolveHistorySubjectMarket(
   userMessage: string,
   context: MapContext | null | undefined
@@ -709,6 +761,9 @@ function resolveHistorySubjectMarket(
       label: `${metroName}, TX`,
     }
   }
+
+  const texasCitySubject = resolveTexasCityHistorySubject(prompt)
+  if (texasCitySubject) return texasCitySubject
 
   const zip = prompt.match(/\b\d{5}\b/)?.[0] ?? context?.zip?.trim() ?? null
   if (zip) {
@@ -1782,19 +1837,19 @@ async function maybeBuildHistoryChartedResponse(
       return getAnalyticalComparison(request)
     })
 
-  try {
+  const runHistoryComparison = async (currentSubjectMarket: AgentHistorySubject) => {
     const comparison = await fetchAnalyticalComparison(
       comparisonMarket
         ? {
             comparisonMode: 'peer_market',
             metric,
-            subjectMarket,
+            subjectMarket: currentSubjectMarket,
             comparisonMarket,
             timeWindow,
           }
-        : buildHistoryComparisonRequest(metric, subjectMarket, timeWindow)
+        : buildHistoryComparisonRequest(metric, currentSubjectMarket, timeWindow)
     )
-    const provenance = await getInternalEvidenceForHistoryComparison(comparison, dependencies, subjectMarket)
+    const provenance = await getInternalEvidenceForHistoryComparison(comparison, dependencies, currentSubjectMarket)
     const baseCitations =
       provenance.citations.length > 0 ? comparison.citations.filter(hasCompleteScoutChartCitation) : comparison.citations
     const enrichedCitations = mergeScoutChartCitationSets(baseCitations, provenance.citations)
@@ -1805,14 +1860,15 @@ async function maybeBuildHistoryChartedResponse(
     const chart = buildHistoryChartFromComparison(enrichedComparison)
     const subjectLine =
       enrichedComparison.comparisonMode === 'peer_market' && enrichedComparison.series.length >= 2
-        ? `${enrichedComparison.series[0]?.label ?? subjectMarket.label} versus ${enrichedComparison.series[1]?.label ?? comparisonMarket?.label ?? 'the comparison market'}`
-        : enrichedComparison.series[0]?.label ?? subjectMarket.label
+        ? `${enrichedComparison.series[0]?.label ?? currentSubjectMarket.label} versus ${enrichedComparison.series[1]?.label ?? comparisonMarket?.label ?? 'the comparison market'}`
+        : enrichedComparison.series[0]?.label ?? currentSubjectMarket.label
     const trace = buildHistoryTrace(enrichedComparison)
     const provenanceEvidence =
       provenance.records.length > 0
         ? [`Internal provenance matched: ${provenance.records.map((record) => record.label).join(', ')}.`]
         : []
-    return await finalizeAgentPipelineResult({
+
+    return finalizeAgentPipelineResult({
       message:
         enrichedComparison.comparisonMode === 'peer_market'
           ? `Here is the ${enrichedComparison.timeWindow.label.toLowerCase()} ${enrichedComparison.metricLabel.toLowerCase()} comparison for ${subjectLine}.`
@@ -1824,8 +1880,45 @@ async function maybeBuildHistoryChartedResponse(
       },
       chart,
     }, dependencies)
+  }
+
+  const countyProxySubject =
+    !comparisonMarket && metric !== 'rent' ? resolveTexasCityHistoryCountyProxy(userMessage) : null
+
+  try {
+    return await runHistoryComparison(subjectMarket)
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to build a grounded history response.'
+
+    if (
+      /insufficient historical data/i.test(message) &&
+      countyProxySubject &&
+      countyProxySubject.id !== subjectMarket.id
+    ) {
+      try {
+        return await runHistoryComparison(countyProxySubject)
+      } catch (proxyError) {
+        const proxyMessage =
+          proxyError instanceof Error ? proxyError.message : 'Unable to build a grounded history response.'
+        if (/insufficient historical data/i.test(proxyMessage)) {
+          return {
+            message: proxyMessage,
+            action: { type: 'none' as const },
+            trace: {
+              summary: 'Insufficient historical data',
+              taskType: 'spot_trends',
+              methodology:
+                'Scout delegated the request to the router, retried the city through a bounded county proxy, and still did not receive enough historical points to chart.',
+              keyFindings: ['No chart was generated.'],
+              evidence: [proxyMessage],
+              caveats: ['Try a broader time window or a subject with more persisted history.'],
+              nextQuestions: ['Ask for a longer history window.', 'Try a ZIP, county, or metro with more persisted rows.'],
+            },
+            chart: null,
+          }
+        }
+      }
+    }
 
     if (/unsupported analytical metric/i.test(message)) {
       return buildUnsupportedHistoryPayload(

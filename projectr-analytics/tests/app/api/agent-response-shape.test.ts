@@ -792,6 +792,92 @@ test('returns a grounded permit history chart for an explicit Texas metro prompt
   assert.match(response.message, /Austin/i)
 })
 
+test('treats an explicit Texas city history prompt as the matching bounded metro subject', async () => {
+  const calls: AnalyticalComparisonRequest[] = []
+  const response = await buildHistoryChartedResponseForTest('analyze the last 10 years of permit data for Austin, Texas', null, {
+    getAnalyticalComparison: async (request: AnalyticalComparisonRequest): Promise<AnalyticalComparisonResult> => {
+      calls.push(request)
+      return {
+        comparisonMode: 'history',
+        metric: 'permit_units',
+        metricLabel: 'Permit units',
+        timeWindow: { mode: 'relative', startDate: '2016-04-01', label: 'Last 10 years', monthsBack: 120 },
+        series: [
+          {
+            key: 'metro:TX:austin:permit_units',
+            label: 'Austin, TX',
+            subject: { kind: 'metro', id: 'metro:TX:austin', label: 'Austin, TX' },
+            points: [
+              { x: '2016-04-01', y: 1024 },
+              { x: '2026-04-01', y: 1188 },
+            ],
+          },
+        ],
+        citations: [
+          {
+            id: 'permit_units:metro:TX:austin',
+            label: 'TREC Building Permits',
+            sourceType: 'internal_dataset',
+            periodLabel: '2016-04-01 to 2026-04-01',
+          },
+        ],
+      }
+    },
+  })
+
+  assert.equal(calls[0]?.metric, 'permit_units')
+  assert.equal(calls[0]?.subjectMarket.kind, 'metro')
+  assert.equal(calls[0]?.subjectMarket.id, 'metro:TX:austin')
+  assert.match(calls[0]?.subjectMarket.label ?? '', /Austin, TX/i)
+  assert.equal(response.chart?.kind, 'bar')
+  assert.match(response.message, /Austin/i)
+})
+
+test('retries an explicit Texas city permit history prompt through the bounded county proxy when metro history is insufficient', async () => {
+  const calls: AnalyticalComparisonRequest[] = []
+  const response = await buildHistoryChartedResponseForTest('analyze the last 10 years of permit data for Austin, Texas', null, {
+    getAnalyticalComparison: async (request: AnalyticalComparisonRequest): Promise<AnalyticalComparisonResult> => {
+      calls.push(request)
+      if (request.subjectMarket.id === 'metro:TX:austin') {
+        throw new Error('Insufficient historical data for Austin, TX')
+      }
+
+      return {
+        comparisonMode: 'history',
+        metric: 'permit_units',
+        metricLabel: 'Permit units',
+        timeWindow: { mode: 'relative', startDate: '2016-04-01', label: 'Last 10 years', monthsBack: 120 },
+        series: [
+          {
+            key: 'county:TX:travis-county:permit_units',
+            label: 'Austin, TX (Travis County proxy)',
+            subject: { kind: 'county', id: 'county:TX:travis-county', label: 'Austin, TX (Travis County proxy)' },
+            points: [
+              { x: '2016-04-01', y: 700 },
+              { x: '2026-04-01', y: 980 },
+            ],
+          },
+        ],
+        citations: [
+          {
+            id: 'permit_units:county:TX:travis-county',
+            label: 'TREC Building Permits',
+            sourceType: 'internal_dataset',
+            periodLabel: '2016-04-01 to 2026-04-01',
+          },
+        ],
+      }
+    },
+  })
+
+  assert.equal(calls.length, 2)
+  assert.equal(calls[0]?.subjectMarket.id, 'metro:TX:austin')
+  assert.equal(calls[1]?.subjectMarket.id, 'county:TX:travis-county')
+  assert.match(calls[1]?.subjectMarket.label ?? '', /Austin, TX \(Travis County proxy\)/i)
+  assert.equal(response.chart?.kind, 'bar')
+  assert.match(response.message, /Austin, TX \(Travis County proxy\)/i)
+})
+
 test('returns a grounded public macro response for a Texas county population prompt', async () => {
   const dependencies: Parameters<typeof buildHistoryChartedResponseForTest>[2] & {
     getPublicMacroEvidence: (query: AgentPublicMacroQuery) => Promise<AgentPublicMacroEvidenceResult>

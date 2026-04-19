@@ -19,6 +19,13 @@ interface BigQueryQueryClient {
   }) => Promise<[Array<Record<string, unknown>>]>
 }
 
+const TEXAS_METRO_WAREHOUSE_ALIASES = new Map<string, string[]>([
+  ['austin', ['Austin-Round Rock-Georgetown', 'Austin-Round Rock']],
+  ['houston', ['Houston-The Woodlands-Sugar Land', 'Houston-Pasadena-The Woodlands']],
+  ['dallas', ['Dallas-Fort Worth-Arlington', 'Dallas-Plano-Irving']],
+  ['san antonio', ['San Antonio-New Braunfels']],
+])
+
 function buildSubjectLabelAliases(subject: AnalyticalSubject): string[] {
   const aliases = new Set<string>()
   const label = subject.label.trim()
@@ -36,6 +43,12 @@ function buildSubjectLabelAliases(subject: AnalyticalSubject): string[] {
     if (withoutState) aliases.add(withoutState)
     const base = withoutState.replace(/\s+metro(?:\s+area)?$/i, '').trim()
     if (base) aliases.add(base)
+
+    const warehouseAliases = TEXAS_METRO_WAREHOUSE_ALIASES.get(base.toLowerCase()) ?? []
+    for (const alias of warehouseAliases) {
+      aliases.add(alias)
+      aliases.add(`${alias}, TX`)
+    }
   }
 
   return Array.from(aliases)

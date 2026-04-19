@@ -860,6 +860,48 @@ test('fetchTexasPermitHistorySeries joins the warehouse dimensions for Texas per
   }
 });
 
+test('fetchTexasPermitHistorySeries expands bounded Texas metro aliases for warehouse lookups', async () => {
+  const { fetchTexasPermitHistorySeries } = await loadBigQueryEdaHistoryModule();
+  const originalProjectId = process.env.BIGQUERY_PROJECT_ID;
+  const originalDatasetId = process.env.BIGQUERY_DATASET_ID;
+  process.env.BIGQUERY_PROJECT_ID = 'scout-dev';
+  process.env.BIGQUERY_DATASET_ID = 'market_router';
+  const seen: Array<{ params: Record<string, unknown> }> = [];
+  const client = {
+    query(options: { params: Record<string, unknown> }) {
+      seen.push(options);
+      return Promise.resolve([[{ time_period: { value: '2024-04-01' }, metric_value: '1188', source_label: 'TREC Building Permits' }]]);
+    },
+  };
+
+  try {
+    const result = await fetchTexasPermitHistorySeries(
+      {
+        subject: { kind: 'metro', id: 'metro:TX:austin', label: 'Austin, TX' },
+        startDate: '2024-04-01',
+      },
+      { client: client as never }
+    );
+
+    assert.strictEqual(seen[0]?.params.geoType, 'metro');
+    assert.strictEqual(seen[0]?.params.startDate, '2024-04-01');
+    const subjectLabels = seen[0]?.params.subjectLabels;
+    assert.ok(Array.isArray(subjectLabels));
+    assert.ok(subjectLabels.includes('austin, tx'));
+    assert.ok(subjectLabels.includes('austin'));
+    assert.ok(subjectLabels.includes('austin-round rock-georgetown'));
+    assert.ok(subjectLabels.includes('austin-round rock-georgetown, tx'));
+    assert.ok(subjectLabels.includes('austin-round rock'));
+    assert.strictEqual(result?.points.length, 1);
+  } finally {
+    if (originalProjectId === undefined) delete process.env.BIGQUERY_PROJECT_ID;
+    else process.env.BIGQUERY_PROJECT_ID = originalProjectId;
+
+    if (originalDatasetId === undefined) delete process.env.BIGQUERY_DATASET_ID;
+    else process.env.BIGQUERY_DATASET_ID = originalDatasetId;
+  }
+});
+
 test('returns a comparison-ready permit county history result', async () => {
   const { getAnalyticalComparisonForTest } = await loadMarketDataRouterModule();
   const calls: Array<{ submarketId: string; metricName: string; startDate: string }> = [];

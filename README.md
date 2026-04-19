@@ -333,6 +333,9 @@ _04.19.2026_
 - The market report PDF now routes its rent, permit, and search-trends chart inputs through the shared Scout chart contract before rendering them with the existing React PDF chart components.
 - City and county searches now render a real Census outer polygon beneath the ZIP choropleth and keep the outline on top, so aggregate area views retain a coherent shell even where individual ZIP coverage is thin or missing.
 - City searches no longer draw legal municipal boundary overlays by default after Houston-style annexation geometry proved too noisy for the product, while county searches keep their outer boundary shell.
+- Bounded history prompts that name Austin, Houston, Dallas, or San Antonio as a Texas city now resolve to the matching metro subject, so demo prompts like `analyze the last 10 years of permit data for Austin, Texas` render the same history lane instead of failing geography resolution.
+- Texas permit warehouse history now expands bounded metro prompts like `Austin, TX` to the longer warehouse metro aliases used by TREC/BigQuery, so Austin demo history reads stop failing just because the warehouse stores the full metro label.
+- When a bounded Texas city history prompt still comes back with insufficient metro history, the agent now retries through that city’s county proxy (for example Austin -> Travis County) and labels the chart honestly as a proxy instead of hard-failing the demo.
 
 ## Known Bugs
 
