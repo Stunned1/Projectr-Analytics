@@ -6,6 +6,7 @@ import AdmZip from 'adm-zip'
 import Papa from 'papaparse'
 import { BigQuery } from '@google-cloud/bigquery'
 import { createClient } from '@supabase/supabase-js'
+import { normalizeTexasCountyName, resolveTexasCountyName } from '../lib/data/texas-zcta-build'
 import type { TexasZctaDimRow } from '../lib/data/texas-zcta-dim'
 
 dotenv.config({ path: '.env.local' })
@@ -112,13 +113,6 @@ function isTexasBboxCandidate(lat: number, lng: number): boolean {
   )
 }
 
-function normalizeCountyName(value: string | null): string | null {
-  if (!value) return null
-  const trimmed = value.trim()
-  if (!trimmed) return null
-  return /county$/i.test(trimmed) ? trimmed : `${trimmed} County`
-}
-
 async function fetchTextFromZip(url: string): Promise<string> {
   const response = await fetch(url, {
     headers: { Accept: 'application/zip' },
@@ -192,9 +186,9 @@ async function fetchCountyLookupForPoint(lat: number, lng: number): Promise<Coun
       countyFips: county.COUNTY != null ? String(county.COUNTY).padStart(3, '0') : null,
       countyName:
         typeof county.BASENAME === 'string'
-          ? normalizeCountyName(county.BASENAME)
+          ? normalizeTexasCountyName(county.BASENAME)
           : typeof county.NAME === 'string'
-            ? normalizeCountyName(county.NAME)
+            ? normalizeTexasCountyName(county.NAME)
             : null,
     }
   } catch {
@@ -422,7 +416,7 @@ async function main(): Promise<void> {
       state_abbr: TEXAS_STATE_ABBR,
       state_fips: TEXAS_STATE_FIPS,
       county_fips: candidate.countyFips,
-      county_name: normalizeCountyName(lookup?.county_name ?? candidate.countyName),
+      county_name: resolveTexasCountyName(candidate.countyName, lookup?.county_name ?? null),
       metro_name: lookup?.metro_name?.trim() || null,
       metro_name_short: lookup?.metro_name_short?.trim() || null,
       lat: candidate.lat,

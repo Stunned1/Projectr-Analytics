@@ -149,10 +149,11 @@ export async function GET(request: NextRequest) {
     const avgZhvi = withZhvi.length
       ? Math.round(withZhvi.reduce((s, r) => s + r.zhvi_latest!, 0) / withZhvi.length)
       : null
+    const responseState = stateAbbr ?? zips[0]?.state ?? null
 
     return NextResponse.json({
       city,
-      state: stateAbbr ?? zips[0]?.state ?? null,
+      state: responseState,
       metro_name: zips[0]?.metro_name ?? null,
       zip_count: results.length,
       aggregates: { avg_zori: avgZori, avg_zhvi: avgZhvi },

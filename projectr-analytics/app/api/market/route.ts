@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
-import { fetchTexasZctaRowByZip } from '@/lib/data/bigquery-texas-zcta'
 import { getRowsForSubmarket, upsertMarketDataRows } from '@/lib/data/market-data-router'
+import { resolveZipAreaContext } from '@/lib/data/zip-area-context'
 import { geocodeZip } from '@/lib/geocoder'
 import { fetchFred, fetchHud, fetchCensus, fetchPermits } from '@/lib/fetchers'
 
@@ -9,45 +9,47 @@ export const dynamic = 'force-dynamic'
 
 const ZIP_REGEX = /^\d{5}$/
 
+type ZillowSnapshotRow = {
+  zip: string
+  zori_latest: number | null
+  zori_growth_12m: number | null
+  zhvi_latest: number | null
+  zhvi_growth_12m: number | null
+  zhvf_growth_1yr: number | null
+  as_of_date: string | null
+}
+
 async function getZillowData(zip: string) {
-  // Flat query for zip snapshot
-  const { data: snap } = await supabase
-    .from('zillow_zip_snapshot')
-    .select('zip, zori_latest, zori_growth_12m, zhvi_latest, zhvi_growth_12m, zhvf_growth_1yr, as_of_date')
-    .eq('zip', zip)
-    .single()
-
-  // Lookup metro name
-  const { data: lookup } = await supabase
-    .from('zip_metro_lookup')
-    .select('metro_name, metro_name_short, city, county_name')
-    .eq('zip', zip)
-    .single()
-
-  const texasCoverageRow =
-    lookup?.metro_name || lookup?.city || lookup?.metro_name_short
-      ? null
-      : await fetchTexasZctaRowByZip(zip)
-
-  const lookupMeta = {
-    metro_name: lookup?.metro_name ?? texasCoverageRow?.metro_name ?? null,
-    metro_name_short: lookup?.metro_name_short ?? texasCoverageRow?.metro_name_short ?? null,
-    city: lookup?.city ?? texasCoverageRow?.city ?? null,
-  }
+  const [{ data: snapData }, areaContext] = await Promise.all([
+    supabase
+      .from('zillow_zip_snapshot')
+      .select('zip, zori_latest, zori_growth_12m, zhvi_latest, zhvi_growth_12m, zhvf_growth_1yr, as_of_date')
+      .eq('zip', zip)
+      .single(),
+    resolveZipAreaContext(zip),
+  ])
+  const snap = (snapData ?? null) as ZillowSnapshotRow | null
 
   // Metro velocity via metro_name_short
   let metroVelocity = null
-  if (lookupMeta.metro_name_short) {
+  if (areaContext?.metro_name_short) {
     const { data: mv } = await supabase
       .from('zillow_metro_snapshot')
       .select('region_name, doz_pending_latest, price_cut_pct_latest, inventory_latest, as_of_date')
-      .eq('region_name', lookupMeta.metro_name_short)
+      .eq('region_name', areaContext.metro_name_short)
       .single()
     metroVelocity = mv
   }
 
   return {
-    zillow: snap ? { ...snap, metro_name: lookupMeta.metro_name, city: lookupMeta.city } : null,
+    zillow:
+      snap
+        ? {
+            ...snap,
+            metro_name: areaContext?.metro_name ?? null,
+            city: areaContext?.city ?? null,
+          }
+        : null,
     metro_velocity: metroVelocity,
   }
 }

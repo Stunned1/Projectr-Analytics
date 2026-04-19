@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { hydrateAreaZipResults } from '@/lib/area-search'
 import { buildCountyAreaKey, normalizeCountyDisplayName } from '@/lib/area-keys'
+import { fetchCountyBoundaryFeature } from '@/lib/county-boundary'
 import { fetchTexasZctaRowsByCounty } from '@/lib/data/bigquery-texas-zcta'
 import {
   mergeTexasCountyCoverageRows,
@@ -210,6 +211,7 @@ export async function GET(request: NextRequest) {
   const countyName = normalizeCountyDisplayName(countyRaw)
 
   try {
+    let resolvedCountyFips: string | null = null
     let query = supabase
       .from('zip_metro_lookup')
       .select('zip, city, state, metro_name, lat, lng, county_name')
@@ -234,8 +236,10 @@ export async function GET(request: NextRequest) {
       rows = (fuzzyRows ?? []) as CountyLookupRow[]
     }
 
-    if (shouldMergeTexasCountyCoverage(stateAbbr, rows)) {
-      const texasCoverageRows = await fetchTexasZctaRowsByCounty(countyName, stateAbbr, {
+    const canonicalStateAbbr = stateAbbr ?? undefined
+
+    if (shouldMergeTexasCountyCoverage(canonicalStateAbbr, rows)) {
+      const texasCoverageRows = await fetchTexasZctaRowsByCounty(countyName, canonicalStateAbbr, {
         limit: MAX_COUNTY_ZIPS,
       })
       if (texasCoverageRows.length > 0) {
@@ -246,16 +250,19 @@ export async function GET(request: NextRequest) {
     // Some environments have `zip_metro_lookup.county_name` populated incorrectly (e.g. "TX").
     // Fall back to `zip_geocode_cache` county FIPS so Texas county search still resolves.
     if (rows.length === 0 && stateAbbr) {
-      const countyFips = await resolveCountyFips(countyName, stateAbbr)
-      if (countyFips) {
+      resolvedCountyFips = await resolveCountyFips(countyName, stateAbbr)
+      if (resolvedCountyFips) {
         const { data: cachedCountyZips } = await supabase
           .from('zip_geocode_cache')
           .select('zip')
           .eq('state', stateAbbr)
-          .eq('county_fips', countyFips)
+          .eq('county_fips', resolvedCountyFips)
           .limit(MAX_COUNTY_ZIPS)
 
-        const zipList = Array.from(new Set((cachedCountyZips ?? []).map((row) => row.zip).filter(Boolean)))
+        const cachedCountyZipRows = (cachedCountyZips ?? []) as Array<{ zip: string | null }>
+        const zipList = Array.from(
+          new Set(cachedCountyZipRows.map((row) => row.zip).filter((zip): zip is string => Boolean(zip)))
+        )
         if (zipList.length > 0) {
           const { data: lookupRows } = await supabase
             .from('zip_metro_lookup')
@@ -268,7 +275,7 @@ export async function GET(request: NextRequest) {
         }
 
         if (rows.length === 0) {
-          rows = await fetchCountyTigerFallbackRows(countyFips, stateAbbr)
+          rows = await fetchCountyTigerFallbackRows(resolvedCountyFips, stateAbbr)
         }
       }
     }
@@ -290,6 +297,13 @@ export async function GET(request: NextRequest) {
 
     const labelState = stateAbbr ?? rows[0]?.state ?? null
     const label = labelState ? `${countyName}, ${labelState}` : countyName
+    if (!resolvedCountyFips && labelState) {
+      resolvedCountyFips = await resolveCountyFips(countyName, labelState)
+    }
+    const boundary =
+      labelState && resolvedCountyFips
+        ? await fetchCountyBoundaryFeature(labelState, resolvedCountyFips)
+        : null
 
     return NextResponse.json({
       kind: 'county',
@@ -297,6 +311,7 @@ export async function GET(request: NextRequest) {
       state: labelState,
       area_key: labelState ? buildCountyAreaKey(countyName, labelState) : null,
       zip_count: results.length,
+      boundary,
       zips: results,
       label,
     })

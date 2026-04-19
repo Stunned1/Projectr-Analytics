@@ -1,17 +1,25 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
-import {
-  fetchTexasZctaRowByZip,
-  fetchTexasZctaRowsByMetro,
-} from '@/lib/data/bigquery-texas-zcta'
+import { fetchTexasZctaRowsByMetro } from '@/lib/data/bigquery-texas-zcta'
 import { mergeTexasPeerZipLists } from '@/lib/data/texas-metro-coverage'
 import { getLatestRowsForSubmarkets } from '@/lib/data/market-data-router'
+import { resolveZipAreaContext } from '@/lib/data/zip-area-context'
 
 export const dynamic = 'force-dynamic'
 
 const ZIP_REGEX = /^\d{5}$/
 
 const MAX_PEER_ZIPS = 650
+
+type PeerZipRow = {
+  zip: string
+}
+
+type SnapshotPeerRow = {
+  zip: string
+  zori_latest: number | null
+  zhvi_latest: number | null
+}
 
 function mean(nums: number[]): number | null {
   const v = nums.filter((n) => Number.isFinite(n))
@@ -27,18 +35,8 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const { data: row } = await supabase
-      .from('zip_metro_lookup')
-      .select('metro_name, metro_name_short, state')
-      .eq('zip', zip)
-      .maybeSingle()
-
-    const texasCoverageRow =
-      row?.state === 'TX' || !row?.metro_name_short
-        ? await fetchTexasZctaRowByZip(zip)
-        : null
-
-    const metro = row?.metro_name_short ?? texasCoverageRow?.metro_name_short ?? row?.metro_name ?? texasCoverageRow?.metro_name
+    const origin = await resolveZipAreaContext(zip)
+    const metro = origin?.metro_name_short ?? origin?.metro_name
     if (!metro) {
       return NextResponse.json({
         found: false,
@@ -52,22 +50,23 @@ export async function GET(request: NextRequest) {
     }
 
     let peerQuery = supabase.from('zip_metro_lookup').select('zip').eq('metro_name_short', metro)
-    if (row?.state) {
-      peerQuery = peerQuery.eq('state', row.state)
+    if (origin?.state) {
+      peerQuery = peerQuery.eq('state', origin.state)
     }
-    const { data: peers } = await peerQuery
+    const { data: peersData } = await peerQuery
+    const peers = (peersData ?? []) as PeerZipRow[]
 
     const canonicalPeers =
-      texasCoverageRow != null
+      origin?.isTexas
         ? await fetchTexasZctaRowsByMetro(
-            texasCoverageRow.metro_name_short ?? texasCoverageRow.metro_name ?? metro,
+            origin.metro_name_short ?? origin.metro_name ?? metro,
             'TX',
             { limit: MAX_PEER_ZIPS }
           )
         : []
 
     const zips = mergeTexasPeerZipLists(
-      (peers ?? []).map((p) => p.zip).filter(Boolean),
+      peers.map((peer) => peer.zip).filter(Boolean),
       canonicalPeers
     )
     if (!zips.length) {
@@ -83,14 +82,15 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    const { data: snaps } = await supabase
+    const { data: snapsData } = await supabase
       .from('zillow_zip_snapshot')
       .select('zip, zori_latest, zhvi_latest')
       .in('zip', zips)
+    const snaps = (snapsData ?? []) as SnapshotPeerRow[]
 
-    const zoris = (snaps ?? []).map((s) => s.zori_latest).filter((v): v is number => v != null && v > 0)
-    const zhvis = (snaps ?? []).map((s) => s.zhvi_latest).filter((v): v is number => v != null && v > 0)
-    const pricingPeerZipCount = new Set((snaps ?? []).map((snapshot) => snapshot.zip).filter(Boolean)).size
+    const zoris = snaps.map((snap) => snap.zori_latest).filter((v): v is number => v != null && v > 0)
+    const zhvis = snaps.map((snap) => snap.zhvi_latest).filter((v): v is number => v != null && v > 0)
+    const pricingPeerZipCount = new Set(snaps.map((snap) => snap.zip).filter(Boolean)).size
 
     const avg_zori = zoris.length ? Math.round(zoris.reduce((a, b) => a + b, 0) / zoris.length) : null
     const avg_zhvi = zhvis.length ? Math.round(zhvis.reduce((a, b) => a + b, 0) / zhvis.length) : null

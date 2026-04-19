@@ -1,14 +1,12 @@
 /**
  * Returns neighboring ZIP codes sorted by geographic proximity.
- * Uses lat/lng centroids in zip_metro_lookup to find the closest ZIPs
- * within the same metro area.
+ * Uses lookup centroids for the general case and canonical Texas ZCTA
+ * coverage when the older lookup table is sparse.
  */
 import { type NextRequest, NextResponse } from 'next/server'
-import {
-  fetchTexasZctaRowByZip,
-  fetchTexasZctaRowsByMetro,
-} from '@/lib/data/bigquery-texas-zcta'
+import { fetchTexasZctaRowsByMetro } from '@/lib/data/bigquery-texas-zcta'
 import { mergeTexasPeerZipLists } from '@/lib/data/texas-metro-coverage'
+import { resolveZipAreaContext } from '@/lib/data/zip-area-context'
 import { supabase } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
@@ -34,6 +32,15 @@ interface LookupMetroZipRow {
   zip: string
   lat: number | null
   lng: number | null
+}
+
+interface ZipOnlyRow {
+  zip: string
+}
+
+type NeighborRpcResult = {
+  data: NeighborRpcRow[] | null
+  error: { message?: string } | null
 }
 
 function toNumber(value: number | string | null | undefined): number | null {
@@ -81,28 +88,9 @@ export async function GET(request: NextRequest) {
   if (!zip) return NextResponse.json({ error: 'Missing zip' }, { status: 400 })
 
   try {
-    // Get the searched ZIP's centroid + metro
-    const { data: originLookup } = await supabase
-      .from('zip_metro_lookup')
-      .select('lat, lng, metro_name, metro_name_short, state')
-      .eq('zip', zip)
-      .maybeSingle()
-
-    const texasCoverageRow =
-      originLookup?.state === 'TX' || !originLookup?.metro_name_short
-        ? await fetchTexasZctaRowByZip(zip)
-        : null
-
-    const origin = {
-      lat: originLookup?.lat ?? texasCoverageRow?.lat ?? null,
-      lng: originLookup?.lng ?? texasCoverageRow?.lng ?? null,
-      metro_name: originLookup?.metro_name ?? texasCoverageRow?.metro_name ?? null,
-      metro_name_short: originLookup?.metro_name_short ?? texasCoverageRow?.metro_name_short ?? null,
-      state: originLookup?.state ?? texasCoverageRow?.state_abbr ?? null,
-    }
-
-    const metroKey = origin.metro_name_short ?? origin.metro_name
-    const isTexasOrigin = origin.state === 'TX' || texasCoverageRow != null
+    const origin = await resolveZipAreaContext(zip)
+    const metroKey = origin?.metro_name_short ?? origin?.metro_name
+    const isTexasOrigin = origin?.isTexas ?? false
 
     if (!metroKey) {
       return NextResponse.json({ zips: [] })
@@ -112,26 +100,27 @@ export async function GET(request: NextRequest) {
       let metroQuery = supabase
         .from('zip_metro_lookup')
         .select('zip, lat, lng')
-        .eq('metro_name_short', origin.metro_name_short ?? metroKey)
+        .eq('metro_name_short', origin?.metro_name_short ?? metroKey)
 
-      if (origin.state) {
+      if (origin?.state) {
         metroQuery = metroQuery.eq('state', origin.state)
       }
 
-      const { data: metroZips } = await metroQuery
+      const { data: metroZipsData } = await metroQuery
+      const metroZips = (metroZipsData ?? []) as LookupMetroZipRow[]
 
       const canonicalMetroRows = await fetchTexasZctaRowsByMetro(metroKey, 'TX', { limit: 650 })
       const mergedPeerZips = mergeTexasPeerZipLists(
-        (metroZips ?? []).map((row) => row.zip).filter(Boolean),
+        metroZips.map((row) => row.zip).filter(Boolean),
         canonicalMetroRows,
         { excludeZip: zip }
       )
 
       if (!mergedPeerZips.length) return NextResponse.json({ zips: [] })
 
-      if (origin.lat != null && origin.lng != null) {
+      if (origin?.lat != null && origin?.lng != null) {
         const rowsByZip = new Map<string, LookupMetroZipRow>()
-        for (const row of (metroZips ?? []) as LookupMetroZipRow[]) {
+        for (const row of metroZips) {
           rowsByZip.set(row.zip, row)
         }
         for (const row of canonicalMetroRows) {
@@ -162,14 +151,18 @@ export async function GET(request: NextRequest) {
     }
 
     // Preferred path: use PostGIS RPC for nearest-neighbor ranking in the database.
-    if (origin.lat != null && origin.lng != null && origin.metro_name_short) {
-      const { data: rpcRows, error: rpcError } = await supabase.rpc('get_neighbor_zips', {
+    if (origin?.lat != null && origin?.lng != null && origin.metro_name_short) {
+      const { data: rpcRows, error: rpcError } = await (
+        supabase as unknown as {
+          rpc: (fn: string, args: { p_zip: string; p_limit: number }) => Promise<NeighborRpcResult>
+        }
+      ).rpc('get_neighbor_zips', {
         p_zip: zip,
         p_limit: 20,
       })
 
       if (!rpcError && Array.isArray(rpcRows) && rpcRows.length > 0) {
-        const parsedRows = (rpcRows as NeighborRpcRow[]).filter((row) => typeof row.zip === 'string')
+        const parsedRows = rpcRows.filter((row) => typeof row.zip === 'string')
         const hasSnapshotMetrics = parsedRows.every(
           (row) =>
             Object.prototype.hasOwnProperty.call(row, 'zori_latest') &&
@@ -215,12 +208,13 @@ export async function GET(request: NextRequest) {
         fallbackMetroQuery = fallbackMetroQuery.eq('state', origin.state)
       }
 
-      const { data: metroZips } = await fallbackMetroQuery
+      const { data: metroZipsData } = await fallbackMetroQuery
+      const metroZips = (metroZipsData ?? []) as LookupMetroZipRow[]
 
-      if (!metroZips?.length) return NextResponse.json({ zips: [] })
+      if (!metroZips.length) return NextResponse.json({ zips: [] })
 
       const sorted = rankZipsByDistance(
-        metroZips as LookupMetroZipRow[],
+        metroZips,
         origin.lat,
         origin.lng,
         zip,
@@ -239,21 +233,22 @@ export async function GET(request: NextRequest) {
     let metroZipQuery = supabase
       .from('zip_metro_lookup')
       .select('zip')
-      .eq('metro_name_short', origin.metro_name_short)
+      .eq('metro_name_short', origin?.metro_name_short ?? metroKey)
       .neq('zip', zip)
       .limit(15)
 
-    if (origin.state) {
+    if (origin?.state) {
       metroZipQuery = metroZipQuery.eq('state', origin.state)
     }
 
-    const { data: metroZips } = await metroZipQuery
+    const { data: metroZipsData } = await metroZipQuery
+    const metroZips = (metroZipsData ?? []) as ZipOnlyRow[]
 
-    if (!metroZips?.length) return NextResponse.json({ zips: [] })
+    if (!metroZips.length) return NextResponse.json({ zips: [] })
 
     const snapshots = await fetchSnapshotsForZips(metroZips.map((z) => z.zip))
 
-    return NextResponse.json({ metro: origin.metro_name_short, zips: snapshots })
+    return NextResponse.json({ metro: origin?.metro_name_short ?? metroKey, zips: snapshots })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unexpected error'
     return NextResponse.json({ error: message }, { status: 500 })

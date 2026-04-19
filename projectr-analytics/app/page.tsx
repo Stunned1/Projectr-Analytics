@@ -121,6 +121,7 @@ interface CountySearchResponse extends AreaSearchResponse {
   state?: string | null
   area_key?: string | null
   label?: string
+  boundary?: object | null
 }
 
 interface MetroSearchResponse extends AreaSearchResponse {
@@ -688,6 +689,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<MarketData | null>(null)
   const [cityZips, setCityZips] = useState<CityZip[] | null>(null)
+  const [aggregateBoundary, setAggregateBoundary] = useState<object | null>(null)
   const [boroughBoundary, setBoroughBoundary] = useState<object | null>(null)
   const [aggregateData, setAggregateData] = useState<AggregateData | null>(null)
   const uploadedMarkers = useClientUploadMarkersStore((s) => s.markers)
@@ -1154,6 +1156,7 @@ export default function Home() {
       setLoading(true)
       setError(null)
       setCityZips(null)
+      setAggregateBoundary(null)
       setBoroughBoundary(null)
       setAggregateData(null)
       setTrends(null)
@@ -1192,6 +1195,7 @@ export default function Home() {
     setLoading(true)
     setError(null)
     setCityZips(null)
+    setAggregateBoundary(null)
     setBoroughBoundary(null)
     setAggregateData(null)
     setTrends(null)
@@ -1208,6 +1212,7 @@ export default function Home() {
             return
           }
           setCityZips(data.zips)
+          setAggregateBoundary(null)
           setBoroughBoundary(data.boundary ?? null)
           setResult(null)
           setTrends(null)
@@ -1240,6 +1245,7 @@ export default function Home() {
               return
             }
             setCityZips(data.zips)
+            setAggregateBoundary(data.boundary ?? null)
             setBoroughBoundary(null)
             setResult(null)
             setTrends(null)
@@ -1273,6 +1279,7 @@ export default function Home() {
           const metroData = metroPromise ? await metroPromise : null
           if (metroData && !metroData.error && metroData.zips?.length) {
             setCityZips(metroData.zips)
+            setAggregateBoundary(null)
             setBoroughBoundary(null)
             setResult(null)
             setTrends(null)
@@ -1309,6 +1316,7 @@ export default function Home() {
               return
             }
             setCityZips(metroData.zips)
+            setAggregateBoundary(null)
             setBoroughBoundary(null)
             setResult(null)
             setTrends(null)
@@ -1331,6 +1339,7 @@ export default function Home() {
             return
           }
           setCityZips(data.zips)
+          setAggregateBoundary(null)
           setBoroughBoundary(null)
           setResult(null)
           setTrends(null)
@@ -1505,6 +1514,7 @@ export default function Home() {
           aggregateData={aggregateData}
           transitData={transit}
           cityZips={cityZips}
+          aggregateBoundary={aggregateBoundary}
           boroughBoundary={boroughBoundary}
           uploadedMarkers={uploadedMarkers}
           shortlistSites={sitesForMap}

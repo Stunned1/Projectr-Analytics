@@ -260,6 +260,9 @@ _04.18.2026_
 - Agent-driven search actions now canonicalize resolved geographies before dispatch, so the terminal emits queries like `Harris County, TX` and `Houston, TX` instead of lowercased raw prompt fragments that still need downstream cleanup.
 - Natural-language terminal map controls now run through a bounded Gemini interpreter that can emit ordered actions like `search -> permits ON`, while slash-prefixed commands stay on the local deterministic fast path and filler like `please` no longer pollutes geography searches.
 - Texas city searches now merge `zip_metro_lookup` rows with canonical `texas_zcta_dim` coverage instead of only falling back on zero-row misses, and the map batches up to 120 multi-ZIP boundary fetches so Houston-sized city views no longer draw the old sparse subset.
+- City boundary lookup now matches Census place `BASENAME` values instead of the suffixed `NAME` field, which restores Houston and other incorporated-city outlines that were returning empty TIGER responses.
+- The Texas ZCTA loader now prefers Census-resolved county names over polluted lookup labels like `TX`, and the rebuilt `texas_zcta_dim` BigQuery table no longer carries poisoned county names.
+- `market`, `aggregate`, `neighbors`, and metro benchmark flows now resolve Texas ZIP metadata through one shared canonical ZIP-context helper, so metro labels, origin centroids, and peer ZIP sets stop diverging by route.
 
 **Map & Visualization**
 
@@ -306,6 +309,8 @@ _04.16.2026_
 _04.18.2026_
 - Added a shared `recharts`-based Scout chart card with citation footer rendering in the live assistant terminal and bridged imported-data chart previews onto the same chart contract.
 - The market report PDF now routes its rent, permit, and search-trends chart inputs through the shared Scout chart contract before rendering them with the existing React PDF chart components.
+- City and county searches now render a real Census outer polygon beneath the ZIP choropleth and keep the outline on top, so aggregate area views retain a coherent shell even where individual ZIP coverage is thin or missing.
+- City searches no longer draw legal municipal boundary overlays by default after Houston-style annexation geometry proved too noisy for the product, while county searches keep their outer boundary shell.
 
 ## Known Bugs
 
@@ -347,11 +352,10 @@ _04.18.2026_
 - **EDA comparisons are workspace-bounded** - The assistant can compare loaded segments and whatever geography is already in context, but it does not yet fetch a second peer geography on demand; that still needs the later context-aware comparison phase.
 - **Peer-market comparisons are still explicit and type-matched** - The new `/api/agent` comparison path currently expects two explicit geographies in the prompt and keeps comparisons bounded to matching subject kinds such as ZIP vs ZIP or county vs county; mixed-kind comparisons and broader inferred peer lookups are still deferred.
 - **Reloaded upload EDA can still fall back to sampled rows** - Imported datasets persist full rows in IndexedDB, but the assistant may still analyze the raw-table sample after a reload until the larger working-row payload is rehydrated into the current session.
-- **County search still depends on available ZIP coverage for map overlays** - The county route now uses TIGER county/ZCTA fallback plus ZIP geocode validation, but counties with very thin Zillow or boundary coverage can still load the aggregate panel with only a small ZIP set on the map; fixing that cleanly would require a broader county-to-ZIP source or county polygon rendering as a first-class shared path.
+- **County choropleths still depend on available ZIP coverage** - County searches now draw the outer county polygon as a first-class overlay, but counties with thin Zillow coverage can still show only a sparse set of filled ZIPs inside that shell until we add broader county-to-ZIP market coverage or a separate county-level metric fill.
 - **Full Texas TREC backfills are network-heavy** - The new direct TREC fetch mode removes manual export prep, but statewide county + metro backfills still make hundreds of remote requests; use `--scope`, `--match`, and `--limit` for fast QA seeds until we add scheduled/background ingest orchestration.
 - **Texas raw permits currently only work in Austin** - Austin is the only Texas market with a wired row-level permit feed in Scout today because the Austin Open Data source exposes usable permit records that can be normalized into the shared raw-permit schema for New Building, Demolition, and Major Renovation views. Dallas, Houston, San Antonio, Fort Worth, and the rest of Texas still fall back to TREC place-level monthly permit activity because they do not yet have shared, normalized raw permit adapters in this repo.
-- **Texas statewide geography cutover is still partial** - Texas city/county/metro search, peer ZIP resolution, aggregate metro velocity, and Texas permit centroid lookup now merge or fall back to canonical `texas_zcta_dim` coverage, but a few other lookup-backed overlays still depend on older `zip_metro_lookup` rows until the broader cutover is completed.
-- **Canonical Texas county labels still need cleanup** - Some `texas_zcta_dim` rows still carry polluted county labels like `TX County` because the seed overlay inherited bad lookup metadata. County merge/fallback now helps where canonical county names are valid, but the loader should be rebuilt or post-cleaned so those rows become reachable by county name.
+- **Derived city market footprints are not implemented yet** - City searches now intentionally skip legal municipal outlines because places like Houston are visually noisy, but Scout does not yet build a cleaner ZIP-union or market-footprint shell as a replacement.
 - **Sandboxed PDF adapter verification** - `tests/lib/report/scout-chart-pdf-adapter.test.ts` can hit `spawn EPERM` under the current sandbox even though the other targeted convergence tests pass; rerun that file outside the sandbox before treating the full targeted verification set as environment-clean.
 
 - **Read-heavy runtime** - Most user interactions fan out into repeated reads across market, transit, trends, cycle, parcel, tract, boundary, amenity, POI, and flood routes; writes are mostly limited to ingestion and saved-site mutations, so the current tooling is better at read-heavy workloads than write-heavy ones.

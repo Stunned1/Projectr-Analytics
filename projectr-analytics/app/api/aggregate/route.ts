@@ -14,8 +14,8 @@
  */
 import { type NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
-import { fetchTexasZctaRowByZip } from '@/lib/data/bigquery-texas-zcta'
 import { getAreaRows, getRowsForSubmarkets } from '@/lib/data/market-data-router'
+import { resolveZipAreaContext } from '@/lib/data/zip-area-context'
 import { geocodeZip } from '@/lib/geocoder'
 import { fetchFred } from '@/lib/fetchers'
 import { ensureAreaMasterDataCached } from '@/lib/ensure-zip-cache'
@@ -45,11 +45,6 @@ type ZillowSnapshotRow = {
   zori_growth_12m: number | null
   zhvi_growth_12m: number | null
   zhvf_growth_1yr: number | null
-}
-
-type ZipMetroLookupRow = {
-  metro_name_short: string | null
-  state: string | null
 }
 
 const ZIP_CACHE_METRICS = [
@@ -157,7 +152,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Pull the shared ZIP inputs in parallel after any cold-fill step.
-    const [{ data: snapshots }, cachedRows, { data: lookup }] = await Promise.all([
+    const [{ data: snapshots }, cachedRows, origin] = await Promise.all([
       supabase
         .from('zillow_zip_snapshot')
         .select('zip, zori_latest, zhvi_latest, zori_growth_12m, zhvi_growth_12m, zhvf_growth_1yr')
@@ -166,17 +161,10 @@ export async function POST(request: NextRequest) {
         dataSource: ['Census ACS', 'HUD', 'Census BPS'],
         metricName: [...ZIP_CACHE_METRICS],
       }),
-      supabase
-        .from('zip_metro_lookup')
-        .select('metro_name_short')
-        .eq('zip', zips[0])
-        .single(),
+      resolveZipAreaContext(zips[0]),
     ])
 
     const rows = cachedRows as CachedRow[]
-    const metroLookup = (lookup ?? null) as ZipMetroLookupRow | null
-    const texasCoverageRow =
-      metroLookup?.metro_name_short ? null : await fetchTexasZctaRowByZip(zips[0])
 
     const latestAreaMetrics = latestMetricRows(directAreaRows).map((row) => ({
       metric_name: row.metric_name,
@@ -356,7 +344,7 @@ export async function POST(request: NextRequest) {
 
     // 5. Pull metro velocity for the first ZIP's metro
     let metroVelocity = null
-    const metroNameShort = metroLookup?.metro_name_short ?? texasCoverageRow?.metro_name_short ?? null
+    const metroNameShort = origin?.metro_name_short ?? null
     if (metroNameShort) {
       const { data: metroSnapshot } = await supabase
         .from('zillow_metro_snapshot')

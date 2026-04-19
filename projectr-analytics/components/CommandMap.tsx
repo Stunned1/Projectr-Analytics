@@ -15,6 +15,7 @@ import type { AnalysisSite } from '@/lib/agent-types'
 import type { ClientUploadMarker } from '@/lib/client-upload-markers-store'
 import { detectNycBoroughFromZips, isNycZip } from '@/lib/geography'
 import { selectMultiZipBoundaryTargets } from '@/lib/area-boundaries'
+import { getGeoJsonBounds } from '@/lib/geojson-bounds'
 import { fetchMomentumScores, normalizeMomentumZipList } from '@/lib/momentum-client'
 import { cn } from '@/lib/utils'
 
@@ -385,42 +386,28 @@ function buildColorScale(values: (number | null)[]) {
 
 // ── Fit map to GeoJSON bounds ─────────────────────────────────────────────────
 
-function getBounds(geojson: { features: Array<{ geometry: { coordinates: number[][][] } }> }) {
-  let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity
-  for (const feature of geojson.features ?? []) {
-    const coords = feature.geometry?.coordinates ?? []
-    for (const ring of coords) {
-      for (const [lng, lat] of ring) {
-        if (lat < minLat) minLat = lat
-        if (lat > maxLat) maxLat = lat
-        if (lng < minLng) minLng = lng
-        if (lng > maxLng) maxLng = lng
-      }
-    }
-  }
-  return { minLat, maxLat, minLng, maxLng }
-}
-
 // ── Map fitter - fits to boundary polygon on zip change ───────────────────────
 
-function MapFitter({ boundary, zip }: { boundary: GeoJSON | null; zip: string | null }) {
+function MapFitter({ boundary, fitKey }: { boundary: GeoJSON | null; fitKey: string | null }) {
   const map = useMap()
-  const lastZip = useRef<string | null>(null)
+  const lastFitKey = useRef<string | null>(null)
 
   useEffect(() => {
-    if (!map || !zip || !boundary || zip === lastZip.current) return
-    lastZip.current = zip
+    if (!map || !fitKey || !boundary || fitKey === lastFitKey.current) return
+    lastFitKey.current = fitKey
 
-    const geojson = boundary as { features: Array<{ geometry: { coordinates: number[][][] } }> }
-    const { minLat, maxLat, minLng, maxLng } = getBounds(geojson)
-    if (!isFinite(minLat)) return
+    const boundsEnvelope = getGeoJsonBounds(boundary as {
+      features?: Array<{ geometry?: { coordinates?: unknown } | null }>
+    } | null)
+    if (!boundsEnvelope) return
+    const { minLat, maxLat, minLng, maxLng } = boundsEnvelope
 
     const bounds = new google.maps.LatLngBounds(
       { lat: minLat, lng: minLng },
       { lat: maxLat, lng: maxLng }
     )
     map.fitBounds(bounds, 40) // 40px padding
-  }, [map, boundary, zip])
+  }, [map, boundary, fitKey])
 
   return null
 }
@@ -691,6 +678,7 @@ interface CommandMapProps {
   aggregateData?: AggregateMapData | null
   transitData: TransitData | null
   cityZips?: Array<{ zip: string; lat: number | null; lng: number | null; zori_latest: number | null; zhvi_latest: number | null; city: string; state: string | null }> | null
+  aggregateBoundary?: object | null
   boroughBoundary?: object | null
   uploadedMarkers?: ClientUploadMarker[] | null
   /** Saved analyst shortlist - always drawn while browsing other ZIPs. */
@@ -726,6 +714,7 @@ function CommandMap({
   aggregateData,
   transitData,
   cityZips,
+  aggregateBoundary,
   boroughBoundary,
   uploadedMarkers,
   shortlistSites = [],
@@ -833,6 +822,23 @@ function CommandMap({
     () => (cityBoundaryKey && cityBoundariesState.key === cityBoundaryKey ? cityBoundariesState.value : []),
     [cityBoundariesState, cityBoundaryKey]
   )
+  const aggregateBoundaryGeoJson = useMemo(
+    () =>
+      aggregateBoundary
+        ? ({ type: 'FeatureCollection', features: [aggregateBoundary] } as GeoJSON)
+        : null,
+    [aggregateBoundary]
+  )
+  const aggregateBoundaryId = useMemo(() => {
+    if (!aggregateBoundary || typeof aggregateBoundary !== 'object') return null
+    const properties = (aggregateBoundary as {
+      properties?: { GEOID?: unknown; NAME?: unknown }
+    }).properties
+    if (typeof properties?.GEOID === 'string' && properties.GEOID) return properties.GEOID
+    if (typeof properties?.NAME === 'string' && properties.NAME) return properties.NAME
+    return null
+  }, [aggregateBoundary])
+  const boundaryFitKey = zipBoundaryKey ?? aggregateBoundaryId ?? cityBoundaryKey ?? null
   const visiblePrimaryBoundary = useMemo(
     () => (zipBoundaryKey && primaryBoundaryState.key === zipBoundaryKey ? primaryBoundaryState.value : null),
     [primaryBoundaryState, zipBoundaryKey]
@@ -1254,7 +1260,20 @@ function CommandMap({
   const deckLayers = useMemo(() => {
     const result: Layer[] = []
 
-    // City ZIP boundaries (rendered first when in city mode)
+    if (aggregateBoundaryGeoJson) {
+      result.push(
+        new GeoJsonLayer({
+          id: 'aggregate-boundary-fill',
+          data: aggregateBoundaryGeoJson,
+          stroked: false,
+          filled: true,
+          getFillColor: [92, 96, 128, 88],
+          pickable: false,
+        })
+      )
+    }
+
+    // Aggregate-area ZIP boundaries (rendered first in city / county / metro mode)
     if (effectiveLayers.zipBoundary && visibleCityBoundaries.length > 0) {
       visibleCityBoundaries.forEach((n) => {
         const metricValue = effectiveMetric === 'zhvi' ? n.zhvi : n.zori
@@ -1279,6 +1298,20 @@ function CommandMap({
           })
         )
       })
+    }
+
+    if (aggregateBoundaryGeoJson) {
+      result.push(
+        new GeoJsonLayer({
+          id: 'aggregate-boundary-outline',
+          data: aggregateBoundaryGeoJson,
+          stroked: true,
+          filled: false,
+          getLineColor: [215, 107, 61, 220],
+          lineWidthMinPixels: 4,
+          pickable: false,
+        })
+      )
     }
 
     // Borough boundary outline — show as soon as `/api/borough` returns (do not wait on per-ZIP boundary fetches)
@@ -1986,7 +2019,7 @@ function CommandMap({
     }
 
     return result
-  }, [visiblePrimaryBoundary, visibleNeighborBoundaries, visibleCityBoundaries, boroughBoundary, transitStops, transitRoutes, parcelData, parcelColorMode, tractData, amenityPoints, poiPoints, floodData, nycPermitData, texasRawPermitData, texasPermitActivity, permitHeatPoints, permitTypeFilter, texasRawPermitCategoryFilter, agentPermitFilter, mapZoom, momentumScores, effectiveLayers, colorScale, primaryMetricValue, effectiveMetric, zip, setTooltipStable, uploadedMarkers, shortlistSites, analysisSites, nycFeatureAvailable, texasPermitAvailable, usingTexasRawPermits, onUploadedMarkerSelect])
+  }, [visiblePrimaryBoundary, visibleNeighborBoundaries, visibleCityBoundaries, aggregateBoundaryGeoJson, boroughBoundary, transitStops, transitRoutes, parcelData, parcelColorMode, tractData, amenityPoints, poiPoints, floodData, nycPermitData, texasRawPermitData, texasPermitActivity, permitHeatPoints, permitTypeFilter, texasRawPermitCategoryFilter, agentPermitFilter, mapZoom, momentumScores, effectiveLayers, colorScale, primaryMetricValue, effectiveMetric, zip, setTooltipStable, uploadedMarkers, shortlistSites, analysisSites, nycFeatureAvailable, texasPermitAvailable, usingTexasRawPermits, onUploadedMarkerSelect])
 
   const handleToggle = useCallback((key: keyof LayerState) => {
     const nextKey =
@@ -2022,7 +2055,10 @@ function CommandMap({
           gestureHandling="greedy"
           style={{ width: '100%', height: '100%' }}
         >
-          <MapFitter boundary={visiblePrimaryBoundary ?? (visibleCityBoundaries[0]?.geojson ?? null)} zip={zip ?? cityZips?.[0]?.zip ?? null} />
+          <MapFitter
+            boundary={visiblePrimaryBoundary ?? aggregateBoundaryGeoJson ?? (visibleCityBoundaries[0]?.geojson ?? null)}
+            fitKey={boundaryFitKey}
+          />
           <UploadedMarkersFitter markers={uploadedMarkers ?? null} active={fitClientMarkersOnly} />
           <TiltController tilt={mapTilt} heading={mapHeading} />
           <ZoomTracker onZoomChange={handleZoomChange} />
