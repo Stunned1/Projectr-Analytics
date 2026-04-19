@@ -336,6 +336,8 @@ _04.19.2026_
 - Bounded history prompts that name Austin, Houston, Dallas, or San Antonio as a Texas city now resolve to the matching metro subject, so demo prompts like `analyze the last 10 years of permit data for Austin, Texas` render the same history lane instead of failing geography resolution.
 - Texas permit warehouse history now expands bounded metro prompts like `Austin, TX` to the longer warehouse metro aliases used by TREC/BigQuery, so Austin demo history reads stop failing just because the warehouse stores the full metro label.
 - When a bounded Texas city history prompt still comes back with insufficient metro history, the agent now retries through that city’s county proxy (for example Austin -> Travis County) and labels the chart honestly as a proxy instead of hard-failing the demo.
+- Austin city permit-history prompts are now routed onto a separate monthly raw-permits lane backed by the live Austin Open Data API, so demo requests like `show monthly permit activity in Austin over the last 12 months` chart Austin-only monthly counts with Austin citations instead of falling through to the shared warehouse tables.
+- Austin city permit-history prompts that still ask for multi-year windows now fail explicitly with a monthly-only / since-January-2024 explanation instead of silently falling back to misleading county or master-data series.
 
 ## Known Bugs
 

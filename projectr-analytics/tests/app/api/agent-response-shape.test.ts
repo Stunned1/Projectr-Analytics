@@ -751,9 +751,9 @@ test('resolves a Texas county history prompt written with "in Texas"', async () 
   assert.equal(response.chart?.kind, 'bar')
 })
 
-test('returns a grounded permit history chart for an explicit Texas metro prompt', async () => {
+test('returns a grounded permit history chart for an explicit non-Austin Texas metro prompt', async () => {
   const calls: AnalyticalComparisonRequest[] = []
-  const response = await buildHistoryChartedResponseForTest('show me permit history for Austin metro area, TX', null, {
+  const response = await buildHistoryChartedResponseForTest('show me permit history for Houston metro area, TX', null, {
     getAnalyticalComparison: async (request: AnalyticalComparisonRequest): Promise<AnalyticalComparisonResult> => {
       calls.push(request)
       return {
@@ -763,9 +763,9 @@ test('returns a grounded permit history chart for an explicit Texas metro prompt
         timeWindow: { mode: 'relative', startDate: '2021-04-01', label: 'Last 5 years', monthsBack: 60 },
         series: [
           {
-            key: 'metro:TX:austin:permit_units',
-            label: 'Austin, TX',
-            subject: { kind: 'metro', id: 'metro:TX:austin', label: 'Austin, TX' },
+            key: 'metro:TX:houston:permit_units',
+            label: 'Houston, TX',
+            subject: { kind: 'metro', id: 'metro:TX:houston', label: 'Houston, TX' },
             points: [
               { x: '2021-04-01', y: 1024 },
               { x: '2025-04-01', y: 1188 },
@@ -774,7 +774,7 @@ test('returns a grounded permit history chart for an explicit Texas metro prompt
         ],
         citations: [
           {
-            id: 'permit_units:metro:TX:austin',
+            id: 'permit_units:metro:TX:houston',
             label: 'Census BPS / Projectr master data',
             sourceType: 'public_dataset',
             periodLabel: '2021-04-01 to 2025-04-01',
@@ -786,15 +786,15 @@ test('returns a grounded permit history chart for an explicit Texas metro prompt
 
   assert.equal(calls[0]?.metric, 'permit_units')
   assert.equal(calls[0]?.subjectMarket.kind, 'metro')
-  assert.equal(calls[0]?.subjectMarket.id, 'metro:TX:austin')
-  assert.match(calls[0]?.subjectMarket.label ?? '', /Austin, TX/i)
+  assert.equal(calls[0]?.subjectMarket.id, 'metro:TX:houston')
+  assert.match(calls[0]?.subjectMarket.label ?? '', /Houston, TX/i)
   assert.equal(response.chart?.kind, 'bar')
-  assert.match(response.message, /Austin/i)
+  assert.match(response.message, /Houston/i)
 })
 
-test('treats an explicit Texas city history prompt as the matching bounded metro subject', async () => {
+test('treats an explicit non-Austin Texas city history prompt as the matching bounded metro subject', async () => {
   const calls: AnalyticalComparisonRequest[] = []
-  const response = await buildHistoryChartedResponseForTest('analyze the last 10 years of permit data for Austin, Texas', null, {
+  const response = await buildHistoryChartedResponseForTest('analyze the last 10 years of permit data for Houston, Texas', null, {
     getAnalyticalComparison: async (request: AnalyticalComparisonRequest): Promise<AnalyticalComparisonResult> => {
       calls.push(request)
       return {
@@ -804,9 +804,9 @@ test('treats an explicit Texas city history prompt as the matching bounded metro
         timeWindow: { mode: 'relative', startDate: '2016-04-01', label: 'Last 10 years', monthsBack: 120 },
         series: [
           {
-            key: 'metro:TX:austin:permit_units',
-            label: 'Austin, TX',
-            subject: { kind: 'metro', id: 'metro:TX:austin', label: 'Austin, TX' },
+            key: 'metro:TX:houston:permit_units',
+            label: 'Houston, TX',
+            subject: { kind: 'metro', id: 'metro:TX:houston', label: 'Houston, TX' },
             points: [
               { x: '2016-04-01', y: 1024 },
               { x: '2026-04-01', y: 1188 },
@@ -815,7 +815,7 @@ test('treats an explicit Texas city history prompt as the matching bounded metro
         ],
         citations: [
           {
-            id: 'permit_units:metro:TX:austin',
+            id: 'permit_units:metro:TX:houston',
             label: 'TREC Building Permits',
             sourceType: 'internal_dataset',
             periodLabel: '2016-04-01 to 2026-04-01',
@@ -827,19 +827,19 @@ test('treats an explicit Texas city history prompt as the matching bounded metro
 
   assert.equal(calls[0]?.metric, 'permit_units')
   assert.equal(calls[0]?.subjectMarket.kind, 'metro')
-  assert.equal(calls[0]?.subjectMarket.id, 'metro:TX:austin')
-  assert.match(calls[0]?.subjectMarket.label ?? '', /Austin, TX/i)
+  assert.equal(calls[0]?.subjectMarket.id, 'metro:TX:houston')
+  assert.match(calls[0]?.subjectMarket.label ?? '', /Houston, TX/i)
   assert.equal(response.chart?.kind, 'bar')
-  assert.match(response.message, /Austin/i)
+  assert.match(response.message, /Houston/i)
 })
 
-test('retries an explicit Texas city permit history prompt through the bounded county proxy when metro history is insufficient', async () => {
+test('retries an explicit non-Austin Texas city permit history prompt through the bounded county proxy when metro history is insufficient', async () => {
   const calls: AnalyticalComparisonRequest[] = []
-  const response = await buildHistoryChartedResponseForTest('analyze the last 10 years of permit data for Austin, Texas', null, {
+  const response = await buildHistoryChartedResponseForTest('analyze the last 10 years of permit data for Houston, Texas', null, {
     getAnalyticalComparison: async (request: AnalyticalComparisonRequest): Promise<AnalyticalComparisonResult> => {
       calls.push(request)
-      if (request.subjectMarket.id === 'metro:TX:austin') {
-        throw new Error('Insufficient historical data for Austin, TX')
+      if (request.subjectMarket.id === 'metro:TX:houston') {
+        throw new Error('Insufficient historical data for Houston, TX')
       }
 
       return {
@@ -849,9 +849,9 @@ test('retries an explicit Texas city permit history prompt through the bounded c
         timeWindow: { mode: 'relative', startDate: '2016-04-01', label: 'Last 10 years', monthsBack: 120 },
         series: [
           {
-            key: 'county:TX:travis-county:permit_units',
-            label: 'Austin, TX (Travis County proxy)',
-            subject: { kind: 'county', id: 'county:TX:travis-county', label: 'Austin, TX (Travis County proxy)' },
+            key: 'county:TX:harris-county:permit_units',
+            label: 'Houston, TX (Harris County proxy)',
+            subject: { kind: 'county', id: 'county:TX:harris-county', label: 'Houston, TX (Harris County proxy)' },
             points: [
               { x: '2016-04-01', y: 700 },
               { x: '2026-04-01', y: 980 },
@@ -860,7 +860,7 @@ test('retries an explicit Texas city permit history prompt through the bounded c
         ],
         citations: [
           {
-            id: 'permit_units:county:TX:travis-county',
+            id: 'permit_units:county:TX:harris-county',
             label: 'TREC Building Permits',
             sourceType: 'internal_dataset',
             periodLabel: '2016-04-01 to 2026-04-01',
@@ -871,11 +871,132 @@ test('retries an explicit Texas city permit history prompt through the bounded c
   })
 
   assert.equal(calls.length, 2)
-  assert.equal(calls[0]?.subjectMarket.id, 'metro:TX:austin')
-  assert.equal(calls[1]?.subjectMarket.id, 'county:TX:travis-county')
-  assert.match(calls[1]?.subjectMarket.label ?? '', /Austin, TX \(Travis County proxy\)/i)
+  assert.equal(calls[0]?.subjectMarket.id, 'metro:TX:houston')
+  assert.equal(calls[1]?.subjectMarket.id, 'county:TX:harris-county')
+  assert.match(calls[1]?.subjectMarket.label ?? '', /Houston, TX \(Harris County proxy\)/i)
   assert.equal(response.chart?.kind, 'bar')
-  assert.match(response.message, /Austin, TX \(Travis County proxy\)/i)
+  assert.match(response.message, /Houston, TX \(Harris County proxy\)/i)
+})
+
+test('returns a grounded Austin-only monthly permit chart from raw permits', async () => {
+  const response = await buildHistoryChartedResponseForTest('show monthly permit activity in Austin, Texas over the last 12 months', null, {
+    getTexasRawPermits: async () => ({
+      city: 'Austin',
+      state: 'TX',
+      source: 'City of Austin Open Data',
+      categories: {
+        new_construction: 2,
+        major_renovation: 1,
+        demolition: 1,
+      },
+      permits: [
+        {
+          id: 'a1',
+          source_city: 'Austin',
+          source_name: 'City of Austin Open Data',
+          category: 'new_construction',
+          category_label: 'New Construction',
+          permit_number: 'A1',
+          permit_type_desc: null,
+          permit_class_mapped: null,
+          work_class: null,
+          description: null,
+          address: null,
+          zip_code: null,
+          issue_date: '2025-05-10',
+          lat: 30.27,
+          lng: -97.74,
+          valuation: null,
+          square_feet: null,
+          housing_units: null,
+          source_url: null,
+        },
+        {
+          id: 'a2',
+          source_city: 'Austin',
+          source_name: 'City of Austin Open Data',
+          category: 'major_renovation',
+          category_label: 'Major Renovation',
+          permit_number: 'A2',
+          permit_type_desc: null,
+          permit_class_mapped: null,
+          work_class: null,
+          description: null,
+          address: null,
+          zip_code: null,
+          issue_date: '2025-05-18',
+          lat: 30.27,
+          lng: -97.74,
+          valuation: null,
+          square_feet: null,
+          housing_units: null,
+          source_url: null,
+        },
+        {
+          id: 'a3',
+          source_city: 'Austin',
+          source_name: 'City of Austin Open Data',
+          category: 'demolition',
+          category_label: 'Demolition',
+          permit_number: 'A3',
+          permit_type_desc: null,
+          permit_class_mapped: null,
+          work_class: null,
+          description: null,
+          address: null,
+          zip_code: null,
+          issue_date: '2026-04-04',
+          lat: 30.27,
+          lng: -97.74,
+          valuation: null,
+          square_feet: null,
+          housing_units: null,
+          source_url: null,
+        },
+      ],
+    }),
+    validateGroundingPayload: async () => ({
+      requiresEvidence: true,
+      normalizedEvidence: {
+        status: 'grounded',
+        citations: [
+          {
+            id: 'austin_raw_permits:monthly',
+            label: 'City of Austin Open Data building permits',
+            sourceType: 'public_dataset',
+            scope: 'Austin, TX',
+            note: 'Monthly permit counts aggregated from live Austin raw permit events.',
+            periodLabel: '2025-05 to 2026-04',
+            placeholder: false,
+          },
+        ],
+      },
+      validation: {
+        status: 'grounded',
+        userMessage: null,
+        suppressGroundedChart: false,
+      },
+    }),
+  })
+
+  assert.equal(response.chart?.kind, 'bar')
+  assert.equal(response.chart?.series[0]?.points.length, 2)
+  assert.equal(response.chart?.series[0]?.points[0]?.x, '2025-05')
+  assert.equal(response.chart?.series[0]?.points[0]?.y, 2)
+  assert.equal(response.trace?.citations?.[0]?.label, 'City of Austin Open Data building permits')
+  assert.match(response.message, /monthly permit activity history for Austin, TX/i)
+})
+
+test('rejects Austin permit history requests that ask for yearly windows on the monthly-only raw path', async () => {
+  const response = await buildHistoryChartedResponseForTest('analyze the last 10 years of permit data for Austin, Texas', null, {
+    getTexasRawPermits: async () => {
+      throw new Error('raw fetch should not be called')
+    },
+  })
+
+  assert.equal(response.chart ?? null, null)
+  assert.match(response.message, /monthly raw permit data since January 2024/i)
+  assert.match(response.trace?.summary ?? '', /monthly-only/i)
 })
 
 test('returns a grounded public macro response for a Texas county population prompt', async () => {
@@ -1829,8 +1950,8 @@ test('keeps unresolved explicit comparisons inside the bounded comparison lane',
 
   assert.equal(called, false)
   assert.equal(response.chart ?? null, null)
-  assert.match(response.message, /could not identify two explicit comparison markets/i)
-  assert.match(response.trace?.summary ?? '', /comparison request missing two resolvable markets/i)
+  assert.match(response.message, /same geography type/i)
+  assert.match(response.trace?.summary ?? '', /matching geography kinds/i)
 })
 
 test('rejects a space-delimited non-Texas county history prompt', async () => {
