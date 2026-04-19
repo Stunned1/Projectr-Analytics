@@ -162,6 +162,65 @@ test('downgrades charted history responses when citation coverage is incomplete'
   assert.match(response.message, /Citation coverage is incomplete/i)
 })
 
+test('keeps charted history responses for demo use when service grounding is incomplete', async () => {
+  const response = await buildHistoryChartedResponseForTest('show me permit history for Travis County, TX', null, {
+    getAnalyticalComparison: async () =>
+      ({
+        comparisonMode: 'history',
+        metric: 'permit_units',
+        metricLabel: 'Permit units',
+        timeWindow: { mode: 'relative', startDate: '2016-12-01', label: 'Last 10 years', monthsBack: 120 },
+        series: [
+          {
+            key: 'county:TX:travis-county:permit_units',
+            label: 'Travis County, TX',
+            subject: { kind: 'county', id: 'county:TX:travis-county', label: 'Travis County, TX' },
+            points: [
+              { x: '2016-12-01', y: 13424 },
+              { x: '2025-12-01', y: 13908 },
+            ],
+          },
+        ],
+        citations: [
+          {
+            id: 'texas_permits:warehouse:county:county:TX:travis-county',
+            label: 'TREC Building Permits',
+            sourceType: 'internal_dataset',
+            scope: 'Travis County, TX',
+            note: 'Texas permit history served from the specialized BigQuery texas_permits warehouse.',
+            periodLabel: 'Historical Texas permit warehouse',
+          },
+        ],
+      }) as AnalyticalComparisonResult,
+    validateGroundingPayload: async () => ({
+      requiresEvidence: true,
+      normalizedEvidence: {
+        status: 'grounded',
+        citations: [
+          {
+            id: 'texas_permits:warehouse:county:county:TX:travis-county',
+            label: 'TREC Building Permits',
+            sourceType: 'internal_dataset',
+            scope: 'Travis County, TX',
+            note: 'Texas permit history served from the specialized BigQuery texas_permits warehouse.',
+            periodLabel: 'Historical Texas permit warehouse',
+            placeholder: false,
+          },
+        ],
+      },
+      validation: {
+        status: 'citation_incomplete',
+        userMessage: 'Citation coverage is incomplete.',
+        suppressGroundedChart: true,
+      },
+    }),
+  })
+
+  assert.equal(response.chart?.kind, 'bar')
+  assert.match(response.message, /Citation coverage is incomplete/i)
+  assert.match(response.trace?.caveats?.join(' ') ?? '', /Citation coverage is incomplete/i)
+})
+
 test('keeps a history response grounded after internal provenance enrichment', async () => {
   const provenanceQueries: AgentInternalProvenanceQuery[] = []
   const dependencies: Parameters<typeof buildHistoryChartedResponseForTest>[2] & {

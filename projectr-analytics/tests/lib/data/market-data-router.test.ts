@@ -547,6 +547,40 @@ test('fetchLatestRowsForSubmarkets reads BigQuery per submarket instead of apply
   }
 });
 
+test('fetchMetricSeriesFromBigQuery omits empty dataSources params when no source filter is provided', async () => {
+  const { fetchMetricSeriesFromBigQuery } = await loadBigQueryMasterDataModule();
+  const originalProjectId = process.env.BIGQUERY_PROJECT_ID;
+  const originalDatasetId = process.env.BIGQUERY_DATASET_ID;
+  process.env.BIGQUERY_PROJECT_ID = 'scout-dev';
+  process.env.BIGQUERY_DATASET_ID = 'market_router';
+
+  const seen: Array<{ query: string; params: Record<string, unknown> }> = [];
+  const client = {
+    query(options: { query: string; params: Record<string, unknown> }) {
+      seen.push(options);
+      return Promise.resolve([[]]);
+    },
+  };
+
+  try {
+    await fetchMetricSeriesFromBigQuery('county:TX:harris-county', 'Permit_Units', {
+      client: client as never,
+      startDate: '2021-04-01',
+    });
+
+    assert.strictEqual(seen.length, 1);
+    assert.match(seen[0]!.query, /metric_name = @metricName/);
+    assert.strictEqual('dataSources' in seen[0]!.params, false);
+    assert.strictEqual(seen[0]!.params.startDate, '2021-04-01');
+  } finally {
+    if (originalProjectId === undefined) delete process.env.BIGQUERY_PROJECT_ID;
+    else process.env.BIGQUERY_PROJECT_ID = originalProjectId;
+
+    if (originalDatasetId === undefined) delete process.env.BIGQUERY_DATASET_ID;
+    else process.env.BIGQUERY_DATASET_ID = originalDatasetId;
+  }
+});
+
 test('fetchRowsForSubmarkets does not impose a synthetic global cap when no limit is provided', async () => {
   const { fetchRowsForSubmarkets } = await loadPostgresMasterDataModule();
   let seenLimit: number | null = null;
@@ -767,18 +801,18 @@ test('fetchTexasPermitHistorySeries joins the warehouse dimensions for Texas per
   process.env.BIGQUERY_PROJECT_ID = 'scout-dev';
   process.env.BIGQUERY_DATASET_ID = 'market_router';
 
-  const seen: Array<{ query: string; params: Record<string, unknown> }> = [];
+  const seen: Array<{ query: string; params: Record<string, unknown>; types?: Record<string, unknown> }> = [];
   const client = {
-    query(options: { query: string; params: Record<string, unknown> }) {
+    query(options: { query: string; params: Record<string, unknown>; types?: Record<string, unknown> }) {
       seen.push(options);
       return Promise.resolve([[
         {
-          time_period: '2016-04-01',
+          time_period: { value: '2016-04-01' },
           metric_value: '700',
           source_label: 'TREC Building Permits',
         },
         {
-          time_period: '2026-04-01',
+          time_period: { value: '2026-04-01' },
           metric_value: '980',
           source_label: 'TREC Building Permits',
         },
@@ -798,11 +832,18 @@ test('fetchTexasPermitHistorySeries joins the warehouse dimensions for Texas per
     assert.strictEqual(seen.length, 1);
     assert.match(seen[0]!.query, /market_router\.texas_permits/);
     assert.match(seen[0]!.query, /market_router\.dim_geography/);
-    assert.match(seen[0]!.query, /market_router\.dim_metrics/);
+    assert.doesNotMatch(seen[0]!.query, /market_router\.dim_metrics/);
+    assert.match(seen[0]!.query, /SAFE_CAST\(geography\.fips_code AS INT64\) = permits\.geo_id/);
+    assert.match(seen[0]!.query, /Permit_Single_Family_Units/);
+    assert.match(seen[0]!.query, /Permit_Multi_Family_Units/);
+    assert.match(seen[0]!.query, /SUM\(CAST\(permits\.metric_value AS FLOAT64\)\) AS metric_value/);
     assert.deepStrictEqual(seen[0]!.params, {
       geoType: 'county',
       subjectLabels: ['travis county, tx', 'travis county', 'travis'],
       startDate: '2016-04-01',
+    });
+    assert.deepStrictEqual(seen[0]!.types, {
+      subjectLabels: ['STRING'],
     });
     assert.strictEqual(result?.sourceId, 'texas_permits:warehouse');
     assert.strictEqual(result?.sourceLabel, 'TREC Building Permits');

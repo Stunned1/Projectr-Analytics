@@ -222,6 +222,10 @@ _04.18.2026_
 _04.19.2026_
 - Added a persistent `address_geocode_cache` plus `npm run warm:houston:permits`, so Houston raw permits can graduate from ZIP-centroid-only fallbacks to Austin-style point rendering without re-geocoding the same addresses on every request.
 - `lib/texas-raw-permits.ts` now resolves cached Houston address points before falling back to canonical ZIP centroids, and only spends a bounded live-geocode budget on cold misses during route requests.
+- Fixed the specialized Texas permit BigQuery history query so `subjectLabels` array params now declare their `STRING` type explicitly, which stops Austin/Travis County permit-history prompts from failing before fallback routing can run.
+- Fixed the shared BigQuery metric-series fallback so it no longer sends an empty `dataSources` array param, which was still causing Travis County permit-history prompts to fail before the router could return a grounded or fallback series.
+- Fixed Texas permit warehouse history to normalize BigQuery `DATE` wrapper values returned by `client.query()`, so matched Travis County permit rows no longer collapse to an empty series during point mapping.
+- Demo-mode grounded charts now stay visible when only the external Check Grounding service reports low support, while still suppressing charts whose citation objects are actually missing or malformed.
 
 **Bug Fixes**
 

@@ -5,7 +5,10 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { normalizeAgentTrace } from '@/lib/agent-trace'
-import { validateAgentGroundingPayloadWithService } from '@/lib/agent-grounding-validator'
+import {
+  validateAgentGroundingPayloadWithService,
+  type AgentGroundingValidation,
+} from '@/lib/agent-grounding-validator'
 import type {
   AgentAction,
   AgentDriveTimeEvidenceResult,
@@ -253,6 +256,15 @@ type AgentPipelineResult = {
   chart?: ScoutChartOutput | null
 }
 
+type GroundingValidationPayload = {
+  message: string
+  trace: AgentTrace
+  chart?: ScoutChartOutput | null
+  synthetic: boolean
+}
+
+type GroundingValidationFn = (payload: GroundingValidationPayload) => Promise<AgentGroundingValidation>
+
 type AgentCitation = ScoutChartOutput['citations'][number]
 
 function getCanonicalEvidenceCitations(result: AgentPipelineResult): AgentCitation[] {
@@ -294,10 +306,17 @@ function tagQuantitativeClaims(message: string, citations: readonly AgentCitatio
   })
 }
 
-async function finalizeAgentPipelineResult(result: AgentPipelineResult): Promise<AgentPipelineResult> {
+async function finalizeAgentPipelineResult(
+  result: AgentPipelineResult,
+  dependencies: {
+    validateGroundingPayload?: GroundingValidationFn
+  } = {}
+): Promise<AgentPipelineResult> {
   const citations = getCanonicalEvidenceCitations(result)
   const taggedMessage = tagQuantitativeClaims(result.message, citations)
-  const grounding = await validateAgentGroundingPayloadWithService({
+  const validateGroundingPayload =
+    dependencies.validateGroundingPayload ?? validateAgentGroundingPayloadWithService
+  const grounding = await validateGroundingPayload({
     message: taggedMessage,
     trace: result.trace,
     chart: result.chart,
@@ -317,6 +336,21 @@ async function finalizeAgentPipelineResult(result: AgentPipelineResult): Promise
   }
 
   const evidenceMessage = grounding.validation.userMessage?.trim() ?? ''
+
+  if (
+    grounding.validation.status === 'citation_incomplete' &&
+    grounding.normalizedEvidence.status === 'grounded' &&
+    result.chart
+  ) {
+    return {
+      ...result,
+      message: evidenceMessage ? `${taggedMessage} ${evidenceMessage}`.trim() : taggedMessage,
+      trace: {
+        ...trace,
+        caveats: evidenceMessage ? [...(trace.caveats ?? []), evidenceMessage] : trace.caveats,
+      },
+    }
+  }
 
   return {
     ...result,
@@ -521,6 +555,7 @@ type HistoryComparisonDependencies = {
   getPublicMacroEvidence?: (query: AgentPublicMacroQuery) => Promise<AgentPublicMacroEvidenceResult>
   getPlaceGrounding?: (query: AgentPlaceGroundingQuery) => Promise<AgentPlaceGroundingEvidenceResult>
   getDriveTimeGrounding?: (query: AgentDriveTimeQuery) => Promise<AgentDriveTimeEvidenceResult>
+  validateGroundingPayload?: GroundingValidationFn
 }
 
 const HISTORY_METRIC_CONFIG: Record<
@@ -1788,7 +1823,7 @@ async function maybeBuildHistoryChartedResponse(
         evidence: [...(trace.evidence ?? []), ...provenanceEvidence],
       },
       chart,
-    })
+    }, dependencies)
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to build a grounded history response.'
 
