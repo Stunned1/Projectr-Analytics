@@ -10,6 +10,7 @@ const LABELS: Record<keyof Omit<MapLayersSnapshot, 'choroplethMetric'>, string> 
   amenityHeatmap: 'Amenity heatmap',
   floodRisk: 'FEMA flood zones',
   nycPermits: 'NYC building permits',
+  permitH3: 'Austin permits H3 cells',
   clientData: 'Client upload markers',
 }
 

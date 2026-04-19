@@ -326,6 +326,7 @@ _04.18.2026_
 _04.19.2026_
 - Houston raw permit searches now render true 3D pins for address-geocoded records and reserve heatmap fallbacks for unresolved ZIP-centroid rows, so the map stops pretending every Houston record has parcel-level precision.
 - Texas raw permit 3D columns now use stronger category-based fallback heights when row-level valuation, square footage, and unit counts are missing, so Houston’s address-geocoded permits no longer render as near-flat stubs.
+- Austin raw permits now expose a separate `Permits H3` overlay layer so H3 cells can be viewed independently without changing the default heatmap and 3D permit behavior.
 - The market report PDF now routes its rent, permit, and search-trends chart inputs through the shared Scout chart contract before rendering them with the existing React PDF chart components.
 - City and county searches now render a real Census outer polygon beneath the ZIP choropleth and keep the outline on top, so aggregate area views retain a coherent shell even where individual ZIP coverage is thin or missing.
 - City searches no longer draw legal municipal boundary overlays by default after Houston-style annexation geometry proved too noisy for the product, while county searches keep their outer boundary shell.
