@@ -41,56 +41,11 @@ export function buildAgentGreeting(context: SurfaceContext): string {
 }
 
 export function buildAgentStarterSuggestions(context: SurfaceContext): string[] {
-  const uploadMode = activeImportedVisualization(context)
-  const uploadSuggestions =
-    uploadMode === 'map'
-      ? [
-          'Summarize the imported dataset',
-          'Find outliers in the mapped upload',
-          'Explain why these rows map',
-        ]
-      : uploadMode === 'chart'
-        ? [
-            'Summarize the imported dataset',
-            'Explain the trend in the uploaded chart',
-            'Why is this dataset using a sidebar fallback?',
-          ]
-        : uploadMode === 'table'
-          ? [
-              'Summarize the imported dataset',
-              'Check data quality in the uploaded table',
-              'Why is this dataset not on the map?',
-            ]
-          : []
-
-  if (isNycActiveSurface(context)) {
-    return dedupeSuggestions([
-      ...uploadSuggestions,
-      '/help',
-      '/go Brooklyn',
-      '/layers:parcels,permits',
-      '/save',
-      'Summarize the loaded market',
-      'Find outliers in the imported CSV',
-      'Explain what parcels and permits are showing here',
-      'Turn on parcels and permits',
-    ])
-  }
-
+  void context
   return dedupeSuggestions([
-    ...uploadSuggestions,
     '/help',
-    '/go 77002',
-    '/go Harris County, TX',
-    '/save',
-    '/layers:transit,rent',
-    '/clear:terminal',
-    '/clear:workspace',
-    'Summarize the loaded market',
-    'Find outliers in the imported CSV',
-    'Explain this rent and vacancy snapshot',
-    'Turn on flood risk and transit',
-    'Open the data panel',
+    'Analyze rent and vacancy in Harris County, TX',
+    'Show me transit routes in Houston, TX',
   ])
 }
 

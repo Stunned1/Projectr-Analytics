@@ -112,7 +112,7 @@ If you add a new environment variable, script, or required setup step, update `#
 - Never leave the README stale - if you touched the code, update the docs
 - Keep entries concise - one sentence per bullet is the target
 - Do not create separate markdown files to document your work - everything goes in `README.md`
-=======
+---
 ## Purpose
 This file defines how AI coding agents (e.g., Codex) should operate within this repository.
 

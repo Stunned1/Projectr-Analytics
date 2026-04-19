@@ -330,6 +330,7 @@ _04.19.2026_
 - The market report PDF now routes its rent, permit, and search-trends chart inputs through the shared Scout chart contract before rendering them with the existing React PDF chart components.
 - City and county searches now render a real Census outer polygon beneath the ZIP choropleth and keep the outline on top, so aggregate area views retain a coherent shell even where individual ZIP coverage is thin or missing.
 - City searches no longer draw legal municipal boundary overlays by default after Houston-style annexation geometry proved too noisy for the product, while county searches keep their outer boundary shell.
+- The terminal starter-chip row now defaults to just three prompts: `/help` plus two concrete Texas-first example prompts, which removes the old crowded multi-chip prompt wall.
 
 ## Known Bugs
 
