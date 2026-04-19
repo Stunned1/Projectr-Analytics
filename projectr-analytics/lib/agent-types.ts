@@ -43,6 +43,20 @@ export type EdaTaskType =
   | 'check_data_quality'
   | 'explain_metric'
 
+export type AgentEvidenceStatus =
+  | 'grounded'
+  | 'citation_incomplete'
+  | 'citation_missing'
+  | 'synthetic'
+
+export interface AgentEvidenceSummary {
+  status: AgentEvidenceStatus
+  userMessage: string | null
+  suppressGroundedChart: boolean
+}
+
+export type AgentEvidenceValidationResult = AgentEvidenceSummary
+
 export interface EdaEvidenceStat {
   label: string
   value: string
@@ -171,10 +185,147 @@ export interface AgentHistorySubject {
   label: string
 }
 
+export type AgentPublicMacroMetric =
+  | 'population'
+  | 'median household income'
+  | 'housing cost burden'
+
+export interface AgentPublicMacroQuery {
+  metric: AgentPublicMacroMetric
+  subject: AgentHistorySubject | null
+  timeHint?: string | null
+}
+
+export interface AgentPublicMacroValue {
+  metric: AgentPublicMacroMetric
+  label: string
+  value: number
+  displayValue: string
+  scope: string
+  periodLabel: string
+  note?: string | null
+  sourceType: 'public_dataset'
+}
+
+export interface AgentPublicMacroRecord {
+  id: string
+  metric: AgentPublicMacroMetric
+  label: string
+  value: number
+  displayValue: string
+  sourceType: 'public_dataset'
+  scope?: string | null
+  note?: string | null
+  periodLabel?: string | null
+}
+
+export interface AgentPublicMacroEvidenceResult {
+  query: AgentPublicMacroQuery
+  value: AgentPublicMacroValue
+  records: AgentPublicMacroRecord[]
+  citations: ScoutChartCitation[]
+}
+
+export type AgentPlaceGroundingRequestType = 'place' | 'drive_time'
+
+export type AgentPlaceGroundingSourceType = ScoutChartCitation['sourceType']
+
+export interface AgentPlaceGroundingQuery {
+  prompt: string
+  subject: AgentHistorySubject | null
+  requestType?: AgentPlaceGroundingRequestType
+}
+
+export interface AgentPlaceGroundingValue {
+  label: string
+  scope: string
+  sourceType: AgentPlaceGroundingSourceType
+  note?: string | null
+  periodLabel?: string | null
+  lat?: number | null
+  lng?: number | null
+}
+
+export interface AgentPlaceGroundingRecord {
+  id: string
+  label: string
+  sourceType: AgentPlaceGroundingSourceType
+  scope?: string | null
+  note?: string | null
+  periodLabel?: string | null
+  lat?: number | null
+  lng?: number | null
+}
+
+export interface AgentPlaceGroundingEvidenceResult {
+  query: AgentPlaceGroundingQuery
+  value: AgentPlaceGroundingValue
+  records: AgentPlaceGroundingRecord[]
+  citations: ScoutChartCitation[]
+}
+
+export type AgentDriveTimeSourceType = ScoutChartCitation['sourceType']
+
+export interface AgentDriveTimeQuery {
+  prompt: string
+  origin: AgentHistorySubject | null
+  destination: AgentHistorySubject | null
+}
+
+export interface AgentDriveTimeValue {
+  label: string
+  scope: string
+  sourceType: AgentDriveTimeSourceType
+  driveMinutes: number
+  displayValue: string
+  distanceMiles?: number | null
+  note?: string | null
+  periodLabel?: string | null
+}
+
+export interface AgentDriveTimeRecord {
+  id: string
+  label: string
+  sourceType: AgentDriveTimeSourceType
+  scope?: string | null
+  note?: string | null
+  periodLabel?: string | null
+  driveMinutes?: number | null
+  distanceMiles?: number | null
+}
+
+export interface AgentDriveTimeEvidenceResult {
+  query: AgentDriveTimeQuery
+  value: AgentDriveTimeValue
+  records: AgentDriveTimeRecord[]
+  citations: ScoutChartCitation[]
+}
+
 export interface AgentHistoryTimeWindow {
   mode: 'relative'
   unit: 'months' | 'years'
   value: number
+}
+
+export type AgentInternalProvenanceSourceType =
+  | 'internal_dataset'
+  | 'workspace_upload'
+  | 'derived'
+
+export interface AgentInternalProvenanceRecord {
+  id: string
+  label: string
+  sourceType: AgentInternalProvenanceSourceType
+  scope?: string | null
+  note?: string | null
+  periodLabel?: string | null
+}
+
+export interface AgentInternalProvenanceQuery {
+  taskType: EdaTaskType
+  subject: AgentHistorySubject | null
+  metric: AgentHistoryMetric | null
+  sourceIds?: string[]
 }
 
 /** Optional row for future server-side tool loops (args/results are previews only). */

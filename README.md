@@ -173,6 +173,7 @@ _04.19.2026_
 - The bounded agent history lane now treats prompts like “last 10 years of permit data in Travis County, Texas” as router-backed history requests, preserves the explicit time window, and prefers the specialized Texas BigQuery permit warehouse before falling back to shared `master_data`.
 - Texas permit warehouse history now matches county and metro alias labels more defensively and carries a dedicated `texas_permits` provenance id, so router-backed Travis/Harris permit reads stop falling through to generic master-data citations and no longer imply client-upload provenance by default.
 - Router-backed history responses now include explicit source-path debug evidence in the agent trace so fallback behavior between `texas_permits` and shared permit history can be diagnosed from a live `/api/agent` response.
+- Phase-2 demo branch merges now carry forward the local agent grounding validator and Google auth helpers so the Austin-based worktree can boot the bounded agent route and tests without missing-module failures.
 - `/api/agent` returns normalized **`trace`** (summary, detail, plan, eval, executionSteps derived from `steps`, optional `toolCalls`); `lib/agent-trace.ts`.
 - `/api/agent` runs an optional first Gemini **text** pass for long-form `trace.thinking` (injected into the JSON pass for consistency); `SCOUT_AGENT_SKIP_REASONING_PASS=1` skips it.
 - `/api/agent` with `stream: true` returns **`application/x-ndjson`**: `thinking_delta` lines (Gemini stream) then `status` + final `done` JSON; client `lib/consume-agent-ndjson-stream.ts`.
