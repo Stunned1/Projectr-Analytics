@@ -1,6 +1,7 @@
-/** Client → POST /api/report/pdf */
+/** Client -> POST /api/report/pdf */
 
 import type { CycleAnalysis } from '@/lib/cycle/types'
+import type { ReportConfig } from '@/lib/report/config'
 
 export type ChoroplethMetric = 'zori' | 'zhvi'
 
@@ -30,6 +31,7 @@ export interface ClientReportPayload {
   primaryZip: string | null
   metroName: string | null
   generatedAt: string
+  reportConfig: ReportConfig
   layers: MapLayersSnapshot
   geo: { lat: number; lng: number; city?: string; state?: string } | null
   zillow: {

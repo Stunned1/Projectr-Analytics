@@ -3,6 +3,7 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { renderToBuffer } from '@react-pdf/renderer'
 import { supabase } from '@/lib/supabase'
 import type { ClientReportPayload, MetroBenchmark, SignalIndicator } from '@/lib/report/types'
+import { normalizeReportConfig } from '@/lib/report/config'
 import { analyzeCycleForZip, cycleHeadline } from '@/lib/cycle/run-analysis'
 import { cycleAnalysisToSignalIndicators } from '@/lib/report/cycle-signals'
 import { buildSignalIndicators, confidenceFromSignals } from '@/lib/report/signals'
@@ -12,6 +13,7 @@ import { generateMarketDossierWithGemini, type MarketDossierGemini } from '@/lib
 import { parseCycleAnalysisField } from '@/lib/report/validate-cycle'
 import { MarketReportDocument, type SiteCompareRow } from '@/lib/report/pdf-document'
 import { loadScoutLogoDataUri } from '@/lib/report/load-scout-logo'
+import { loadStaticMapDataUri, type StaticMapSnapshot } from '@/lib/report/load-static-map'
 import type { CycleAnalysis } from '@/lib/cycle/types'
 import { resolveZctaFromCoordinates } from '@/lib/upload/resolve-zcta'
 
@@ -140,7 +142,11 @@ function validatePayload(body: unknown): ClientReportPayload | null {
   if (!b.zillow || !b.census || !b.permits || !b.employment || !b.fred || !b.trends) return null
   if (!Array.isArray(b.pins)) return null
   const cycle = parseCycleAnalysisField(b.cycleAnalysis)
-  const payload = { ...b, cycleAnalysis: cycle } as unknown as ClientReportPayload
+  const reportConfig = normalizeReportConfig(b.reportConfig, {
+    title: typeof b.marketLabel === 'string' ? b.marketLabel : null,
+    subtitle: typeof b.metroName === 'string' ? b.metroName : null,
+  })
+  const payload = { ...b, reportConfig, cycleAnalysis: cycle } as unknown as ClientReportPayload
   return payload
 }
 
@@ -155,6 +161,7 @@ async function renderMarketReportPdf(args: {
   trendsSeries: ClientReportPayload['trends']['series']
   metro: MetroBenchmark | null
   logoDataUri: string | null
+  staticMap: StaticMapSnapshot | null
   siteRows: SiteCompareRow[] | null
 }) {
   return renderToBuffer(
@@ -169,6 +176,7 @@ async function renderMarketReportPdf(args: {
       trendsSeries={args.trendsSeries}
       metro={args.metro}
       logoDataUri={args.logoDataUri}
+      staticMap={args.staticMap}
       siteRows={args.siteRows}
     />
   )
@@ -227,7 +235,10 @@ export async function POST(request: NextRequest) {
       trendsSeries,
     })
 
-    const logoDataUri = loadScoutLogoDataUri()
+    const [logoDataUri, staticMap] = await Promise.all([
+      Promise.resolve(loadScoutLogoDataUri()),
+      loadStaticMapDataUri(payload),
+    ])
     const buffer = await renderMarketReportPdf({
       payload,
       brief,
@@ -239,15 +250,17 @@ export async function POST(request: NextRequest) {
       trendsSeries,
       metro,
       logoDataUri,
+      staticMap,
       siteRows: siteRows && siteRows.length >= 2 ? siteRows : null,
     })
 
     const safeName = payload.marketLabel.replace(/[^\w\s-]/g, '').trim().slice(0, 60) || 'market-brief'
+    const templateLabel = payload.reportConfig.template === 'internal' ? 'Internal' : 'Client'
     return new NextResponse(new Uint8Array(buffer), {
       status: 200,
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="Scout-${safeName}.pdf"`,
+        'Content-Disposition': `attachment; filename="Scout-${templateLabel}-${safeName}.pdf"`,
         'Cache-Control': 'no-store',
       },
     })

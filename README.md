@@ -103,7 +103,7 @@ NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
 GOOGLE_GEOCODING_API_KEY         # optional server-only Geocoding API key; Client CSV / upload forward-geocode falls back to NEXT_PUBLIC_GOOGLE_MAPS_API_KEY if unset
 NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID   # must be a Vector map ID
 GEMINI_API_KEY
-GOOGLE_MAPS_STATIC_KEY           # optional; unused by current PDF exports (reserved if static map returns)
+GOOGLE_MAPS_STATIC_KEY           # optional server-side key for PDF static map snapshots; falls back to NEXT_PUBLIC_GOOGLE_MAPS_API_KEY if unset
 HUD_API_TOKEN                    # optional, falls back to Census ACS rent data
 TRANSITLAND_API_KEY=             # free at transit.land/sign-up (Developer API, 10k queries/month)
 ```
@@ -189,6 +189,8 @@ _04.17.2026_
 
 _04.18.2026_
 - BigQuery config is now dataset-scoped instead of relying on one global `BIGQUERY_TABLE_ID`, and the shared table registry lets each adapter target its own BigQuery table while keeping the master-data router on `master_data`.
+- `/api/report/pdf` now accepts a normalized `reportConfig`, applies client-vs-internal template defaults server-side, and reuses the shared Scout chart adapter for PDF chart evidence footers and comparative site momentum exports.
+- Added a shared PDF metric-evidence registry so report labels, source classes, explanation copy, and appendix rows stay consistent across templates instead of being hardcoded inline.
 - Added `npm run check:bigquery`, a local BigQuery probe that prints the resolved config plus logical table identifiers and runs a cheap `LIMIT 1` reachability query against the shared `master_data` table.
 - Cycle analysis and report generation now privately pull longer `Unemployment_Rate` and `Permit_Units` series through the shared market-data router when BigQuery history is configured, while preserving the existing behavior when the cold-history path is unavailable.
 - `/api/agent` now resolves Texas county and metro history prompts through the shared area-name normalizers and canonical area keys instead of the route-local parser shim, while still rejecting explicit non-Texas county or metro prompts.
@@ -297,6 +299,26 @@ _04.16.2026_
 _04.18.2026_
 - Added a shared `recharts`-based Scout chart card with citation footer rendering in the live assistant terminal and bridged imported-data chart previews onto the same chart contract.
 - The market report PDF now routes its rent, permit, and search-trends chart inputs through the shared Scout chart contract before rendering them with the existing React PDF chart components.
+- The market PDF export is now a lightweight report builder with client-vs-internal templates, customizable title blocks, analyst notes, section toggles, and a stronger site-comparison page that pairs the table with a shared-contract momentum chart and citation footer.
+- Client-facing PDF metric tables now use plain-English labels and explanations, and internal/methodology exports include an evidence appendix that lists each headline metric’s source, scope, period, and whether the value is direct, aggregated, derived, proxy, or modeled.
+- Client briefs now default to a slimmer PDF section set and render the dossier as a condensed one-page narrative instead of reusing the full internal memo layout.
+- The PDF cover now uses a more polished market-brief layout with snapshot cards and an executive-read panel, and the market-data page adds benchmark takeaway cards to make EDA-style comparisons easier to scan.
+- The site-comparison PDF page now surfaces a visual leaderboard with lead-site and runner-up callouts plus score-spread summary cards before the shared Scout momentum chart and ranking table.
+
+_04.19.2026_
+- Client-facing PDFs now follow a more template-driven chapter structure with a contents page, a thesis page, and section-divider pages before the market snapshot, site comparison, and supporting narrative chapters.
+- The client `Market Snapshot` chapter now uses a dedicated metric snapshot page and a separate charts page instead of mixing benchmark cards and time-series visuals into the older white-page layout.
+- The client thesis page now stays on the same light page treatment as the rest of the brief, keeping the cycle wheel and signal tiles in the normal page flow instead of isolating them inside a separate contrast-heavy card.
+- The client thesis page now places the cycle wheel inside a lighter chart panel with integrated cycle signal tiles so the visualization no longer fights the dark page background.
+- Client `Supporting Narrative` and `Methodology` sections now use the same chaptered card-based PDF language as the rest of the brief, including condensed summary cards and a two-page client methodology appendix instead of the older memo-style text pages.
+- Client PDF supporting-narrative pages now use a planned two-page layout with a tighter Google static neighborhood snapshot, a visible area ring, full wrapped text instead of forced ellipses, and non-splitting content panels so bordered boxes stop breaking awkwardly across pages.
+- The client PDF neighborhood snapshot now uses a styled roadmap with darker map tones instead of the noisier hybrid/satellite view so it reads closer to the platform’s visual language.
+- The client cover now uses a cleaner title-page layout with the Scout logo treated as square hero artwork, a simplified dark cover, and metadata moved into a small footer strip instead of mixing executive-read copy and stat cards onto page one.
+
+**Bug Fixes**
+
+_04.18.2026_
+- PDF dossier bullets and monitoring checklist items now use ASCII-safe markers so client and internal exports stop rendering malformed glyphs like stray `i` characters.
 
 ## Known Bugs
 

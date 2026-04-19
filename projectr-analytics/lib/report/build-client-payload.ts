@@ -1,4 +1,5 @@
 import type { CycleAnalysis } from '@/lib/cycle/types'
+import { createDefaultReportConfig } from './config'
 import type { ClientReportPayload, ClientReportPin, MapLayersSnapshot } from './types'
 
 type DataRow = {
@@ -114,6 +115,11 @@ export function buildClientReportPayloadFromZip(args: {
     primaryZip: result.zip,
     metroName: result.zillow?.metro_name ?? null,
     generatedAt: new Date().toISOString(),
+    reportConfig: createDefaultReportConfig({
+      template: 'client',
+      title: result.zillow?.city ?? result.zip,
+      subtitle: result.zillow?.metro_name ?? null,
+    }),
     layers,
     geo: result.geo ? { lat: result.geo.lat, lng: result.geo.lng, city: result.geo.city, state: result.geo.state } : null,
     zillow: {
@@ -182,6 +188,11 @@ export function buildClientReportPayloadFromAggregate(args: {
     primaryZip,
     metroName: null,
     generatedAt: new Date().toISOString(),
+    reportConfig: createDefaultReportConfig({
+      template: 'client',
+      title: aggregate.label,
+      subtitle: cityZips?.length ? `${cityZips.length} ZIPs` : null,
+    }),
     layers,
     geo: first?.lat && first?.lng ? { lat: first.lat, lng: first.lng, city: first.city, state: first.state ?? undefined } : null,
     zillow: {
