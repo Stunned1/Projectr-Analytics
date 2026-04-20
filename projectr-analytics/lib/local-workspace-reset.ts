@@ -1,6 +1,7 @@
 import { AGENT_CHAT_STORAGE_KEY } from '@/lib/agent-chat-storage-key'
 import { clearClientUploadWorkingRows } from '@/lib/client-upload-working-rows'
 import { PENDING_NAV_KEY } from '@/lib/pending-navigation'
+import { SAVED_CHARTS_STORAGE_KEY } from '@/lib/saved-charts-store'
 
 /**
  * sessionStorage keys used for command-center local state (this browser tab).
@@ -12,6 +13,7 @@ export const LOCAL_WORKSPACE_SESSION_KEYS: readonly string[] = [
   'scout-client-upload-markers',
   AGENT_CHAT_STORAGE_KEY,
   PENDING_NAV_KEY,
+  SAVED_CHARTS_STORAGE_KEY,
 ]
 
 /**

@@ -7,6 +7,7 @@ A geospatial data engine, bounded EDA assistant, and automated reporting platfor
 * **Unified Pipeline:** Ingests and normalizes data from 8 public sources, including Zillow, Census ACS, FRED, HUD, Transitland, and NYC Open Data.
 * **CSV Import + Normalization:** Drag-and-drop CSV uploads are automatically categorized, classified for mapability, and routed to map, chart, or table views.
 * **EDA Assistant:** The default AI surface summarizes loaded markets and uploaded datasets, explains metrics, flags outliers, and calls out data-quality issues using deterministic workspace evidence.
+* **Saved Workspace:** Saved Sites persists map/site context, and Saved Charts collects terminal-generated charts for the current browser session.
 * **Spatial Engine:** Renders dense datasets, including parcels and building permits, smoothly via WebGL.
 * **Automated Reporting:** Generates structured, exportable PDF market briefs directly from the live map state.
 
@@ -239,6 +240,7 @@ _04.19.2026_
 _04.20.2026_
 - `/api/pois` now honors `OVERTURE_API_KEY` before falling back to Overture's demo key and normalizes the live `value` response envelope, so Texas POI requests stop returning empty or malformed payloads when a real Overture key is configured.
 - Terminal chart saves now dedupe by chart, prompt, and market label signature, and chart messages preserve their originating market label so the `Saved` state survives remounts without creating duplicate records.
+- `/clear:workspace` now clears session-local saved charts alongside chat and upload state so the Saved Charts panel resets predictably.
 
 _4.11.2026_
 - Agent keys: `permits` / `nycPermits` normalization; clear tracts/blockGroups after `run_analysis`; `FlyToController` uses `moveCamera` + easing; layer chrome layout; PDF cycle layout, arrows, wrapping, sanitizers; restore `sites-store`; normalize JSON from Gemini; split `AGENT_CHAT_STORAGE_KEY`; default ZIP boundary + choropleth on; `/clear:layers` + override resync + `overlayReady`; Transit `paths` / `color` + legacy `path` caps.
@@ -326,6 +328,7 @@ _4.15.2026_
 _04.20.2026_
 - Cleared the right-panel Analysis tab for ZIP and aggregate views and stopped loading cycle state into the map page so the tab stays intentionally blank for future work.
 - Intelligence terminal and `/api/agent` now block off-topic prompts before Gemini runs, while every leading `/` input stays on the local slash-command path.
+- `/saved` now renders separate Saved Sites and Saved Charts sections, and terminal chart saves appear there with prompt, timestamp, market label, and remove controls.
 
 _04.16.2026_
 - Search, guide, and agent copy now lead with Texas market examples while keeping NYC borough entry points available only when relevant.
@@ -373,6 +376,8 @@ _04.19.2026_
 - **Full build still hits untyped Supabase route payloads** - `npm run build` now gets past the shared chart and router code, but older API routes like `app/api/borough/route.ts` still infer Supabase `data` payloads as `never[]`; each affected route needs explicit local row typing before the production build baseline is fully clean.
 
 ## Minor Gaps
+
+- **Saved Charts are session-local** - Terminal chart saves persist only in the current browser tab/session and are cleared by workspace reset; cross-device persistence would require a dedicated saved-chart backend model.
 
 - **Employment Rate (FRED)** - The FRED series search for "employed persons" at the county level doesn't reliably return a consistent series name across all markets. The computation (employed / labor force × 100) is built and ready, but the series lookup needs a more robust matching strategy. Revisit before demo.
 
