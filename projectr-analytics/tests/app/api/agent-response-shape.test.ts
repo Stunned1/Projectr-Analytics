@@ -1,13 +1,20 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { buildFallbackChartedResponseForTest, buildRentTrendChartForTest, buildRouterBackedChartForTest, buildHistoryChartedResponseForTest } from '@/app/api/agent/route'
-import type { MapContext } from '@/lib/agent-types'
+import { buildFallbackChartedResponseForTest, buildRentTrendChartForTest, buildRouterBackedChartForTest, buildHistoryChartedResponseForTest, buildRetailComparisonResponseForTest } from '@/app/api/agent/agent-pipeline'
+import type { AgentMessage, MapContext } from '@/lib/agent-types'
 import type { AgentDriveTimeQuery } from '@/lib/agent-types'
 import type { AgentInternalProvenanceQuery } from '@/lib/agent-types'
 import type { AgentPublicMacroEvidenceResult, AgentPublicMacroQuery } from '@/lib/agent-types'
 import type { AgentPlaceGroundingQuery } from '@/lib/agent-types'
 import type { AnalyticalComparisonRequest, AnalyticalComparisonResult } from '@/lib/data/market-data-router'
+import type { CoreRetailComparisonResult } from '@/lib/overture-core-retail-comparison'
+
+test('route module only exports route-safe entry points', async () => {
+  const routeModule = await import('@/app/api/agent/route')
+
+  assert.deepEqual(Object.keys(routeModule).sort(), ['POST', 'dynamic', 'maxDuration'])
+})
 
 function createActiveZipContext(zip: string, label = zip): MapContext {
   return {
@@ -45,6 +52,74 @@ function createActiveSubjectContext(subject: { kind: 'county' | 'metro'; id: str
   } as MapContext
 }
 
+function fixtureRetailComparison(cityA: 'Austin' | 'Houston' | 'Dallas', cityB: 'Austin' | 'Houston' | 'Dallas'): CoreRetailComparisonResult {
+  const cities = {
+    Austin: { key: 'austin' as const, label: 'Austin', latitude: 30.2672, longitude: -97.7431 },
+    Houston: { key: 'houston' as const, label: 'Houston', latitude: 29.7604, longitude: -95.3698 },
+    Dallas: { key: 'dallas' as const, label: 'Dallas', latitude: 32.7767, longitude: -96.797 },
+  }
+
+  return {
+    cityA: cities[cityA],
+    cityB: cities[cityB],
+    radiusMeters: 1200,
+    buckets: [
+      { key: 'food_bev', label: 'Food & Bev', cityAValue: 8, cityBValue: 4 },
+      { key: 'coffee_cafe', label: 'Coffee & Cafe', cityAValue: 2, cityBValue: 1 },
+      { key: 'essentials', label: 'Essentials', cityAValue: 1, cityBValue: 1 },
+      { key: 'fitness', label: 'Fitness', cityAValue: 2, cityBValue: 2 },
+    ],
+  }
+}
+
+function fixturePublicMacroEvidence(
+  query: AgentPublicMacroQuery,
+  value: number,
+  displayValue: string,
+  periodLabel = '2024 ACS 5-year'
+): AgentPublicMacroEvidenceResult {
+  return {
+    query: {
+      metric: query.metric,
+      subject: query.subject!,
+      timeHint: query.timeHint ?? null,
+    },
+    value: {
+      metric: query.metric,
+      label: typeof query.metric === 'string' ? query.metric : 'metric',
+      value,
+      displayValue,
+      scope: query.subject?.label ?? 'Unknown',
+      note: 'Fixture public macro evidence.',
+      periodLabel,
+      sourceLabel: 'U.S. Census Bureau ACS 5-year estimate',
+    },
+    records: [
+      {
+        id: `fixture:${query.metric}:${query.subject?.id ?? 'unknown'}`,
+        metric: query.metric === 'population' ? 'population' : 'median household income',
+        label: 'U.S. Census Bureau ACS 5-year estimate',
+        value,
+        displayValue,
+        sourceType: 'public_dataset',
+        scope: query.subject?.label ?? 'Unknown',
+        note: 'Fixture public macro evidence.',
+        periodLabel,
+      },
+    ],
+    citations: [
+      {
+        id: `fixture:${query.metric}:${query.subject?.id ?? 'unknown'}`,
+        label: 'U.S. Census Bureau ACS 5-year estimate',
+        sourceType: 'public_dataset',
+        scope: query.subject?.label ?? 'Unknown',
+        note: 'Fixture public macro evidence.',
+        periodLabel,
+      },
+    ],
+  }
+}
+
 test('returns a chart payload for a supported analytical prompt', () => {
   const context: MapContext = {
     label: 'Austin, TX',
@@ -65,6 +140,38 @@ test('returns a chart payload for a supported analytical prompt', () => {
   assert.equal(out.chart?.kind, 'line')
   assert.equal(out.chart?.placeholder, true)
   assert.ok((out.trace.citations?.length ?? 0) > 0)
+})
+
+test('agent messages can carry chart and stats companion outputs', () => {
+  const message: AgentMessage = {
+    role: 'agent',
+    text: 'Demo',
+    companionOutputs: [
+      {
+        kind: 'chart',
+        chart: {
+          kind: 'bar',
+          title: 'Population',
+          xAxis: { key: 'bucket', label: 'Bucket' },
+          yAxis: { label: 'Value', valueFormat: 'number' },
+          series: [],
+          citations: [],
+        },
+      },
+      {
+        kind: 'stats',
+        title: 'Median household income',
+        items: [
+          { label: 'Austin', value: '$95,000' },
+          { label: 'Houston', value: '$62,000' },
+        ],
+      },
+    ],
+  }
+
+  assert.equal(message.companionOutputs?.length, 2)
+  assert.equal(message.companionOutputs?.[0]?.kind, 'chart')
+  assert.equal(message.companionOutputs?.[1]?.kind, 'stats')
 })
 
 // Route-level downgrade should eventually live in one shared response-finalization path
@@ -2078,6 +2185,49 @@ test('returns a grounded Austin vs Dallas core retail comparison chart', async (
   assert.equal(response.chart?.series[1]?.label, 'Dallas')
   assert.deepEqual(response.chart?.series[1]?.points.map((point) => point.y), [6, 2, 1, 1])
   assert.match(response.message, /Austin and Dallas/i)
+})
+
+test('retail comparison for Austin and Houston includes macro companions', async () => {
+  const response = await buildRetailComparisonResponseForTest('compare Austin and Houston for retail', {
+    getCoreRetailComparison: async () => fixtureRetailComparison('Austin', 'Houston'),
+    getPublicMacroEvidence: async (query) =>
+      query.metric === 'population'
+        ? fixturePublicMacroEvidence(query, query.subject?.label === 'Austin, TX' ? 1200000 : 2300000, query.subject?.label === 'Austin, TX' ? '1,200,000' : '2,300,000')
+        : fixturePublicMacroEvidence(
+            query,
+            query.subject?.label === 'Austin, TX' ? 95000 : 62000,
+            query.subject?.label === 'Austin, TX' ? '$95,000' : '$62,000'
+          ),
+  })
+
+  assert.equal(response?.chart?.title.includes('core retail context'), true)
+  assert.deepEqual(response?.companionOutputs?.map((item) => item.kind), ['chart', 'stats'])
+
+  const populationCompanion = response?.companionOutputs?.[0]
+  assert.equal(populationCompanion?.kind, 'chart')
+  assert.equal(populationCompanion?.chart.title, 'Austin vs Houston population')
+  assert.deepEqual(populationCompanion?.chart.series[0]?.points.map((point) => point.y), [1200000, 2300000])
+
+  const incomeCompanion = response?.companionOutputs?.[1]
+  assert.equal(incomeCompanion?.kind, 'stats')
+  assert.deepEqual(incomeCompanion?.items.map((item) => item.value), ['$95,000', '$62,000'])
+})
+
+test('retail comparison keeps the retail chart when one macro companion fails', async () => {
+  const response = await buildRetailComparisonResponseForTest('compare Austin and Houston for retail', {
+    getCoreRetailComparison: async () => fixtureRetailComparison('Austin', 'Houston'),
+    getPublicMacroEvidence: async (query) => {
+      if (query.metric === 'population') throw new Error('population unavailable')
+      return fixturePublicMacroEvidence(
+        query,
+        query.subject?.label === 'Austin, TX' ? 95000 : 62000,
+        query.subject?.label === 'Austin, TX' ? '$95,000' : '$62,000'
+      )
+    },
+  })
+
+  assert.equal(response?.chart?.title.includes('core retail context'), true)
+  assert.deepEqual(response?.companionOutputs?.map((item) => item.kind), ['stats'])
 })
 
 test('returns a bounded unsupported-pair core retail comparison response for Houston and Dallas', async () => {

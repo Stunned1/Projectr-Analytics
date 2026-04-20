@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import type { AgentAction, AgentMessage, AgentStep, AgentTrace, AnalysisSite, MapContext } from '@/lib/agent-types'
+import type { AgentAction, AgentCompanionOutput, AgentMessage, AgentStep, AgentTrace, AnalysisSite, MapContext } from '@/lib/agent-types'
 import { consumeAgentNdjsonStream } from '@/lib/consume-agent-ndjson-stream'
 import { buildAgentGreeting } from '@/lib/agent-surface-copy'
 import { evaluateAgentRequestPolicy } from '@/lib/agent-request-policy'
@@ -783,6 +783,7 @@ export function useAgentIntelligence(
           insight?: string | null
           trace?: AgentTrace
           chart?: ScoutChartOutput | null
+          companionOutputs?: AgentCompanionOutput[]
           error?: string
         }
 
@@ -808,6 +809,7 @@ export function useAgentIntelligence(
             insight: out.insight ?? null,
             trace: out.trace,
             chart: out.chart ?? null,
+            companionOutputs: out.companionOutputs ?? [],
           }
           options?.onAgentThinkingUpdate?.({ trace: out.trace, phase: 'done' })
         } else {
@@ -837,6 +839,7 @@ export function useAgentIntelligence(
               chart: data.chart ?? undefined,
               chartSourcePrompt: data.chart ? userPrompt : undefined,
               chartSourceMarketLabel: data.chart ? mapContext.label ?? null : undefined,
+              companionOutputs: data.companionOutputs ?? undefined,
             },
           ])
           maybeNotify()
@@ -860,6 +863,7 @@ export function useAgentIntelligence(
             chart: data.chart ?? undefined,
             chartSourcePrompt: data.chart ? userPrompt : undefined,
             chartSourceMarketLabel: data.chart ? mapContext.label ?? null : undefined,
+            companionOutputs: data.companionOutputs ?? undefined,
           },
         ])
         maybeNotify()

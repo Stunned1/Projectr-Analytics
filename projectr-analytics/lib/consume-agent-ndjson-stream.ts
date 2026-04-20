@@ -1,4 +1,4 @@
-import type { AgentTrace } from '@/lib/agent-types'
+import type { AgentCompanionOutput, AgentTrace } from '@/lib/agent-types'
 import type { ScoutChartOutput } from '@/lib/scout-chart-output'
 
 export type AgentStreamDonePayload = {
@@ -8,6 +8,7 @@ export type AgentStreamDonePayload = {
   insight?: string | null
   trace: AgentTrace
   chart?: ScoutChartOutput | null
+  companionOutputs?: AgentCompanionOutput[]
 }
 
 type NdjsonLine =
@@ -22,6 +23,7 @@ type NdjsonLine =
       insight?: string | null
       trace: AgentTrace
       chart?: ScoutChartOutput | null
+      companionOutputs?: AgentCompanionOutput[]
     }
   | { type: 'error'; error: string }
 
@@ -78,6 +80,7 @@ export async function consumeAgentNdjsonStream(
           insight: ev.insight ?? null,
           trace: ev.trace,
           chart: ev.chart ?? null,
+          companionOutputs: ev.companionOutputs ?? [],
         }
       }
     }

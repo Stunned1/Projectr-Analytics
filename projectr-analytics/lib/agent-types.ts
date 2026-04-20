@@ -359,6 +359,17 @@ export interface AgentTrace {
   toolCalls?: AgentTraceToolRow[]
 }
 
+export type AgentCompanionOutput =
+  | {
+      kind: 'chart'
+      chart: ScoutChartOutput
+    }
+  | {
+      kind: 'stats'
+      title: string
+      items: Array<{ label: string; value: string; note?: string | null }>
+    }
+
 export interface AgentMessage {
   role: 'user' | 'agent'
   text: string
@@ -372,6 +383,7 @@ export interface AgentMessage {
   chart?: ScoutChartOutput
   chartSourcePrompt?: string
   chartSourceMarketLabel?: string | null
+  companionOutputs?: AgentCompanionOutput[]
 }
 
 /** Last client CSV ingest — agent uses for “show my upload / pins / sidebar” intents. */

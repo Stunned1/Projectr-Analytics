@@ -1,7 +1,7 @@
 'use client'
 
 import { Fragment, useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react'
-import type { AgentAction, AgentTrace, AnalysisSite } from '@/lib/agent-types'
+import type { AgentAction, AgentCompanionOutput, AgentTrace, AnalysisSite } from '@/lib/agent-types'
 import type { MapContext } from '@/lib/agent-types'
 import {buildAgentStarterSuggestions } from '@/lib/agent-surface-copy'
 import { useAgentIntelligence, formatActionLogLine } from '@/lib/use-agent-intelligence'
@@ -59,6 +59,25 @@ function splitForTerminal(text: string): string[] {
   const sentences = trimmed.match(/[^.!?\n]+[.!?]?/g)?.map((s) => s.trim()).filter(Boolean)
   if (sentences && sentences.length > 1) return sentences
   return [trimmed]
+}
+
+function SavedCompanionStatsCard({ companion }: { companion: Extract<AgentCompanionOutput, { kind: 'stats' }> }) {
+  return (
+    <div className="mt-3 rounded border border-zinc-800/80 bg-zinc-950/60 px-3 py-2">
+      <p className="font-mono text-[11px] font-semibold text-zinc-100">{companion.title}</p>
+      <div className="mt-2 space-y-2">
+        {companion.items.map((item) => (
+          <div key={`${companion.title}:${item.label}`} className="flex items-start justify-between gap-3 font-mono text-[10px]">
+            <div className="min-w-0">
+              <div className="text-zinc-300">{item.label}</div>
+              {item.note ? <div className="text-[9px] text-zinc-500">{item.note}</div> : null}
+            </div>
+            <div className="shrink-0 text-right text-zinc-100">{item.value}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 function SystemActionLine({ children, pulsing }: { children: React.ReactNode; pulsing?: boolean }) {
@@ -556,14 +575,15 @@ export default function AgentTerminal({
 
               const logLine = formatActionLogLine(msg.action)
               const showNarrative = Boolean(msg.text?.trim())
-              const chartSaveInput =
-                msg.chart && msg.chartSourcePrompt
+              const buildChartSaveInput = (chart: (typeof msg.chart) | null | undefined) =>
+                chart && msg.chartSourcePrompt
                   ? {
-                      chart: msg.chart,
+                      chart,
                       prompt: msg.chartSourcePrompt,
                       marketLabel: msg.chartSourceMarketLabel ?? null,
                     }
                   : null
+              const chartSaveInput = buildChartSaveInput(msg.chart)
               const chartAlreadySaved = chartSaveInput ? savedCharts.length > 0 && hasSavedChart(chartSaveInput) : false
 
               return (
@@ -606,6 +626,43 @@ export default function AgentTerminal({
                           ) : null
                         }
                       />
+                      {msg.companionOutputs?.map((companion, companionIndex) => {
+                        if (companion.kind === 'chart') {
+                          const companionSaveInput = buildChartSaveInput(companion.chart)
+                          const companionAlreadySaved =
+                            companionSaveInput ? savedCharts.length > 0 && hasSavedChart(companionSaveInput) : false
+
+                          return (
+                            <div key={`companion-chart-${i}-${companionIndex}`} className="mt-3">
+                              <ScoutChartCard
+                                chart={companion.chart}
+                                actions={
+                                  companionSaveInput ? (
+                                    <button
+                                      type="button"
+                                      disabled={companionAlreadySaved}
+                                      onClick={() => {
+                                        if (!companionSaveInput || companionAlreadySaved) return
+                                        saveChart(companionSaveInput)
+                                      }}
+                                      className="rounded border border-primary/30 px-2 py-0.5 text-[10px] font-semibold text-primary transition-colors hover:bg-primary/10 disabled:cursor-default disabled:opacity-60"
+                                    >
+                                      {companionAlreadySaved ? 'Saved' : 'Save chart'}
+                                    </button>
+                                  ) : null
+                                }
+                              />
+                            </div>
+                          )
+                        }
+
+                        return (
+                          <SavedCompanionStatsCard
+                            key={`companion-stats-${i}-${companionIndex}`}
+                            companion={companion}
+                          />
+                        )
+                      })}
                     </div>
                   ) : null}
                   {msg.trace && onShowThinking && !msg.isAnalyzing && (
