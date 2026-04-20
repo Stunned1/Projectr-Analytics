@@ -117,6 +117,32 @@ test('deduplicates unlabeled legacy saves against labeled records', () => {
   assert.equal(useSavedChartsStore.getState().hasSavedChart({ ...labeledInput, marketLabel: null }), true)
 })
 
+test('does not deduplicate an unlabeled legacy save when multiple markets share the same chart and prompt', () => {
+  useSavedChartsStore.getState().resetForTests()
+
+  useSavedChartsStore.getState().saveChart({
+    chart: baseChart,
+    prompt: 'Show rent trend',
+    marketLabel: 'Austin, TX',
+  })
+  const secondId = useSavedChartsStore.getState().saveChart({
+    chart: baseChart,
+    prompt: 'Show rent trend',
+    marketLabel: 'Houston, TX',
+  })
+
+  const legacyId = useSavedChartsStore.getState().saveChart({
+    chart: baseChart,
+    prompt: 'Show rent trend',
+    marketLabel: null,
+  })
+
+  const state = useSavedChartsStore.getState()
+  assert.equal(state.charts.length, 3)
+  assert.notEqual(legacyId, secondId)
+  assert.equal(useSavedChartsStore.getState().hasSavedChart({ chart: baseChart, prompt: 'Show rent trend', marketLabel: null }), true)
+})
+
 test('keeps newest saved chart first', () => {
   useSavedChartsStore.getState().resetForTests()
 

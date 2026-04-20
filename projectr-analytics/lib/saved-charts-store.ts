@@ -84,29 +84,44 @@ function buildSavedChartSignature(input: {
   })
 }
 
-function matchesSavedChart(
-  input: { chart: ScoutChartOutput; prompt: string; marketLabel?: string | null },
-  existing: SavedChartRecord
-): boolean {
-  const inputSignature = buildSavedChartSignature(input)
-  const existingSignature = buildSavedChartSignature({
-    chart: existing.chart,
-    prompt: existing.prompt,
-    marketLabel: existing.marketLabel ?? null,
-  })
-  if (inputSignature === existingSignature) return true
-
-  const inputMarketLabel = input.marketLabel ?? null
-  const existingMarketLabel = existing.marketLabel ?? null
-  if (inputMarketLabel != null && existingMarketLabel != null) return false
-
+function buildSavedChartCoreSignature(input: {
+  chart: ScoutChartOutput
+  prompt: string
+}): string {
   return JSON.stringify({
     chart: normalizeScoutChartOutput(input.chart),
     prompt: input.prompt,
-  }) === JSON.stringify({
-    chart: normalizeScoutChartOutput(existing.chart),
-    prompt: existing.prompt,
   })
+}
+
+function matchesSavedChart(
+  input: { chart: ScoutChartOutput; prompt: string; marketLabel?: string | null },
+  charts: SavedChartRecord[]
+): SavedChartRecord | null {
+  const inputSignature = buildSavedChartSignature(input)
+  const exact = charts.find((existing) => {
+    const existingSignature = buildSavedChartSignature({
+      chart: existing.chart,
+      prompt: existing.prompt,
+      marketLabel: existing.marketLabel ?? null,
+    })
+    return inputSignature === existingSignature
+  })
+  if (exact) return exact
+
+  const inputMarketLabel = input.marketLabel ?? null
+  if (inputMarketLabel != null) return null
+
+  const inputCoreSignature = buildSavedChartCoreSignature(input)
+  const compatibleMatches = charts.filter((existing) => {
+    const existingCoreSignature = buildSavedChartCoreSignature({
+      chart: existing.chart,
+      prompt: existing.prompt,
+    })
+    return existingCoreSignature === inputCoreSignature
+  })
+
+  return compatibleMatches.length === 1 ? compatibleMatches[0] : null
 }
 
 export const useSavedChartsStore = create<SavedChartsStore>()(
@@ -114,7 +129,7 @@ export const useSavedChartsStore = create<SavedChartsStore>()(
     (set, get) => ({
       charts: [],
       saveChart: (input) => {
-        const existing = get().charts.find((chart) => matchesSavedChart(input, chart))
+        const existing = matchesSavedChart(input, get().charts)
         if (existing) return existing.id
 
         const id = generateSavedChartId()
@@ -133,7 +148,7 @@ export const useSavedChartsStore = create<SavedChartsStore>()(
         return id
       },
       hasSavedChart: (input) => {
-        return get().charts.some((chart) => matchesSavedChart(input, chart))
+        return matchesSavedChart(input, get().charts) != null
       },
       removeChart: (id) =>
         set((state) => ({
