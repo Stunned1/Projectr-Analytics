@@ -84,6 +84,29 @@ interface POIPoint {
   color: [number, number, number]
 }
 
+type OverturePlacesResponse = OverturePlace[] | { value?: OverturePlace[] | null }
+
+function getOvertureApiKey(env: NodeJS.ProcessEnv = process.env): string {
+  const configured = env.OVERTURE_API_KEY?.trim()
+  return configured && configured.length > 0 ? configured : DEMO_KEY
+}
+
+function normalizeOverturePlacesResponse(payload: OverturePlacesResponse | null | undefined): OverturePlace[] {
+  if (Array.isArray(payload)) return payload
+  if (payload && Array.isArray(payload.value)) return payload.value
+  return []
+}
+
+export function getOvertureApiKeyForTest(env: NodeJS.ProcessEnv = process.env): string {
+  return getOvertureApiKey(env)
+}
+
+export function normalizeOverturePlacesResponseForTest(
+  payload: OverturePlacesResponse | null | undefined
+): OverturePlace[] {
+  return normalizeOverturePlacesResponse(payload)
+}
+
 async function fetchOverturePlaces(lat: number, lng: number, radius: number, categories?: string, limit = 500): Promise<OverturePlace[]> {
   const params = new URLSearchParams({
     lat: lat.toString(),
@@ -95,12 +118,12 @@ async function fetchOverturePlaces(lat: number, lng: number, radius: number, cat
   if (categories) params.set('categories', categories)
 
   const res = await fetch(`${OVERTURE_URL}?${params}`, {
-    headers: { 'x-api-key': DEMO_KEY },
+    headers: { 'x-api-key': getOvertureApiKey() },
     next: { revalidate: 86400 * 7 }, // 7-day cache
     signal: AbortSignal.timeout(12000),
   })
   if (!res.ok) return []
-  return res.json()
+  return normalizeOverturePlacesResponse((await res.json()) as OverturePlacesResponse)
 }
 
 export async function GET(request: NextRequest) {
@@ -125,13 +148,13 @@ export async function GET(request: NextRequest) {
       // Fetch anchor brands in parallel (brand_name filter)
       const anchorBatches = await Promise.allSettled(
         ['Whole Foods', 'Equinox', 'SoulCycle', 'Sweetgreen', 'Trader Joe\'s', 'Lululemon', 'WeWork'].map((brand) =>
-          fetchOverturePlaces(lat, lng, radius * 2, undefined, 20).then(() =>
-            fetch(`${OVERTURE_URL}?lat=${lat}&lng=${lng}&radius=${radius * 2}&brand_name=${encodeURIComponent(brand)}&limit=20`, {
-              headers: { 'x-api-key': DEMO_KEY },
-              next: { revalidate: 86400 * 7 },
-              signal: AbortSignal.timeout(8000),
-            }).then((r) => r.ok ? r.json() : [])
-          )
+            fetchOverturePlaces(lat, lng, radius * 2, undefined, 20).then(() =>
+              fetch(`${OVERTURE_URL}?lat=${lat}&lng=${lng}&radius=${radius * 2}&brand_name=${encodeURIComponent(brand)}&limit=20`, {
+                headers: { 'x-api-key': getOvertureApiKey() },
+                next: { revalidate: 86400 * 7 },
+                signal: AbortSignal.timeout(8000),
+              }).then(async (r) => (r.ok ? normalizeOverturePlacesResponse((await r.json()) as OverturePlacesResponse) : []))
+            )
         )
       )
       for (const batch of anchorBatches) {
