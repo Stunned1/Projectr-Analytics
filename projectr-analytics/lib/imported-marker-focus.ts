@@ -1,5 +1,7 @@
 import type { ClientUploadMarker } from '@/lib/client-upload-markers-store'
+import type { ClientUploadSourcePart } from '@/lib/client-upload-session-store'
 import type { SitePlacesContextResponse } from '@/lib/google-places-site-context'
+import { getImportedSourceKey } from '@/lib/client-upload-presentation'
 
 export type ImportedMarkerFocusPlan =
   | { mode: 'clear' }
@@ -20,6 +22,34 @@ export function planImportedMarkerFocus(
     }
   }
   return { mode: 'fit' }
+}
+
+export function resolveImportedMarkerSelection(args: {
+  sources: Array<Pick<ClientUploadSourcePart, 'fileName'>>
+  selectedMarker: Pick<ClientUploadMarker, 'source_key'> | null
+  preferredSourceKey: string | null
+}): {
+  selectedSourceKey: string | null
+  markerBelongsToSelected: boolean
+} {
+  if (args.sources.length === 0) {
+    return { selectedSourceKey: null, markerBelongsToSelected: false }
+  }
+
+  const sourceKeys = args.sources.map((source, index) =>
+    getImportedSourceKey(source as ClientUploadSourcePart, index)
+  )
+  const markerSourceKey = args.selectedMarker?.source_key ?? null
+  const selectedSourceKey = sourceKeys.includes(markerSourceKey ?? '')
+    ? markerSourceKey
+    : sourceKeys.includes(args.preferredSourceKey ?? '')
+      ? args.preferredSourceKey
+      : sourceKeys[0]
+
+  return {
+    selectedSourceKey,
+    markerBelongsToSelected: markerSourceKey != null && markerSourceKey === selectedSourceKey,
+  }
 }
 
 export type ImportedMarkerSiteContextState =

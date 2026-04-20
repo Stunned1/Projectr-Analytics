@@ -78,13 +78,14 @@ export function buildImportedResolvePreview(
 
 export async function resolveImportedSourceToMarkers(args: {
   source: ClientUploadSourcePart
+  sourceKey?: string | null
   currentZip?: string | null
   fetchImpl?: typeof fetch
 }): Promise<{
   markers: ClientNormalizeMarkerPoint[]
   normalization: ClientUploadNormalizationState
 }> {
-  const { source, currentZip = null, fetchImpl = fetch } = args
+  const { source, sourceKey = null, currentZip = null, fetchImpl = fetch } = args
   const candidates = buildCandidates(source, currentZip)
   const attempted = candidates.filter((candidate) => candidate.submarket_id != null || candidate.lat != null)
 
@@ -109,6 +110,7 @@ export async function resolveImportedSourceToMarkers(args: {
       lng: candidate.lng!,
       value: candidate.metric_value,
       label: candidate.label,
+      source_key: sourceKey,
       file_name: source.fileName,
       metric_name: source.triage.metric_name,
       submarket_id: candidate.submarket_id,
@@ -174,6 +176,7 @@ export async function resolveImportedSourceToMarkers(args: {
       lng: resolved.lng,
       value: candidate.metric_value,
       label: candidate.label,
+      source_key: sourceKey,
       file_name: source.fileName,
       metric_name: source.triage.metric_name,
       submarket_id: resolved.zip ?? candidate.submarket_id,

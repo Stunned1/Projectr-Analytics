@@ -10,6 +10,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { useClientUploadMarkersStore } from '@/lib/client-upload-markers-store'
+import { attachImportedMarkerSourceKey, getImportedSourceKey } from '@/lib/client-upload-presentation'
 import {
   useClientUploadSessionStore,
   type ClientUploadSourcePart,
@@ -146,14 +147,12 @@ export default function AgenticNormalizer({ currentZip, onIngested }: AgenticNor
       const previousSession = useClientUploadSessionStore.getState().session
       const previousWorkingRowsKeys = collectClientUploadWorkingRowsKeys(previousSession)
       const ingestedAt = new Date().toISOString()
-      const perFileMarkers = normalized.map((d) => d.marker_points ?? [])
-      const merged = mergeMarkerPoints(perFileMarkers)
-      const hasPins = merged.length > 0
 
       const sources: ClientUploadSourcePart[] = await Promise.all(
         normalized.map(async (data, i) => {
-          const pts = data.marker_points ?? []
           const fileName = list[i]?.name ?? null
+          const sourceKey = getImportedSourceKey({ fileName } as ClientUploadSourcePart, i)
+          const pts = attachImportedMarkerSourceKey(data.marker_points, sourceKey)
           const workingRows = parsedFiles[i]?.rows ?? []
           const workingRowsKey = buildClientUploadWorkingRowsKey(ingestedAt, i, fileName)
           let rowStorageWarning: string | null = null
@@ -222,6 +221,8 @@ export default function AgenticNormalizer({ currentZip, onIngested }: AgenticNor
           }
         })
       )
+      const merged = mergeMarkerPoints(sources.map((source) => source.markerPoints ?? []))
+      const hasPins = merged.length > 0
 
       const nextWorkingRowsKeys = sources
         .map((source) => source.workingRowsKey?.trim() ?? '')

@@ -1,4 +1,5 @@
 import type { ClientUploadSourcePart } from '@/lib/client-upload-session-store'
+import type { ClientNormalizeMarkerPoint } from '@/lib/normalize-client-types'
 import { normalizeScoutChartOutput, type ScoutChartOutput } from '@/lib/scout-chart-output'
 import type { UploadCellValue, UploadRawRow } from '@/lib/upload/types'
 
@@ -51,6 +52,18 @@ export function toScoutChartOutputFromImportedChart(model: ImportedChartModel | 
 
 export function getImportedSourceKey(source: ClientUploadSourcePart, index: number): string {
   return `${source.fileName ?? 'file'}:${index}`
+}
+
+export function attachImportedMarkerSourceKey(
+  markers: ClientNormalizeMarkerPoint[] | null | undefined,
+  sourceKey: string
+): ClientNormalizeMarkerPoint[] {
+  if (!markers || markers.length === 0) return []
+
+  return markers.map((marker) => ({
+    ...marker,
+    source_key: sourceKey,
+  }))
 }
 
 function hasFullImportedWorkingRows(source: ClientUploadSourcePart): boolean {

@@ -5,6 +5,7 @@ import { useClientUploadMarkersStore, type ClientUploadMarker } from '@/lib/clie
 import { getClientUploadWorkingRows } from '@/lib/client-upload-working-rows'
 import { resolveImportedSourceToMarkers, buildImportedResolvePreview } from '@/lib/client-upload-map-resolver'
 import {
+  attachImportedMarkerSourceKey,
   getImportedDatasetView,
   buildImportedChartModel,
   buildImportedSummaryStats,
@@ -23,7 +24,10 @@ import {
 } from '@/lib/client-upload-session-aggregate'
 import { ScoutChartCard } from '@/components/ScoutChartCard'
 import { useSiteContextStore } from '@/lib/site-context-store'
-import { buildImportedMarkerSiteContextState } from '@/lib/imported-marker-focus'
+import {
+  buildImportedMarkerSiteContextState,
+  resolveImportedMarkerSelection,
+} from '@/lib/imported-marker-focus'
 import type { SitePlacesContextResponse } from '@/lib/google-places-site-context'
 
 type ImportedPanelView = 'recommended' | 'map' | 'chart' | 'table'
@@ -219,22 +223,11 @@ export function ImportedDataPanel({
   const [selectedMarkerSiteContext, setSelectedMarkerSiteContext] = useState<SitePlacesContextResponse | null>(null)
   const [selectedMarkerSiteContextLoading, setSelectedMarkerSiteContextLoading] = useState(false)
   const [selectedMarkerSiteContextError, setSelectedMarkerSiteContextError] = useState<string | null>(null)
-  let selectedSourceKey: string | null = null
-  if (sources.length > 0) {
-    if (selectedMarker?.file_name) {
-      const markerMatch = sources.findIndex((source) => source.fileName === selectedMarker.file_name)
-      if (markerMatch >= 0) {
-        selectedSourceKey = getImportedSourceKey(sources[markerMatch], markerMatch)
-      }
-    }
-
-    if (!selectedSourceKey) {
-      const preferredStillExists = sources.some(
-        (source, index) => getImportedSourceKey(source, index) === preferredSourceKey
-      )
-      selectedSourceKey = preferredStillExists ? preferredSourceKey : getImportedSourceKey(sources[0], 0)
-    }
-  }
+  const { selectedSourceKey, markerBelongsToSelected } = resolveImportedMarkerSelection({
+    sources,
+    selectedMarker,
+    preferredSourceKey,
+  })
 
   const selectedSource =
     sources.find((source, index) => getImportedSourceKey(source, index) === selectedSourceKey) ?? null
@@ -277,10 +270,6 @@ export function ImportedDataPanel({
         : { totalRows: 0, candidateRows: 0, directCoordinateRows: 0, requestRows: 0, uniqueRequestRows: 0 },
     [currentZip, selectedSource]
   )
-  const markerBelongsToSelected =
-    selectedMarker != null &&
-    selectedMarker.file_name != null &&
-    selectedMarker.file_name === selectedSource?.fileName
   const resolveInFlight = resolvingSourceKey === selectedSourceKey
   const siteContextStore = useSiteContextStore.getState()
   const selectedMarkerSiteContextKey =
@@ -471,12 +460,13 @@ export function ImportedDataPanel({
     try {
       const resolved = await resolveImportedSourceToMarkers({
         source: selectedSource,
+        sourceKey: selectedSourceKey,
         currentZip,
       })
+      const markers = attachImportedMarkerSourceKey(resolved.markers, selectedSourceKey)
 
       updateSession((currentSession) =>
         updateSessionSourceAtIndex(currentSession, selectedSourceIndex, (source) => {
-          const markers = resolved.markers
           const inferredMapEligible =
             source.triage.mapability_classification === 'map_ready' ||
             source.triage.mapability_classification === 'map_normalizable'
@@ -504,7 +494,7 @@ export function ImportedDataPanel({
       const mergedMarkers = getMergedSessionMarkerPoints(nextSession)
       setMarkers(mergedMarkers.length > 0 ? mergedMarkers : null)
 
-      if (resolved.markers.length > 0) {
+      if (markers.length > 0) {
         setViewState({ sourceKey: selectedSourceKey, view: 'map' })
         onMarkersResolved?.(mergedMarkers)
       }

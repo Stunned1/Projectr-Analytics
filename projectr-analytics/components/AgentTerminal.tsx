@@ -3,7 +3,7 @@
 import { Fragment, useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react'
 import type { AgentAction, AgentTrace, AnalysisSite } from '@/lib/agent-types'
 import type { MapContext } from '@/lib/agent-types'
-import { buildAgentInputPlaceholder, buildAgentStarterSuggestions } from '@/lib/agent-surface-copy'
+import {buildAgentStarterSuggestions } from '@/lib/agent-surface-copy'
 import { useAgentIntelligence, formatActionLogLine } from '@/lib/use-agent-intelligence'
 import { getSlashPaletteState } from '@/lib/slash-commands'
 import { useSavedChartsStore } from '@/lib/saved-charts-store'
@@ -373,10 +373,10 @@ export default function AgentTerminal({
 
   const terminalMsgOffset = messages.length - visibleTerminalMessages.length
   const hasUserMessage = useMemo(() => messages.some((m) => m.role === 'user'), [messages])
-  const inputPlaceholder = useMemo(
-    () => buildAgentInputPlaceholder(mapContext, hasUserMessage, isRunningSequence),
-    [mapContext, hasUserMessage, isRunningSequence]
-  )
+  // const inputPlaceholder = useMemo(
+  //   () => buildAgentInputPlaceholder(mapContext, hasUserMessage, isRunningSequence),
+  //   [mapContext, hasUserMessage, isRunningSequence]
+  // )
 
   const lastStatusLine = useMemo(() => {
     for (let i = visibleTerminalMessages.length - 1; i >= 0; i--) {
@@ -522,9 +522,7 @@ export default function AgentTerminal({
 
         {size !== 'collapsed' && (
         <>
-          <div className="shrink-0 border-b border-zinc-800/80 px-2 py-0.5 text-[9px] text-zinc-600">
-            type <span className="font-mono text-zinc-500">/</span> for suggestions
-          </div>
+          
 
           <div ref={outputRef} className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
             {visibleTerminalMessages.map((msg, j) => {
@@ -741,7 +739,7 @@ export default function AgentTerminal({
                   }
                 }}
                 disabled={loading || isRunningSequence}
-                placeholder={inputPlaceholder}
+                placeholder={'Type / for suggestions'}
                 className="w-full min-w-0 bg-transparent font-mono text-[11px] text-zinc-200 caret-primary outline-none placeholder:text-zinc-700 disabled:opacity-50"
                 style={{ color: C_USER_TEXT }}
                 spellCheck={false}

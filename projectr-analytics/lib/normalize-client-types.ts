@@ -10,6 +10,7 @@ export interface ClientNormalizeMarkerPoint {
   lng: number
   value: number | null
   label: string
+  source_key?: string | null
   file_name?: string | null
   metric_name?: string | null
   submarket_id?: string | null

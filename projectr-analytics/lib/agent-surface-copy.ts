@@ -37,7 +37,7 @@ export function buildAgentGreeting(context: SurfaceContext): string {
     return 'EDA assistant ready. Analyze the loaded market or imported dataset, and use explicit prompts for direct map controls like parcels, permits, search, or panel changes.'
   }
 
-  return 'EDA assistant ready. Ask for summaries, outliers, trends, comparisons, or data-quality checks on the loaded market or imported CSV. Direct map controls still work when you ask for them explicitly.'
+  return 'EDA assistant ready. Ask for summaries, outliers, trends, comparisons, or data-quality checks on the loaded market or imported CSV.'
 }
 
 export function buildAgentStarterSuggestions(context: SurfaceContext): string[] {
@@ -49,18 +49,18 @@ export function buildAgentStarterSuggestions(context: SurfaceContext): string[] 
   ])
 }
 
-export function buildAgentInputPlaceholder(context: SurfaceContext, hasUserMessage: boolean, isRunningSequence: boolean): string {
-  if (isRunningSequence) return 'Action running…'
-  if (hasUserMessage) return '_'
-  const uploadMode = activeImportedVisualization(context)
-  if (uploadMode === 'map') {
-    return 'Summarize the imported dataset · find outliers in the mapped rows · or use /help…'
-  }
-  if (uploadMode === 'chart' || uploadMode === 'table') {
-    return 'Summarize the imported dataset · explain the sidebar/chart fallback · or use /help…'
-  }
-  if (isNycActiveSurface(context)) {
-    return 'Summarize this market · find outliers in the upload · turn on parcels and permits · or use /help…'
-  }
-  return 'Summarize this market · explain a metric · find outliers in the upload · or use /help…'
-}
+// export function buildAgentInputPlaceholder(context: SurfaceContext, hasUserMessage: boolean, isRunningSequence: boolean): string {
+//   if (isRunningSequence) return 'Action running…'
+//   if (hasUserMessage) return '_'
+//   const uploadMode = activeImportedVisualization(context)
+//   if (uploadMode === 'map') {
+//     return 'Summarize the imported dataset · find outliers in the mapped rows · or use /help…'
+//   }
+//   if (uploadMode === 'chart' || uploadMode === 'table') {
+//     return 'Summarize the imported dataset · explain the sidebar/chart fallback · or use /help…'
+//   }
+//   if (isNycActiveSurface(context)) {
+//     return 'Summarize this market · find outliers in the upload · turn on parcels and permits · or use /help…'
+//   }
+//   return 'Summarize this market · explain a metric · find outliers in the upload · or use /help…'
+// }

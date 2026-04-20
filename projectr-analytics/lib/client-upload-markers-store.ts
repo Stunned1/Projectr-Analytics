@@ -7,6 +7,7 @@ export type ClientUploadMarker = {
   lng: number
   label: string
   value: number | null
+  source_key?: string | null
   file_name?: string | null
   metric_name?: string | null
   submarket_id?: string | null

@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   buildImportedMarkerSiteContextState,
   planImportedMarkerFocus,
+  resolveImportedMarkerSelection,
 } from '@/lib/imported-marker-focus'
 
 test('planImportedMarkerFocus clears focus when there are no imported markers', () => {
@@ -26,6 +27,29 @@ test('planImportedMarkerFocus fits bounds when multiple imported markers are pre
     ]),
     { mode: 'fit' }
   )
+})
+
+test('resolveImportedMarkerSelection prefers marker source_key over duplicate file names', () => {
+  const selection = resolveImportedMarkerSelection({
+    sources: [
+      { fileName: 'shared.csv' },
+      { fileName: 'shared.csv' },
+    ],
+    selectedMarker: {
+      lat: 30.2672,
+      lng: -97.7431,
+      label: 'Second import row',
+      value: 42,
+      file_name: 'shared.csv',
+      source_key: 'shared.csv:1',
+    },
+    preferredSourceKey: null,
+  })
+
+  assert.deepEqual(selection, {
+    selectedSourceKey: 'shared.csv:1',
+    markerBelongsToSelected: true,
+  })
 })
 
 test('buildImportedMarkerSiteContextState returns idle when there is no selected marker', () => {
