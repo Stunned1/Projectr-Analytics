@@ -32,7 +32,7 @@ function dedupeMarkers(markers: ClientNormalizeMarkerPoint[]): ClientNormalizeMa
   const seen = new Set<string>()
   const out: ClientNormalizeMarkerPoint[] = []
   for (const marker of markers) {
-    const key = `${marker.lat.toFixed(5)}|${marker.lng.toFixed(5)}|${marker.label}`
+    const key = `${marker.source_key ?? 'source'}|${marker.lat.toFixed(5)}|${marker.lng.toFixed(5)}|${marker.label}`
     if (seen.has(key)) continue
     seen.add(key)
     out.push(marker)

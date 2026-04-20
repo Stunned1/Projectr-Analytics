@@ -106,7 +106,7 @@ export function getMergedSessionMarkerPoints(session: ClientUploadSession | null
 
   for (const source of getSessionSources(session)) {
     for (const marker of source.markerPoints ?? []) {
-      const key = `${marker.lat.toFixed(5)}|${marker.lng.toFixed(5)}|${marker.label}`
+      const key = `${marker.source_key ?? 'source'}|${marker.lat.toFixed(5)}|${marker.lng.toFixed(5)}|${marker.label}`
       if (seen.has(key)) continue
       seen.add(key)
       merged.push(marker)

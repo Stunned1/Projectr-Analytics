@@ -1,5 +1,5 @@
 import type { ClientUploadSourcePart } from '@/lib/client-upload-session-store'
-import type { ClientNormalizeMarkerPoint } from '@/lib/normalize-client-types'
+import type { ClientNormalizeApiResult, ClientNormalizeMarkerPoint } from '@/lib/normalize-client-types'
 import { normalizeScoutChartOutput, type ScoutChartOutput } from '@/lib/scout-chart-output'
 import type { UploadCellValue, UploadRawRow } from '@/lib/upload/types'
 
@@ -64,6 +64,27 @@ export function attachImportedMarkerSourceKey(
     ...marker,
     source_key: sourceKey,
   }))
+}
+
+export function mergeImportedReviewMarkerPoints(
+  results: Array<Pick<ClientNormalizeApiResult, 'marker_points'>>,
+  fileNames: Array<string | null | undefined>
+): ClientNormalizeMarkerPoint[] {
+  const seen = new Set<string>()
+  const merged: ClientNormalizeMarkerPoint[] = []
+
+  results.forEach((result, index) => {
+    const sourceKey = getImportedSourceKey({ fileName: fileNames[index] ?? null } as ClientUploadSourcePart, index)
+    const markers = attachImportedMarkerSourceKey(result.marker_points, sourceKey)
+    for (const marker of markers) {
+      const key = `${marker.source_key ?? sourceKey}|${marker.lat.toFixed(5)}|${marker.lng.toFixed(5)}|${marker.label}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      merged.push(marker)
+    }
+  })
+
+  return merged
 }
 
 function hasFullImportedWorkingRows(source: ClientUploadSourcePart): boolean {

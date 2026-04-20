@@ -10,7 +10,11 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { useClientUploadMarkersStore } from '@/lib/client-upload-markers-store'
-import { attachImportedMarkerSourceKey, getImportedSourceKey } from '@/lib/client-upload-presentation'
+import {
+  attachImportedMarkerSourceKey,
+  getImportedSourceKey,
+  mergeImportedReviewMarkerPoints,
+} from '@/lib/client-upload-presentation'
 import {
   useClientUploadSessionStore,
   type ClientUploadSourcePart,
@@ -75,7 +79,7 @@ function mergeMarkerPoints(lists: ClientNormalizeMarkerPoint[][]): ClientNormali
   const out: ClientNormalizeMarkerPoint[] = []
   for (const list of lists) {
     for (const m of list) {
-      const key = `${m.lat.toFixed(5)}|${m.lng.toFixed(5)}|${m.label}`
+      const key = `${m.source_key ?? 'source'}|${m.lat.toFixed(5)}|${m.lng.toFixed(5)}|${m.label}`
       if (seen.has(key)) continue
       seen.add(key)
       out.push(m)
@@ -426,11 +430,11 @@ export default function AgenticNormalizer({ currentZip, onIngested }: AgenticNor
           </div>
 
           {results.length > 1 && (
-            <p className="text-[10px] font-medium text-zinc-400">
-              {results.length} files ·{' '}
-              {mergeMarkerPoints(results.map((r) => r.marker_points ?? [])).length} total map pin(s) ·{' '}
-              {results.reduce((a, r) => a + r.rows_ingested, 0)} total rows ingested
-            </p>
+              <p className="text-[10px] font-medium text-zinc-400">
+                {results.length} files ·{' '}
+                {mergeImportedReviewMarkerPoints(results, resultNames).length} total map pin(s) ·{' '}
+                {results.reduce((a, r) => a + r.rows_ingested, 0)} total rows ingested
+              </p>
           )}
           {results.map((result, idx) => (
             <div key={idx} className="rounded-lg border border-white/8 bg-white/3 p-3">
