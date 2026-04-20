@@ -184,7 +184,7 @@ export default function AgentTerminal({
   const slashOpenPendingRef = useRef(false)
   const [unread, setUnread] = useState(false)
   const [slashHighlight, setSlashHighlight] = useState(0)
-  const [savedChartMessageKeys, setSavedChartMessageKeys] = useState<Record<number, true>>({})
+  const hasSavedChart = useSavedChartsStore((state) => state.hasSavedChart)
   const saveChart = useSavedChartsStore((state) => state.saveChart)
 
   const shouldNotifyWhileClosed = useCallback(() => size === 'collapsed', [size])
@@ -566,6 +566,15 @@ export default function AgentTerminal({
 
               const logLine = formatActionLogLine(msg.action)
               const showNarrative = Boolean(msg.text?.trim())
+              const chartSaveInput =
+                msg.chart && msg.chartSourcePrompt
+                  ? {
+                      chart: msg.chart,
+                      prompt: msg.chartSourcePrompt,
+                      marketLabel: msg.chartSourceMarketLabel ?? null,
+                    }
+                  : null
+              const chartAlreadySaved = chartSaveInput ? hasSavedChart(chartSaveInput) : false
 
               return (
                 <div key={i}>
@@ -592,24 +601,17 @@ export default function AgentTerminal({
                       <ScoutChartCard
                         chart={msg.chart!}
                         actions={
-                          msg.chartSourcePrompt ? (
+                          chartSaveInput ? (
                             <button
                               type="button"
-                              disabled={savedChartMessageKeys[i] === true}
+                              disabled={chartAlreadySaved}
                               onClick={() => {
-                                if (savedChartMessageKeys[i] === true || !msg.chartSourcePrompt) return
-                                saveChart({
-                                  chart: msg.chart!,
-                                  prompt: msg.chartSourcePrompt,
-                                  marketLabel: mapContext.label ?? null,
-                                })
-                                setSavedChartMessageKeys((prev) =>
-                                  prev[i] === true ? prev : { ...prev, [i]: true }
-                                )
+                                if (!chartSaveInput || chartAlreadySaved) return
+                                saveChart(chartSaveInput)
                               }}
                               className="rounded border border-primary/30 px-2 py-0.5 text-[10px] font-semibold text-primary transition-colors hover:bg-primary/10 disabled:cursor-default disabled:opacity-60"
                             >
-                              {savedChartMessageKeys[i] === true ? 'Saved' : 'Save chart'}
+                              {chartAlreadySaved ? 'Saved' : 'Save chart'}
                             </button>
                           ) : null
                         }

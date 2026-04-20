@@ -371,6 +371,7 @@ export interface AgentMessage {
   trace?: AgentTrace
   chart?: ScoutChartOutput
   chartSourcePrompt?: string
+  chartSourceMarketLabel?: string | null
 }
 
 /** Last client CSV ingest — agent uses for “show my upload / pins / sidebar” intents. */

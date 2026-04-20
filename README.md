@@ -238,6 +238,7 @@ _04.19.2026_
 
 _04.20.2026_
 - `/api/pois` now honors `OVERTURE_API_KEY` before falling back to Overture's demo key and normalizes the live `value` response envelope, so Texas POI requests stop returning empty or malformed payloads when a real Overture key is configured.
+- Terminal chart saves now dedupe by chart, prompt, and market label signature, and chart messages preserve their originating market label so the `Saved` state survives remounts without creating duplicate records.
 
 _4.11.2026_
 - Agent keys: `permits` / `nycPermits` normalization; clear tracts/blockGroups after `run_analysis`; `FlyToController` uses `moveCamera` + easing; layer chrome layout; PDF cycle layout, arrows, wrapping, sanitizers; restore `sites-store`; normalize JSON from Gemini; split `AGENT_CHAT_STORAGE_KEY`; default ZIP boundary + choropleth on; `/clear:layers` + override resync + `overlayReady`; Transit `paths` / `color` + legacy `path` caps.

@@ -836,6 +836,7 @@ export function useAgentIntelligence(
               trace,
               chart: data.chart ?? undefined,
               chartSourcePrompt: data.chart ? userPrompt : undefined,
+              chartSourceMarketLabel: data.chart ? mapContext.label ?? null : undefined,
             },
           ])
           maybeNotify()
@@ -858,6 +859,7 @@ export function useAgentIntelligence(
             trace: data.trace as AgentTrace | undefined,
             chart: data.chart ?? undefined,
             chartSourcePrompt: data.chart ? userPrompt : undefined,
+            chartSourceMarketLabel: data.chart ? mapContext.label ?? null : undefined,
           },
         ])
         maybeNotify()

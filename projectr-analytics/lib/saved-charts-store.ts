@@ -16,6 +16,7 @@ export interface SavedChartRecord {
 interface SavedChartsStore {
   charts: SavedChartRecord[]
   saveChart: (input: { chart: ScoutChartOutput; prompt: string; marketLabel?: string | null }) => string
+  hasSavedChart: (input: { chart: ScoutChartOutput; prompt: string; marketLabel?: string | null }) => boolean
   removeChart: (id: string) => void
   hasChart: (id: string) => boolean
   resetForTests: () => void
@@ -71,11 +72,33 @@ function normalizeSavedChartRecords(state: unknown): SavedChartRecord[] {
   })
 }
 
+function buildSavedChartSignature(input: {
+  chart: ScoutChartOutput
+  prompt: string
+  marketLabel?: string | null
+}): string {
+  return JSON.stringify({
+    chart: normalizeScoutChartOutput(input.chart),
+    prompt: input.prompt,
+    marketLabel: input.marketLabel ?? null,
+  })
+}
+
 export const useSavedChartsStore = create<SavedChartsStore>()(
   persist(
     (set, get) => ({
       charts: [],
       saveChart: (input) => {
+        const signature = buildSavedChartSignature(input)
+        const existing = get().charts.find((chart) =>
+          buildSavedChartSignature({
+            chart: chart.chart,
+            prompt: chart.prompt,
+            marketLabel: chart.marketLabel ?? null,
+          }) === signature
+        )
+        if (existing) return existing.id
+
         const id = generateSavedChartId()
         const record: SavedChartRecord = {
           id,
@@ -90,6 +113,16 @@ export const useSavedChartsStore = create<SavedChartsStore>()(
         }))
 
         return id
+      },
+      hasSavedChart: (input) => {
+        const signature = buildSavedChartSignature(input)
+        return get().charts.some((chart) =>
+          buildSavedChartSignature({
+            chart: chart.chart,
+            prompt: chart.prompt,
+            marketLabel: chart.marketLabel ?? null,
+          }) === signature
+        )
       },
       removeChart: (id) =>
         set((state) => ({

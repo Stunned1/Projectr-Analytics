@@ -72,6 +72,29 @@ test('adds a saved chart record', () => {
   })
 })
 
+test('deduplicates repeated saves for the same chart signature', () => {
+  useSavedChartsStore.getState().resetForTests()
+
+  const input = {
+    chart: baseChart,
+    prompt: 'Show rent trend',
+    marketLabel: 'Austin, TX',
+  }
+
+  const firstId = useSavedChartsStore.getState().saveChart(input)
+  const secondId = useSavedChartsStore.getState().saveChart(input)
+
+  const state = useSavedChartsStore.getState()
+  const storedPayload = JSON.parse(sessionStorage.getItem(SAVED_CHARTS_STORAGE_KEY) ?? 'null')
+
+  assert.equal(secondId, firstId)
+  assert.equal(state.charts.length, 1)
+  assert.equal(state.charts[0]?.id, firstId)
+  assert.equal(storedPayload.state.charts.length, 1)
+  assert.equal(storedPayload.state.charts[0]?.id, firstId)
+  assert.equal(useSavedChartsStore.getState().hasSavedChart(input), true)
+})
+
 test('keeps newest saved chart first', () => {
   useSavedChartsStore.getState().resetForTests()
 
