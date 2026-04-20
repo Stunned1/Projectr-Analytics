@@ -37,6 +37,7 @@ import { normalizeScoutChartOutput, type ScoutChartCitation, type ScoutChartOutp
 import type { AnalyticalComparisonRequest, AnalyticalComparisonResult } from '@/lib/data/market-data-router'
 import type { MasterDataRow } from '@/lib/data/types'
 import { normalizeUsStateToAbbr, splitTrailingUsState } from '@/lib/us-state-abbr'
+import { buildCoreRetailComparison, type CoreRetailComparisonResult } from '@/lib/overture-core-retail-comparison'
 import type {
   AgentInternalProvenanceQuery,
   AgentPublicMacroEvidenceResult,
@@ -552,6 +553,7 @@ export async function buildRouterBackedChartForTest(
 
 type HistoryComparisonDependencies = {
   getAnalyticalComparison?: (request: AnalyticalComparisonRequest) => Promise<AnalyticalComparisonResult>
+  getCoreRetailComparison?: typeof buildCoreRetailComparison
   getInternalEvidence?: (query: AgentInternalProvenanceQuery) => Promise<AgentInternalEvidenceResult>
   getPublicMacroEvidence?: (query: AgentPublicMacroQuery) => Promise<AgentPublicMacroEvidenceResult>
   getPlaceGrounding?: (query: AgentPlaceGroundingQuery) => Promise<AgentPlaceGroundingEvidenceResult>
@@ -595,6 +597,10 @@ function hasHistoryIntent(userMessage: string): boolean {
     /\b(?:last|past)\s+\d+\s+(?:year|years|month|months)\b/i.test(userMessage)
   )
 }
+
+const CORE_RETAIL_PROMPT_PATTERN = /\b(core retail|downtown retail|retail context)\b/i
+const CORE_RETAIL_CITY_PATTERN = /\b(austin|houston|dallas|san antonio|el paso)\b/gi
+const CORE_RETAIL_COMPARISON_PATTERN = /\b(compare|comparison|versus|vs\.?|between|against)\b/i
 
 function hasPeerComparisonIntent(userMessage: string): boolean {
   return /\b(compare|comparison|versus|vs\.?)\b/i.test(userMessage)
@@ -1068,6 +1074,173 @@ function buildUnsupportedComparisonMetricPayload(
       ],
     },
     chart: null,
+  }
+}
+
+function buildUnsupportedCoreRetailComparisonPayload(cities: string[]): AgentPipelineResult {
+  const renderedCities = cities.map((city) => formatCoreRetailCityName(city))
+  const cityList = renderedCities.length >= 2 ? `${renderedCities[0]} and ${renderedCities[1]}` : renderedCities.join(', ')
+
+  return {
+    message: `Core retail comparison currently supports Austin and Houston only. I could not use ${cityList || 'that pair'} for this bounded path.`,
+    action: { type: 'none' as const },
+    trace: {
+      summary: 'Unsupported core retail comparison pair',
+      taskType: 'compare_segments',
+      methodology:
+        'Scout recognized a bounded current retail-context comparison prompt, but the requested cities are outside the supported Austin-versus-Houston core pair.',
+      keyFindings: ['No comparison chart was generated.'],
+      evidence: [
+        renderedCities.length > 0 ? `Resolved cities: ${renderedCities.join(', ')}.` : 'No explicit cities were resolved.',
+        'Supported core retail cities currently include Austin and Houston only.',
+      ],
+      caveats: ['Use Austin and Houston together for the bounded current retail comparison path.'],
+      nextQuestions: ['Ask to compare core retail context for Austin and Houston.'],
+    },
+    chart: null,
+  }
+}
+
+function buildUnresolvedCoreRetailComparisonPayload(): AgentPipelineResult {
+  return {
+    message: 'I could not identify two explicit cities for that core retail comparison.',
+    action: { type: 'none' as const },
+    trace: {
+      summary: 'Core retail comparison missing two cities',
+      taskType: 'compare_segments',
+      methodology:
+        'Scout recognized a bounded core retail comparison prompt, but the prompt did not resolve to two explicit cities.',
+      keyFindings: ['No comparison chart was generated.'],
+      evidence: ['The bounded core retail path currently needs two explicit cities.'],
+      caveats: ['Ask for Austin and Houston together to use this path.'],
+      nextQuestions: ['Ask to compare core retail context for Austin and Houston.'],
+    },
+    chart: null,
+  }
+}
+
+function formatCoreRetailCityName(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/\b[a-z]/g, (match) => match.toUpperCase())
+}
+
+function resolveCoreRetailPromptCities(userMessage: string): string[] {
+  return Array.from(
+    new Set((userMessage.match(CORE_RETAIL_CITY_PATTERN) ?? []).map((value) => value.trim().toLowerCase()))
+  )
+}
+
+function hasCoreRetailComparisonIntent(userMessage: string): boolean {
+  return CORE_RETAIL_PROMPT_PATTERN.test(userMessage) && (
+    CORE_RETAIL_COMPARISON_PATTERN.test(userMessage) ||
+    resolveCoreRetailPromptCities(userMessage).length >= 2
+  )
+}
+
+function pickCoreRetailComparisonCities(cities: string[]): { cityA: string; cityB: string } | null {
+  if (cities.length < 2) return null
+
+  const citySet = new Set(cities)
+  if (citySet.has('austin') && citySet.has('houston')) {
+    return { cityA: 'Austin', cityB: 'Houston' }
+  }
+
+  return null
+}
+
+function buildCoreRetailComparisonChart(comparison: CoreRetailComparisonResult): ScoutChartOutput {
+  return normalizeScoutChartOutput({
+    kind: 'bar',
+    title: `${comparison.cityA.label} vs ${comparison.cityB.label} core retail context`,
+    subtitle: `Current Overture POI snapshot within a fixed ${comparison.radiusMeters}m radius around each city core.`,
+    summary: `Bounded current retail-context comparison for ${comparison.cityA.label} and ${comparison.cityB.label}.`,
+    placeholder: false,
+    confidenceLabel: 'Overture current snapshot',
+    xAxis: { key: 'bucket', label: 'Retail bucket' },
+    yAxis: { label: 'POI count', valueFormat: 'number' },
+    series: [
+      {
+        key: comparison.cityA.key,
+        label: comparison.cityA.label,
+        color: '#D76B3D',
+        points: comparison.buckets.map((bucket) => ({ x: bucket.label, y: bucket.cityAValue })),
+      },
+      {
+        key: comparison.cityB.key,
+        label: comparison.cityB.label,
+        color: '#7A8FA6',
+        points: comparison.buckets.map((bucket) => ({ x: bucket.label, y: bucket.cityBValue })),
+      },
+    ],
+    citations: [
+      {
+        id: `overture:core-retail:${comparison.cityA.key}:${comparison.cityB.key}`,
+        label: 'Overture POIs',
+        sourceType: 'public_dataset',
+        scope: `${comparison.cityA.label} and ${comparison.cityB.label} core anchors`,
+        note: `Current snapshot within ${comparison.radiusMeters}m fixed-radius core anchors.`,
+      },
+    ],
+  })
+}
+
+function buildCoreRetailComparisonTrace(comparison: CoreRetailComparisonResult): AgentTrace {
+  return {
+    summary: `${comparison.cityA.label} versus ${comparison.cityB.label} core retail context`,
+    taskType: 'compare_segments',
+    methodology:
+      'Scout matched the prompt to the bounded Overture core-retail comparison path, counted current POIs inside fixed-radius city-core anchors, and grouped them into explicit retail buckets.',
+    keyFindings: [
+      `Compared ${comparison.buckets.length} bounded retail buckets across both city cores.`,
+      `${comparison.cityA.label} and ${comparison.cityB.label} were evaluated with the same ${comparison.radiusMeters}m radius.`,
+    ],
+    evidence: [
+      'Source: Overture current POI snapshot.',
+      `Buckets: ${comparison.buckets.map((bucket) => bucket.label).join(', ')}.`,
+      'This is a current retail-context comparison, not a historical trend.',
+    ],
+    caveats: ['This bounded path supports Austin and Houston core comparisons only in v1.'],
+    nextQuestions: ['Ask which Austin neighborhoods look early but have development demand forming nearby.'],
+    citations: [
+      {
+        id: `overture:core-retail:${comparison.cityA.key}:${comparison.cityB.key}`,
+        label: 'Overture POIs',
+        sourceType: 'public_dataset',
+        scope: `${comparison.cityA.label} and ${comparison.cityB.label} core anchors`,
+        note: `Current snapshot within ${comparison.radiusMeters}m fixed-radius core anchors.`,
+      },
+    ],
+  }
+}
+
+async function maybeBuildCoreRetailComparisonResponse(
+  userMessage: string,
+  dependencies: HistoryComparisonDependencies = {}
+): Promise<AgentPipelineResult | null> {
+  if (!hasCoreRetailComparisonIntent(userMessage)) return null
+
+  const cities = resolveCoreRetailPromptCities(userMessage)
+  if (cities.length < 2) {
+    return buildUnresolvedCoreRetailComparisonPayload()
+  }
+
+  const supportedCities = pickCoreRetailComparisonCities(cities)
+  if (!supportedCities) {
+    return buildUnsupportedCoreRetailComparisonPayload(cities)
+  }
+
+  const getCoreRetailComparison = dependencies.getCoreRetailComparison ?? buildCoreRetailComparison
+  const comparison = await getCoreRetailComparison(supportedCities)
+  const chart = buildCoreRetailComparisonChart(comparison)
+  const trace = buildCoreRetailComparisonTrace(comparison)
+
+  return {
+    message: `Here is the current core retail context comparison for ${comparison.cityA.label} and ${comparison.cityB.label}.`,
+    action: { type: 'none' as const },
+    trace,
+    chart,
   }
 }
 
@@ -1921,6 +2094,9 @@ async function maybeBuildHistoryChartedResponse(
   context: MapContext | null,
   dependencies: HistoryComparisonDependencies = {}
 ): Promise<AgentPipelineResult | null> {
+  const coreRetail = await maybeBuildCoreRetailComparisonResponse(userMessage, dependencies)
+  if (coreRetail) return coreRetail
+
   const wantsPeerComparison = hasPeerComparisonIntent(userMessage)
   const wantsHistory = hasHistoryIntent(userMessage)
   if (!wantsHistory && !wantsPeerComparison) {

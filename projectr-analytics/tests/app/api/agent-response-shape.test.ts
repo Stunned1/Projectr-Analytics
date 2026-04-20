@@ -1996,6 +1996,136 @@ test('returns no history chart for unsupported history metrics', async () => {
   assert.match(response.message, /not supported yet/i)
 })
 
+test('returns a grounded Austin vs Houston core retail comparison chart', async () => {
+  const calls: Array<{ cityA: string; cityB: string }> = []
+  let analyticalCalled = false
+  const response = await buildHistoryChartedResponseForTest(
+    'compare core retail context for Austin and Houston',
+    null,
+    {
+      getAnalyticalComparison: async () => {
+        analyticalCalled = true
+        throw new Error('history router should not be called for core retail comparison')
+      },
+      getCoreRetailComparison: async (request) => {
+        calls.push(request)
+        return {
+          cityA: { key: 'austin', label: 'Austin', latitude: 30.2672, longitude: -97.7431 },
+          cityB: { key: 'houston', label: 'Houston', latitude: 29.7604, longitude: -95.3698 },
+          radiusMeters: 1200,
+          buckets: [
+            { key: 'food_bev', label: 'Food & Bev', cityAValue: 8, cityBValue: 4 },
+            { key: 'coffee_cafe', label: 'Coffee & Cafe', cityAValue: 2, cityBValue: 1 },
+            { key: 'essentials', label: 'Essentials', cityAValue: 1, cityBValue: 0 },
+            { key: 'fitness', label: 'Fitness', cityAValue: 2, cityBValue: 2 },
+          ],
+        }
+      },
+    }
+  )
+
+  assert.equal(analyticalCalled, false)
+  assert.deepEqual(calls, [{ cityA: 'Austin', cityB: 'Houston' }])
+  assert.equal(response.chart?.kind, 'bar')
+  assert.equal(response.chart?.series.length, 2)
+  assert.equal(response.chart?.series[0]?.label, 'Austin')
+  assert.equal(response.chart?.series[1]?.label, 'Houston')
+  assert.deepEqual(response.chart?.series[0]?.points.map((point) => point.x), [
+    'Food & Bev',
+    'Coffee & Cafe',
+    'Essentials',
+    'Fitness',
+  ])
+  assert.deepEqual(response.chart?.series[1]?.points.map((point) => point.y), [4, 1, 0, 2])
+  assert.match(response.message, /Austin and Houston/i)
+  assert.match(response.trace?.summary ?? '', /core retail context/i)
+  assert.match(response.trace?.evidence?.join(' ') ?? '', /current retail-context comparison/i)
+})
+
+test('returns a bounded unsupported-city core retail comparison response for Austin and Dallas', async () => {
+  let called = false
+  const response = await buildHistoryChartedResponseForTest(
+    'compare downtown retail context between Austin and Dallas',
+    null,
+    {
+      getCoreRetailComparison: async () => {
+        called = true
+        throw new Error('helper should not be called for unsupported pairs')
+      },
+    }
+  )
+
+  assert.equal(called, false)
+  assert.equal(response.chart ?? null, null)
+  assert.match(response.message, /Austin and Houston only/i)
+  assert.match(response.trace?.summary ?? '', /unsupported core retail comparison/i)
+  assert.match(response.trace?.evidence?.join(' ') ?? '', /Austin/i)
+  assert.match(response.trace?.evidence?.join(' ') ?? '', /Dallas/i)
+})
+
+test('returns a bounded unsupported-city core retail comparison response for Austin and El Paso', async () => {
+  let called = false
+  const response = await buildHistoryChartedResponseForTest(
+    'compare core retail context for Austin and El Paso',
+    null,
+    {
+      getCoreRetailComparison: async () => {
+        called = true
+        throw new Error('helper should not be called for unsupported pairs')
+      },
+    }
+  )
+
+  assert.equal(called, false)
+  assert.equal(response.chart ?? null, null)
+  assert.match(response.message, /Austin and Houston only/i)
+  assert.match(response.trace?.summary ?? '', /unsupported core retail comparison/i)
+  assert.match(response.trace?.evidence?.join(' ') ?? '', /Austin/i)
+  assert.match(response.trace?.evidence?.join(' ') ?? '', /El Paso/i)
+})
+
+test('does not consume a one-city retail-context prompt', async () => {
+  let called = false
+  const response = await buildHistoryChartedResponseForTest('show Austin retail context', null, {
+    getCoreRetailComparison: async () => {
+      called = true
+      throw new Error('core retail helper should not be called')
+    },
+  })
+
+  assert.equal(called, false)
+  assert.equal(response, null)
+})
+
+test('selects Austin and Houston when extra cities are present in the prompt', async () => {
+  const calls: Array<{ cityA: string; cityB: string }> = []
+  const response = await buildHistoryChartedResponseForTest(
+    'compare core retail context between Dallas, San Antonio, Austin, and Houston',
+    null,
+    {
+      getCoreRetailComparison: async (request) => {
+        calls.push(request)
+        return {
+          cityA: { key: 'austin', label: 'Austin', latitude: 30.2672, longitude: -97.7431 },
+          cityB: { key: 'houston', label: 'Houston', latitude: 29.7604, longitude: -95.3698 },
+          radiusMeters: 1200,
+          buckets: [
+            { key: 'food_bev', label: 'Food & Bev', cityAValue: 8, cityBValue: 4 },
+            { key: 'coffee_cafe', label: 'Coffee & Cafe', cityAValue: 2, cityBValue: 1 },
+            { key: 'essentials', label: 'Essentials', cityAValue: 1, cityBValue: 0 },
+            { key: 'fitness', label: 'Fitness', cityAValue: 2, cityBValue: 2 },
+          ],
+        }
+      },
+    }
+  )
+
+  assert.deepEqual(calls, [{ cityA: 'Austin', cityB: 'Houston' }])
+  assert.equal(response.chart?.kind, 'bar')
+  assert.equal(response.chart?.series[0]?.label, 'Austin')
+  assert.equal(response.chart?.series[1]?.label, 'Houston')
+})
+
 test('does not rewrite a non-Texas county history prompt into a Texas chart', async () => {
   let called = false
   const response = await buildHistoryChartedResponseForTest('show me permit history for Cook County, IL', null, {

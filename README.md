@@ -30,7 +30,7 @@ A geospatial data engine, bounded EDA assistant, and automated reporting platfor
 
 | Surface | Disposition |
 |---|---|
-| `/api/agent` prompt + routing | Narrowed to a one-pass EDA contract with deterministic fallback summaries, a shared request-lane classifier, and context-aware upload-vs-market subject selection; explicit map controls remain available as a separate direct-action lane. |
+| `/api/agent` prompt + routing | Narrowed to a one-pass EDA contract with deterministic fallback summaries, a shared request-lane classifier, context-aware upload-vs-market subject selection, and a bounded Austin-vs-Houston Overture core-retail comparison lane; explicit map controls remain available as a separate direct-action lane. |
 | Multi-step `steps` / `run_analysis` defaults | Removed from the default assistant path; legacy NYC analysis tooling stays available elsewhere and remains geography-gated. |
 | Starter prompts / placeholders / chips | Rewritten to emphasize summaries, outliers, trends, metric explanations, and explicit map controls instead of open-ended reasoning. |
 | Right-panel “Thinking” UI | Reframed as **Notes** with methodology, key findings, evidence, caveats, and next questions. |
@@ -183,6 +183,7 @@ _04.19.2026_
 
 _04.20.2026_
 - Removed cycle-derived payload fields and classifier fallbacks from the market report pipeline, so PDF headlines, dossier context, methodology rows, site comparison, and demo warmups now use the generic report signal set instead.
+- `/api/agent` now supports a bounded Austin-vs-Houston Overture core-retail comparison rendered as grouped bar charts from fixed-radius core snapshots.
 
 _04.16.2026_
 - Added shared geography gating and Texas MVP source / architecture / performance notes so Texas becomes the default product framing without deleting NYC-specific workflows.
