@@ -99,7 +99,7 @@ export default function ShortlistPanel({
   className,
 }: {
   onOpenSite: (site: Site) => void
-  /** e.g. `h-full min-h-0` on the Saved page */
+  /** e.g. `min-h-0 flex-1` on the Saved page */
   className?: string
 }) {
   const sites = useSitesStore((s) => s.sites)
@@ -113,7 +113,7 @@ export default function ShortlistPanel({
   const compareCount = selectedForComparison.length
 
   return (
-    <div className={cn('flex min-h-0 flex-1 flex-col gap-3', className)}>
+    <div className={cn('flex min-h-0 flex-col gap-3', className)}>
       {syncError && (
         <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[10px] leading-snug text-amber-600 dark:text-amber-400">
           {syncError}

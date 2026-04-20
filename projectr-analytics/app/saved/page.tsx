@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import CommandCenterSidebar from '@/components/CommandCenterSidebar'
+import SavedChartsPanel from '@/components/SavedChartsPanel'
 import ShortlistPanel from '@/components/ShortlistPanel'
 import SitesBootstrap from '@/components/SitesBootstrap'
 import { stashPendingNav } from '@/lib/pending-navigation'
@@ -50,14 +51,30 @@ export default function SavedPage() {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-l border-border/60">
         <header className="shrink-0 border-b border-border bg-muted/20 px-5 py-3">
           <p className="text-[10px] font-semibold tracking-widest text-primary uppercase">Workspace</p>
-          <h1 className="text-base font-semibold tracking-tight text-foreground">Saved sites</h1>
+          <h1 className="text-base font-semibold tracking-tight text-foreground">Saved workspace</h1>
           <p className="mt-1 max-w-xl text-xs text-muted-foreground">
-            Sites and areas you save from the map appear here. Use the sidebar search to jump to a ZIP, county, metro, or city on the map.
+            Sites and areas you save from the map, plus terminal charts you save from the assistant, appear here. Use the sidebar search to jump to a ZIP, county, metro, or city on the map.
           </p>
         </header>
 
-        <main className="min-h-0 flex-1 overflow-hidden px-5 py-4">
-          <ShortlistPanel onOpenSite={goMapWithPending} className="h-full" />
+        <main className="min-h-0 flex-1 overflow-auto px-5 py-4">
+          <div className="grid min-h-full gap-4 xl:grid-cols-2">
+            <section className="flex min-h-0 flex-col gap-3">
+              <div>
+                <p className="text-[10px] font-semibold tracking-widest text-primary uppercase">Saved Sites</p>
+                <p className="mt-1 text-xs text-muted-foreground">ZIPs, areas, and map views you can reopen or compare later.</p>
+              </div>
+              <ShortlistPanel onOpenSite={goMapWithPending} className="min-h-0 flex-1" />
+            </section>
+
+            <section className="flex min-h-0 flex-col gap-3">
+              <div>
+                <p className="text-[10px] font-semibold tracking-widest text-primary uppercase">Saved Charts</p>
+                <p className="mt-1 text-xs text-muted-foreground">Terminal charts persist for the current session and can be removed here.</p>
+              </div>
+              <SavedChartsPanel className="min-h-0 flex-1" />
+            </section>
+          </div>
         </main>
       </div>
     </div>
