@@ -184,6 +184,7 @@ export default function AgentTerminal({
   const slashOpenPendingRef = useRef(false)
   const [unread, setUnread] = useState(false)
   const [slashHighlight, setSlashHighlight] = useState(0)
+  const savedCharts = useSavedChartsStore((state) => state.charts)
   const hasSavedChart = useSavedChartsStore((state) => state.hasSavedChart)
   const saveChart = useSavedChartsStore((state) => state.saveChart)
 
@@ -571,10 +572,10 @@ export default function AgentTerminal({
                   ? {
                       chart: msg.chart,
                       prompt: msg.chartSourcePrompt,
-                      marketLabel: msg.chartSourceMarketLabel ?? null,
+                      marketLabel: msg.chartSourceMarketLabel ?? mapContext.label ?? null,
                     }
                   : null
-              const chartAlreadySaved = chartSaveInput ? hasSavedChart(chartSaveInput) : false
+              const chartAlreadySaved = chartSaveInput ? savedCharts.length > 0 && hasSavedChart(chartSaveInput) : false
 
               return (
                 <div key={i}>
