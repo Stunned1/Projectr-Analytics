@@ -57,22 +57,22 @@ export default function SavedPage() {
           </p>
         </header>
 
-        <main className="min-h-0 flex-1 overflow-hidden px-5 py-4">
-          <div className="grid h-full min-h-0 gap-4 xl:grid-cols-2">
-            <section className="flex min-h-0 flex-col gap-3">
+        <main className="min-h-0 flex-1 overflow-auto px-5 py-4 xl:overflow-hidden">
+          <div className="grid min-h-full gap-4 xl:h-full xl:min-h-0 xl:grid-cols-2">
+            <section className="flex min-h-[24rem] flex-col gap-3 xl:min-h-0">
               <div>
                 <h2 className="text-[10px] font-semibold tracking-widest text-primary uppercase">Saved Sites</h2>
                 <p className="mt-1 text-xs text-muted-foreground">ZIPs, areas, and map views you can reopen or compare later.</p>
               </div>
-              <ShortlistPanel onOpenSite={goMapWithPending} className="min-h-0 flex-1" />
+              <ShortlistPanel onOpenSite={goMapWithPending} className="min-h-[20rem] flex-1 xl:min-h-0" />
             </section>
 
-            <section className="flex min-h-0 flex-col gap-3">
+            <section className="flex min-h-[24rem] flex-col gap-3 xl:min-h-0">
               <div>
                 <h2 className="text-[10px] font-semibold tracking-widest text-primary uppercase">Saved Charts</h2>
                 <p className="mt-1 text-xs text-muted-foreground">Terminal charts persist for the current session and can be removed here.</p>
               </div>
-              <SavedChartsPanel className="min-h-0 flex-1" />
+              <SavedChartsPanel className="min-h-[20rem] flex-1 xl:min-h-0" />
             </section>
           </div>
         </main>
