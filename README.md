@@ -241,6 +241,7 @@ _04.20.2026_
 - `/api/pois` now honors `OVERTURE_API_KEY` before falling back to Overture's demo key and normalizes the live `value` response envelope, so Texas POI requests stop returning empty or malformed payloads when a real Overture key is configured.
 - Terminal chart saves now dedupe by chart, prompt, and market label signature, and chart messages preserve their originating market label so the `Saved` state survives remounts without creating duplicate records.
 - `/clear:workspace` now clears session-local saved charts alongside chat and upload state so the Saved Charts panel resets predictably.
+- Saved-chart PDF export now uses a valid Next App Router `route.ts` handler, so `/export` can generate merged-session chart reports again.
 
 _4.11.2026_
 - Agent keys: `permits` / `nycPermits` normalization; clear tracts/blockGroups after `run_analysis`; `FlyToController` uses `moveCamera` + easing; layer chrome layout; PDF cycle layout, arrows, wrapping, sanitizers; restore `sites-store`; normalize JSON from Gemini; split `AGENT_CHAT_STORAGE_KEY`; default ZIP boundary + choropleth on; `/clear:layers` + override resync + `overlayReady`; Transit `paths` / `color` + legacy `path` caps.
@@ -329,6 +330,11 @@ _04.20.2026_
 - Cleared the right-panel Analysis tab for ZIP and aggregate views and stopped loading cycle state into the map page so the tab stays intentionally blank for future work.
 - Intelligence terminal and `/api/agent` now block off-topic prompts before Gemini runs, while every leading `/` input stays on the local slash-command path.
 - `/saved` now renders separate Saved Sites and Saved Charts sections, and terminal chart saves appear there with prompt, timestamp, market label, and remove controls.
+- The map-page terminal now supports `/export`, which opens a saved-chart picker with reader notes and exports the selected session charts as a plain-language PDF.
+- The `/export` dialog is now larger and shows live saved-chart previews in a two-column grid so you can visually choose charts before exporting.
+- The `Saved` and `Upload` workspace header bars now use the same compact two-line treatment again, removing the stray saved-page descriptor and restoring consistent header dimensions.
+- The `/export` dialog layout is now cleaned up into a non-overlapping header/body/footer shell with compact chart previews, a stable notes panel, and explicit cancel/export actions.
+- The `/export` dialog no longer shows the redundant report-summary block, and the notes field is now constrained to the body area so it does not run underneath the footer actions.
 
 _04.16.2026_
 - Search, guide, and agent copy now lead with Texas market examples while keeping NYC borough entry points available only when relevant.

@@ -31,6 +31,10 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
     summary: '`/save` or `/save <name>`: save loaded market or current map view to **Saved**',
   },
   {
+    command: 'export',
+    summary: '`/export`: open the saved-chart PDF export dialog',
+  },
+  {
     command: 'layers',
     summary: '`/layers:a,b`: turn **on** listed layers (comma-separated); see /help',
   },
@@ -66,6 +70,7 @@ export function getSlashPaletteState(input: string): { open: boolean; matches: S
     body === 'rotate' ||
     body === 'go' ||
     body === 'save' ||
+    body === 'export' ||
     body === 'layers' ||
     body.startsWith('layers:') ||
     body === 'restart'
@@ -112,6 +117,29 @@ export function goSlashUsageLines(): string {
   ].join('\n')
 }
 
+export type ParsedExportSlash =
+  | { kind: 'run' }
+  | { kind: 'bad_arg'; message: string }
+
+export function exportSlashUsageLines(): string {
+  return [
+    'Usage: `/export`: opens the saved-chart PDF export dialog.',
+    '• The dialog lists charts saved from the terminal in this browser session.',
+    '• Pick the charts you want, add notes, then export a PDF.',
+  ].join('\n')
+}
+
+export function parseExportSlashCommand(trimmed: string): ParsedExportSlash | null {
+  const m = trimmed.match(/^\/export(?:\s+(.*))?\s*$/i)
+  if (!m) return null
+  const rest = (m[1] ?? '').trim()
+  if (!rest) return { kind: 'run' }
+  return {
+    kind: 'bad_arg',
+    message: 'Use `/export` with no extra text. Choose charts and add notes in the export dialog.',
+  }
+}
+
 export function layersSlashUsageLines(): string {
   return [
     'Usage: `/layers:name1,name2,...`: **colon required**; comma-separated names; turns **on** those layers (others unchanged).',
@@ -155,6 +183,9 @@ export function buildSlashHelpMessage(): string {
     '',
     '/go (detail):',
     ...goSlashUsageLines().split('\n').map((ln) => `  ${ln}`),
+    '',
+    '/export:',
+    ...exportSlashUsageLines().split('\n').map((ln) => `  ${ln}`),
     '',
     '/save (detail):',
     ...saveSlashUsageLines().split('\n').map((ln) => `  ${ln}`),
@@ -456,6 +487,7 @@ export function isSlashCommandHandled(trimmed: string): boolean {
   if (/^\/help\b/i.test(trimmed)) return true
   if (parseClearSlashCommand(trimmed)) return true
   if (parseGoSlashCommand(trimmed)) return true
+  if (parseExportSlashCommand(trimmed)) return true
   if (parseSaveSlashCommand(trimmed)) return true
   if (parseLayersSlashCommand(trimmed)) return true
   if (parseRestartSlashCommand(trimmed)) return true

@@ -167,6 +167,8 @@ interface AgentTerminalProps {
   bottomOffsetClass?: string
   /** Map page: `/save` persists ZIP, aggregate, or camera to Saved. */
   onSlashSave?: (customLabel: string | null) => Promise<{ ok: boolean; message: string }>
+  /** Map page: `/export` opens the saved-chart PDF export dialog. */
+  onSlashExport?: () => void
   /** Open right sidebar with analysis notes from `/api/agent`. */
   onShowThinking?: (trace: AgentTrace) => void
   /** Live updates while `/api/agent` streams notes progress (Notes tab opens automatically). */
@@ -183,6 +185,7 @@ export default function AgentTerminal({
   onOpenHeightPxChange,
   bottomOffsetClass = 'bottom-0',
   onSlashSave,
+  onSlashExport,
   onShowThinking,
   onAgentThinkingUpdate,
   onAgentThinkingStreamFinished,
@@ -227,6 +230,7 @@ export default function AgentTerminal({
       onUnreadChange?.(true)
     },
     onSlashSave,
+    onSlashExport,
     onAgentThinkingUpdate,
     onAgentThinkingStreamFinished,
   })

@@ -2,6 +2,7 @@
 
 import type { ReactNode } from 'react'
 import type { ScoutChartOutput } from '@/lib/scout-chart-output'
+import { cn } from '@/lib/utils'
 import {
   Bar,
   BarChart,
@@ -47,31 +48,47 @@ function toRechartsRows(chart: ScoutChartOutput): Array<Record<string, string | 
   })
 }
 
-export function ScoutChartCard({ chart, actions }: { chart: ScoutChartOutput; actions?: ReactNode }) {
+export function ScoutChartCard({
+  chart,
+  actions,
+  className,
+  showHeader = true,
+  showSources = true,
+  chartHeightClass = 'h-56',
+}: {
+  chart: ScoutChartOutput
+  actions?: ReactNode
+  className?: string
+  showHeader?: boolean
+  showSources?: boolean
+  chartHeightClass?: string
+}) {
   const rows = toRechartsRows(chart)
 
   return (
-    <div className="mt-3 rounded-lg border border-border/60 bg-muted/10 p-3">
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-sm font-semibold text-white">{chart.title}</p>
-          {chart.subtitle ? <p className="text-[11px] text-zinc-400">{chart.subtitle}</p> : null}
-          {chart.summary ? <p className="mt-1 text-[11px] leading-relaxed text-zinc-300">{chart.summary}</p> : null}
-        </div>
-        <div className="flex flex-col items-end gap-2 text-[10px]">
-          <div className="flex flex-col items-end gap-1">
-            {chart.placeholder ? (
-              <span className="rounded-full border border-amber-700/40 bg-amber-950/30 px-2 py-0.5 text-amber-200">
-                Placeholder
-              </span>
-            ) : null}
-            {chart.confidenceLabel ? <span className="text-zinc-500">{chart.confidenceLabel}</span> : null}
+    <div className={cn('mt-3 rounded-lg border border-border/60 bg-muted/10 p-3', className)}>
+      {showHeader ? (
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-white">{chart.title}</p>
+            {chart.subtitle ? <p className="text-[11px] text-zinc-400">{chart.subtitle}</p> : null}
+            {chart.summary ? <p className="mt-1 text-[11px] leading-relaxed text-zinc-300">{chart.summary}</p> : null}
           </div>
-          {actions ? <div className="flex items-center justify-end gap-2">{actions}</div> : null}
+          <div className="flex flex-col items-end gap-2 text-[10px]">
+            <div className="flex flex-col items-end gap-1">
+              {chart.placeholder ? (
+                <span className="rounded-full border border-amber-700/40 bg-amber-950/30 px-2 py-0.5 text-amber-200">
+                  Placeholder
+                </span>
+              ) : null}
+              {chart.confidenceLabel ? <span className="text-zinc-500">{chart.confidenceLabel}</span> : null}
+            </div>
+            {actions ? <div className="flex items-center justify-end gap-2">{actions}</div> : null}
+          </div>
         </div>
-      </div>
+      ) : null}
 
-      <div className="h-56 w-full">
+      <div className={cn('w-full', chartHeightClass)}>
         <ResponsiveContainer width="100%" height="100%">
           {chart.kind === 'line' ? (
             <LineChart data={rows}>
@@ -123,19 +140,21 @@ export function ScoutChartCard({ chart, actions }: { chart: ScoutChartOutput; ac
         </ResponsiveContainer>
       </div>
 
-      <div className="mt-3 border-t border-border/60 pt-2">
-        <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Sources</p>
-        <div className="mt-1 space-y-1">
-          {chart.citations.map((citation) => (
-            <p key={citation.id} className="text-[10px] leading-relaxed text-zinc-400">
-              <span className="font-medium text-zinc-200">{citation.label}</span>
-              {citation.periodLabel ? ` · ${citation.periodLabel}` : ''}
-              {citation.note ? ` · ${citation.note}` : ''}
-              {citation.placeholder ? ' · placeholder' : ''}
-            </p>
-          ))}
+      {showSources ? (
+        <div className="mt-3 border-t border-border/60 pt-2">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Sources</p>
+          <div className="mt-1 space-y-1">
+            {chart.citations.map((citation) => (
+              <p key={citation.id} className="text-[10px] leading-relaxed text-zinc-400">
+                <span className="font-medium text-zinc-200">{citation.label}</span>
+                {citation.periodLabel ? ` · ${citation.periodLabel}` : ''}
+                {citation.note ? ` · ${citation.note}` : ''}
+                {citation.placeholder ? ' · placeholder' : ''}
+              </p>
+            ))}
+          </div>
         </div>
-      </div>
+      ) : null}
     </div>
   )
 }

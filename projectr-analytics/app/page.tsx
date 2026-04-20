@@ -7,6 +7,7 @@ import AgenticNormalizer from '@/components/AgenticNormalizer'
 import { AgentThinkingPanel } from '@/components/AgentThinkingPanel'
 import AgentTerminal, { type AgentTerminalSize } from '@/components/AgentTerminal'
 import { ImportedDataPanel } from '@/components/ImportedDataPanel'
+import SavedChartsExportDialog from '@/components/SavedChartsExportDialog'
 import type { AgentAction, AgentTrace, AnalysisSite } from '@/lib/agent-types'
 import type { MapLayersSnapshot } from '@/lib/report/types'
 import { useSitesStore } from '@/lib/sites-store'
@@ -724,6 +725,7 @@ export default function Home() {
   const [marketPanelTab, setMarketPanelTab] = useState<'analysis' | 'data' | 'thinking'>('analysis')
   const [agentSidebarTrace, setAgentSidebarTrace] = useState<AgentTrace | null>(null)
   const [agentThinkingStreaming, setAgentThinkingStreaming] = useState(false)
+  const [savedChartsExportOpen, setSavedChartsExportOpen] = useState(false)
   const mapViewportRef = useRef<MapViewportSnapshot | null>(null)
 
   const handleShowAgentThinking = useCallback((trace: AgentTrace) => {
@@ -1058,6 +1060,16 @@ export default function Home() {
     },
     [result, aggregateData, analysisSites.length, clientUploadAgg, mapLayersSnapshot, transit]
   )
+
+  const savedChartsExportTitle = useMemo(() => {
+    const marketLabel =
+      aggregateData?.label?.trim() ||
+      result?.zillow?.city?.trim() ||
+      result?.zip?.trim() ||
+      mapContext.label?.trim() ||
+      null
+    return marketLabel ? `${marketLabel} chart report` : 'Scout chart report'
+  }, [aggregateData?.label, mapContext.label, result?.zip, result?.zillow?.city])
 
   /** Normalize `/api/trends` JSON into panel + PDF state (always sets `trends` so analysts see errors). */
   const applyTrendsApiBody = useCallback((body: Record<string, unknown> | null, httpOk: boolean) => {
@@ -1525,9 +1537,15 @@ export default function Home() {
           onSizeChange={setAgentTerminalSize}
           onOpenHeightPxChange={setAgentTerminalOpenHeightPx}
           onSlashSave={handleSlashSave}
+          onSlashExport={() => setSavedChartsExportOpen(true)}
           onShowThinking={handleShowAgentThinking}
           onAgentThinkingUpdate={handleAgentThinkingUpdate}
           onAgentThinkingStreamFinished={handleAgentThinkingStreamFinished}
+        />
+        <SavedChartsExportDialog
+          open={savedChartsExportOpen}
+          onOpenChange={setSavedChartsExportOpen}
+          suggestedTitle={savedChartsExportTitle}
         />
 
         {/* Floating stats bubble */}
