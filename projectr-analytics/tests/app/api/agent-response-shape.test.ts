@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 
 import { buildFallbackChartedResponseForTest, buildRentTrendChartForTest, buildRouterBackedChartForTest, buildHistoryChartedResponseForTest, buildRetailComparisonResponseForTest } from '@/app/api/agent/agent-pipeline'
 import type { AgentMessage, MapContext } from '@/lib/agent-types'
@@ -14,6 +15,14 @@ test('route module only exports route-safe entry points', async () => {
   const routeModule = await import('@/app/api/agent/route')
 
   assert.deepEqual(Object.keys(routeModule).sort(), ['POST', 'dynamic', 'maxDuration'])
+})
+
+test('route entry declares segment config inline instead of re-exporting it', async () => {
+  const routeSource = await readFile(new URL('../../../app/api/agent/route.ts', import.meta.url), 'utf8')
+
+  assert.match(routeSource, /export const dynamic = 'force-dynamic'/)
+  assert.match(routeSource, /export const maxDuration = 60/)
+  assert.doesNotMatch(routeSource, /export\s*\{\s*dynamic\b/)
 })
 
 function createActiveZipContext(zip: string, label = zip): MapContext {

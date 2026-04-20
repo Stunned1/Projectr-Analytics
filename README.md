@@ -102,6 +102,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY
 SUPABASE_SERVICE_ROLE_KEY        # optional but recommended for ingest scripts that backfill new rows into `projectr_master_data`
 NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
 GOOGLE_GEOCODING_API_KEY         # optional server-only Geocoding API key; Client CSV / upload forward-geocode falls back to NEXT_PUBLIC_GOOGLE_MAPS_API_KEY if unset
+GOOGLE_PLACES_API_KEY            # optional dedicated server-side Places API key for uploaded-pin nearby context; falls back to GOOGLE_GEOCODING_API_KEY if that key is Places-enabled
 NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID   # must be a Vector map ID
 GEMINI_API_KEY
 GOOGLE_MAPS_STATIC_KEY           # optional; unused by current PDF exports (reserved if static map returns)
@@ -185,7 +186,9 @@ _04.19.2026_
 _04.20.2026_
 - Removed cycle-derived payload fields and classifier fallbacks from the market report pipeline, so PDF headlines, dossier context, methodology rows, site comparison, and demo warmups now use the generic report signal set instead.
 - `/api/agent` now supports bounded Austin-vs-Houston and Austin-vs-Dallas Overture core-retail comparisons rendered as grouped bar charts from fixed-radius core snapshots, while still rejecting other city pairings.
+- Retail comparison prompts like `compare Austin and Houston for retail` now keep the bounded Overture core-retail chart and append public-macro companions for population plus median household income in the same terminal response.
 - Agent chart messages now retain the originating trimmed prompt in `chartSourcePrompt` so later saved-chart workflows can attach prompt metadata without changing the response contract.
+- Added `/api/site-context/places` plus normalized Google Places site-context helpers so uploaded pins can request bounded nearby retail context from the sidebar.
 
 _04.16.2026_
 - Added shared geography gating and Texas MVP source / architecture / performance notes so Texas becomes the default product framing without deleting NYC-specific workflows.
@@ -241,6 +244,7 @@ _04.20.2026_
 - `/api/pois` now honors `OVERTURE_API_KEY` before falling back to Overture's demo key and normalizes the live `value` response envelope, so Texas POI requests stop returning empty or malformed payloads when a real Overture key is configured.
 - Terminal chart saves now dedupe by chart, prompt, and market label signature, and chart messages preserve their originating market label so the `Saved` state survives remounts without creating duplicate records.
 - `/clear:workspace` now clears session-local saved charts alongside chat and upload state so the Saved Charts panel resets predictably.
+- `POST /api/agent` no longer disappears behind Next App Router route-export validation, because the test helpers moved out of `app/api/agent/route.ts` and the live route file now exports only route-safe entry points.
 
 _4.11.2026_
 - Agent keys: `permits` / `nycPermits` normalization; clear tracts/blockGroups after `run_analysis`; `FlyToController` uses `moveCamera` + easing; layer chrome layout; PDF cycle layout, arrows, wrapping, sanitizers; restore `sites-store`; normalize JSON from Gemini; split `AGENT_CHAT_STORAGE_KEY`; default ZIP boundary + choropleth on; `/clear:layers` + override resync + `overlayReady`; Transit `paths` / `color` + legacy `path` caps.
@@ -327,8 +331,11 @@ _4.15.2026_
 
 _04.20.2026_
 - Cleared the right-panel Analysis tab for ZIP and aggregate views and stopped loading cycle state into the map page so the tab stays intentionally blank for future work.
+- The map sidecar now uses `Data`, `Imported Data`, and `Assistant` tabs, moving uploaded-pin inspection out of the market metrics view and removing the unused `Analysis` tab.
 - Intelligence terminal and `/api/agent` now block off-topic prompts before Gemini runs, while every leading `/` input stays on the local slash-command path.
 - `/saved` now renders separate Saved Sites and Saved Charts sections, and terminal chart saves appear there with prompt, timestamp, market label, and remove controls.
+- The terminal now renders ordered retail-comparison companion outputs, including a second population chart, a compact median-household-income stat block, and `Save chart` support on companion charts.
+- Uploaded CSV pins now show an `Around this site` sidebar block with Places-based nearby context, cached per session and keyed by source-stable uploaded markers.
 
 _04.16.2026_
 - Search, guide, and agent copy now lead with Texas market examples while keeping NYC borough entry points available only when relevant.

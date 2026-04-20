@@ -721,7 +721,7 @@ export default function Home() {
   const [mapLayersSnapshot, setMapLayersSnapshot] = useState<MapLayersSnapshot>(DEFAULT_MAP_LAYERS)
   const layerStateResyncIdRef = useRef(0)
   const [layerStateResync, setLayerStateResync] = useState<{ id: number; state: LayerState } | null>(null)
-  const [marketPanelTab, setMarketPanelTab] = useState<'analysis' | 'data' | 'thinking'>('analysis')
+  const [marketPanelTab, setMarketPanelTab] = useState<'data' | 'imported' | 'assistant'>('data')
   const [agentSidebarTrace, setAgentSidebarTrace] = useState<AgentTrace | null>(null)
   const [agentThinkingStreaming, setAgentThinkingStreaming] = useState(false)
   const mapViewportRef = useRef<MapViewportSnapshot | null>(null)
@@ -729,7 +729,7 @@ export default function Home() {
   const handleShowAgentThinking = useCallback((trace: AgentTrace) => {
     setSelectedSite(null)
     setAgentSidebarTrace(trace)
-    setMarketPanelTab('thinking')
+    setMarketPanelTab('assistant')
     setPanelOpen(true)
   }, [])
 
@@ -737,7 +737,7 @@ export default function Home() {
     (u: { trace: AgentTrace; phase: 'thinking' | 'json' | 'done' }) => {
       setSelectedSite(null)
       setAgentSidebarTrace(u.trace)
-      setMarketPanelTab('thinking')
+      setMarketPanelTab('assistant')
       setPanelOpen(true)
       setAgentThinkingStreaming(u.phase !== 'done')
     },
@@ -750,13 +750,13 @@ export default function Home() {
 
   const clearAgentSidebarTrace = useCallback(() => {
     setAgentSidebarTrace(null)
-    setMarketPanelTab('analysis')
+    setMarketPanelTab('data')
     setAgentThinkingStreaming(false)
   }, [])
 
   const focusImportedMarkers = useCallback((markers: Array<{ lat: number; lng: number }>) => {
     setSelectedUploadedMarker(null)
-    setMarketPanelTab('data')
+    setMarketPanelTab('imported')
     setPanelOpen(true)
     const focusPlan = planImportedMarkerFocus(markers)
     if (focusPlan.mode === 'clear') {
@@ -781,7 +781,7 @@ export default function Home() {
     setSelectedSite(null)
     setSelectedUploadedMarker(marker)
     if (marker) {
-      setMarketPanelTab('data')
+      setMarketPanelTab('imported')
       setPanelOpen(true)
     }
   }, [])
@@ -838,7 +838,7 @@ export default function Home() {
         }
         break
       case 'generate_memo':
-        setMarketPanelTab('analysis')
+        setMarketPanelTab('assistant')
         setPanelOpen(true)
         break
       case 'focus_data_panel':
@@ -1723,33 +1723,30 @@ export default function Home() {
                 </div>
               </div>
               <div className="mt-3 flex gap-0 overflow-hidden rounded-lg border border-white/10">
-                {(['analysis', 'data', 'thinking'] as const).map((t) => (
+                {(['data', 'imported', 'assistant'] as const).map((t) => (
                   <button
                     key={t}
                     type="button"
                     onClick={() => setMarketPanelTab(t)}
                     className={cn(
-                      'flex-1 py-1.5 text-[10px] font-semibold capitalize transition-colors',
+                      'flex-1 py-1.5 text-[10px] font-semibold transition-colors',
                       marketPanelTab === t ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'
                     )}
                   >
-                    {t === 'analysis' ? 'Analysis' : t === 'data' ? 'Data' : 'Notes'}
+                    {t === 'data' ? 'Data' : t === 'imported' ? 'Imported Data' : 'Assistant'}
                   </button>
                 ))}
               </div>
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
-            {marketPanelTab === 'thinking' && (
+            {marketPanelTab === 'assistant' && (
               <AgentThinkingPanel
                 trace={agentSidebarTrace}
                 embedded
                 streaming={agentThinkingStreaming}
                 onDismiss={clearAgentSidebarTrace}
               />
-            )}
-            {marketPanelTab === 'analysis' && (
-              <></>
             )}
 
             {marketPanelTab === 'data' && (
@@ -1862,18 +1859,38 @@ export default function Home() {
               </PanelSection>
             )}
 
-            {cityZips && cityZips.length > 0 && (
-              <AggregateShortlistToggle
-                aggregateData={aggregateData}
-                cityZips={cityZips}
-                savedSearch={searchInput}
-              />
+                {cityZips && cityZips.length > 0 && (
+                  <AggregateShortlistToggle
+                    aggregateData={aggregateData}
+                    cityZips={cityZips}
+                    savedSearch={searchInput}
+                  />
+                )}
+                  </>
+                )}
+                {marketPanelTab === 'imported' && (
+                  <PanelSection title="Imported Data">
+                    {clientUploadSession ? (
+                      <ImportedDataPanel
+                        session={clientUploadSession}
+                        selectedMarker={selectedUploadedMarker}
+                        onClearSelectedMarker={() => setSelectedUploadedMarker(null)}
+                        currentZip={cityZips?.find((candidate) => /^\d{5}$/.test(candidate.zip))?.zip ?? null}
+                        onMarkersResolved={focusImportedMarkers}
+                      />
+                    ) : (
+                      <div className="rounded-lg border border-border/50 bg-muted/10 px-3 py-3 text-[11px] leading-relaxed text-zinc-400">
+                        <p className="font-medium text-white">No imported data yet</p>
+                        <p className="mt-1">
+                          Upload a CSV to inspect imported rows, mapped pins, and nearby site context here.
+                        </p>
+                      </div>
+                    )}
+                  </PanelSection>
+                )}
+                </div>
+              </div>
             )}
-              </>
-            )}
-            </div>
-          </div>
-        )}
 
         {!selectedSite && result && panelOpen && (
           <div className="flex min-h-0 min-w-[360px] flex-1 flex-col overflow-hidden">
@@ -1888,33 +1905,30 @@ export default function Home() {
                 </div>
               </div>
               <div className="mt-3 flex gap-0 overflow-hidden rounded-lg border border-white/10">
-                {(['analysis', 'data', 'thinking'] as const).map((t) => (
+                {(['data', 'imported', 'assistant'] as const).map((t) => (
                   <button
                     key={t}
                     type="button"
                     onClick={() => setMarketPanelTab(t)}
                     className={cn(
-                      'flex-1 py-1.5 text-[10px] font-semibold capitalize transition-colors',
+                      'flex-1 py-1.5 text-[10px] font-semibold transition-colors',
                       marketPanelTab === t ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'
                     )}
                   >
-                    {t === 'analysis' ? 'Analysis' : t === 'data' ? 'Data' : 'Notes'}
+                    {t === 'data' ? 'Data' : t === 'imported' ? 'Imported Data' : 'Assistant'}
                   </button>
                 ))}
               </div>
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
-            {marketPanelTab === 'thinking' && (
+            {marketPanelTab === 'assistant' && (
               <AgentThinkingPanel
                 trace={agentSidebarTrace}
                 embedded
                 streaming={agentThinkingStreaming}
                 onDismiss={clearAgentSidebarTrace}
               />
-            )}
-            {marketPanelTab === 'analysis' && (
-              <></>
             )}
 
             {marketPanelTab === 'data' && (
@@ -2076,22 +2090,30 @@ export default function Home() {
               </div>
             </details>
 
-            {clientUploadAgg && (
-              <PanelSection title="Imported Data">
-                <ImportedDataPanel
-                  session={clientUploadSession}
-                  selectedMarker={selectedUploadedMarker}
-                  onClearSelectedMarker={() => setSelectedUploadedMarker(null)}
-                  currentZip={result?.zip}
-                  onMarkersResolved={focusImportedMarkers}
-                />
-              </PanelSection>
-            )}
-
             <PanelSection title="Agentic Normalizer">
               <AgenticNormalizer currentZip={result.zip} onIngested={handleNormalizerIngested} />
             </PanelSection>
               </>
+            )}
+            {marketPanelTab === 'imported' && (
+              <PanelSection title="Imported Data">
+                {clientUploadSession ? (
+                  <ImportedDataPanel
+                    session={clientUploadSession}
+                    selectedMarker={selectedUploadedMarker}
+                    onClearSelectedMarker={() => setSelectedUploadedMarker(null)}
+                    currentZip={result?.zip}
+                    onMarkersResolved={focusImportedMarkers}
+                  />
+                ) : (
+                  <div className="rounded-lg border border-border/50 bg-muted/10 px-3 py-3 text-[11px] leading-relaxed text-zinc-400">
+                    <p className="font-medium text-white">No imported data yet</p>
+                    <p className="mt-1">
+                      Upload a CSV to inspect imported rows, mapped pins, and nearby site context here.
+                    </p>
+                  </div>
+                )}
+              </PanelSection>
             )}
             </div>
           </div>
