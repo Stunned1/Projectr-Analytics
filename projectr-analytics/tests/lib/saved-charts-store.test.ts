@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import type { ScoutChartOutput } from '@/lib/scout-chart-output'
+import { normalizeScoutChartOutput, type ScoutChartOutput } from '@/lib/scout-chart-output'
 
 const sessionStorageMock = (() => {
   const store = new Map<string, string>()
@@ -54,6 +54,8 @@ test('adds a saved chart record', () => {
   })
 
   const state = useSavedChartsStore.getState()
+  const storedPayload = JSON.parse(sessionStorage.getItem(SAVED_CHARTS_STORAGE_KEY) ?? 'null')
+
   assert.equal(state.charts.length, 1)
   assert.equal(state.charts[0]?.id, id)
   assert.equal(state.charts[0]?.prompt, 'Show rent trend')
@@ -61,6 +63,13 @@ test('adds a saved chart record', () => {
   assert.equal(state.charts[0]?.chart.title, 'Rent trend')
   assert.equal(typeof state.charts[0]?.savedAt, 'string')
   assert.ok(state.hasChart(id))
+  assert.deepEqual(storedPayload.state.charts[0], {
+    id,
+    chart: normalizeScoutChartOutput(baseChart),
+    prompt: 'Show rent trend',
+    marketLabel: 'Austin, TX',
+    savedAt: state.charts[0]?.savedAt,
+  })
 })
 
 test('keeps newest saved chart first', () => {
@@ -114,6 +123,16 @@ test('hydrates saved charts from sessionStorage', () => {
             marketLabel: null,
             savedAt: '2026-04-20T12:00:00.000Z',
           },
+          {
+            id: 'saved-chart-2',
+            chart: {
+              ...baseChart,
+              citations: 'not-an-array',
+            },
+            prompt: 'Broken chart',
+            marketLabel: 'Ignored',
+            savedAt: '2026-04-20T12:05:00.000Z',
+          },
         ],
       },
       version: 0,
@@ -128,4 +147,6 @@ test('hydrates saved charts from sessionStorage', () => {
   assert.equal(state.charts[0]?.prompt, 'Hydrated chart')
   assert.equal(state.charts[0]?.marketLabel, null)
   assert.equal(state.charts[0]?.savedAt, '2026-04-20T12:00:00.000Z')
+  assert.equal(state.charts[0]?.chart.yAxis.valueFormat, 'number')
+  assert.equal(state.charts[0]?.chart.series[0]?.color, null)
 })

@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 
-import type { ScoutChartOutput } from '@/lib/scout-chart-output'
+import { isScoutChartOutput, normalizeScoutChartOutput, type ScoutChartOutput } from '@/lib/scout-chart-output'
 
 export const SAVED_CHARTS_STORAGE_KEY = 'projectr-saved-charts-v1'
 
@@ -29,11 +29,46 @@ function generateSavedChartId(): string {
   return `saved-chart-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 }
 
-function normalizeSavedChartRecord(record: SavedChartRecord): SavedChartRecord {
-  return {
-    ...record,
-    marketLabel: record.marketLabel ?? null,
+function normalizeSavedChartRecord(record: unknown): SavedChartRecord | null {
+  if (!record || typeof record !== 'object' || Array.isArray(record)) {
+    return null
   }
+
+  const candidate = record as Partial<SavedChartRecord> & { chart?: unknown }
+
+  if (
+    typeof candidate.id !== 'string' ||
+    typeof candidate.prompt !== 'string' ||
+    typeof candidate.savedAt !== 'string' ||
+    !isScoutChartOutput(candidate.chart)
+  ) {
+    return null
+  }
+
+  return {
+    id: candidate.id,
+    chart: normalizeScoutChartOutput(candidate.chart),
+    prompt: candidate.prompt,
+    marketLabel: typeof candidate.marketLabel === 'string' ? candidate.marketLabel : null,
+    savedAt: candidate.savedAt,
+  }
+}
+
+function normalizeSavedChartRecords(state: unknown): SavedChartRecord[] {
+  if (!state || typeof state !== 'object' || Array.isArray(state)) {
+    return []
+  }
+
+  const charts = (state as { charts?: unknown }).charts
+
+  if (!Array.isArray(charts)) {
+    return []
+  }
+
+  return charts.flatMap((chart) => {
+    const normalized = normalizeSavedChartRecord(chart)
+    return normalized ? [normalized] : []
+  })
 }
 
 export const useSavedChartsStore = create<SavedChartsStore>()(
@@ -44,7 +79,7 @@ export const useSavedChartsStore = create<SavedChartsStore>()(
         const id = generateSavedChartId()
         const record: SavedChartRecord = {
           id,
-          chart: input.chart,
+          chart: normalizeScoutChartOutput(input.chart),
           prompt: input.prompt,
           marketLabel: input.marketLabel ?? null,
           savedAt: new Date().toISOString(),
@@ -66,8 +101,15 @@ export const useSavedChartsStore = create<SavedChartsStore>()(
     {
       name: SAVED_CHARTS_STORAGE_KEY,
       storage: createJSONStorage(() => sessionStorage),
+      merge: (persistedState, currentState) => ({
+        ...currentState,
+        charts: normalizeSavedChartRecords(persistedState),
+      }),
       partialize: (state) => ({
-        charts: state.charts.map((chart) => normalizeSavedChartRecord(chart)),
+        charts: state.charts.flatMap((chart) => {
+          const normalized = normalizeSavedChartRecord(chart)
+          return normalized ? [normalized] : []
+        }),
       }),
     }
   )
