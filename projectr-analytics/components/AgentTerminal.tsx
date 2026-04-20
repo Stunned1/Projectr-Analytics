@@ -6,6 +6,7 @@ import type { MapContext } from '@/lib/agent-types'
 import { buildAgentInputPlaceholder, buildAgentStarterSuggestions } from '@/lib/agent-surface-copy'
 import { useAgentIntelligence, formatActionLogLine } from '@/lib/use-agent-intelligence'
 import { getSlashPaletteState } from '@/lib/slash-commands'
+import { useSavedChartsStore } from '@/lib/saved-charts-store'
 import { cn } from '@/lib/utils'
 import { ScoutChartCard } from '@/components/ScoutChartCard'
 
@@ -183,6 +184,8 @@ export default function AgentTerminal({
   const slashOpenPendingRef = useRef(false)
   const [unread, setUnread] = useState(false)
   const [slashHighlight, setSlashHighlight] = useState(0)
+  const [savedChartMessageKeys, setSavedChartMessageKeys] = useState<Record<number, true>>({})
+  const saveChart = useSavedChartsStore((state) => state.saveChart)
 
   const shouldNotifyWhileClosed = useCallback(() => size === 'collapsed', [size])
 
@@ -586,7 +589,31 @@ export default function AgentTerminal({
                   )}
                   {msg.chart ? (
                     <div className="pl-[2ch]">
-                      <ScoutChartCard chart={msg.chart} />
+                      <ScoutChartCard
+                        chart={msg.chart!}
+                        actions={
+                          msg.chartSourcePrompt ? (
+                            <button
+                              type="button"
+                              disabled={savedChartMessageKeys[i] === true}
+                              onClick={() => {
+                                if (savedChartMessageKeys[i] === true || !msg.chartSourcePrompt) return
+                                saveChart({
+                                  chart: msg.chart!,
+                                  prompt: msg.chartSourcePrompt,
+                                  marketLabel: mapContext.label ?? null,
+                                })
+                                setSavedChartMessageKeys((prev) =>
+                                  prev[i] === true ? prev : { ...prev, [i]: true }
+                                )
+                              }}
+                              className="rounded border border-primary/30 px-2 py-0.5 text-[10px] font-semibold text-primary transition-colors hover:bg-primary/10 disabled:cursor-default disabled:opacity-60"
+                            >
+                              {savedChartMessageKeys[i] === true ? 'Saved' : 'Save chart'}
+                            </button>
+                          ) : null
+                        }
+                      />
                     </div>
                   ) : null}
                   {msg.trace && onShowThinking && !msg.isAnalyzing && (

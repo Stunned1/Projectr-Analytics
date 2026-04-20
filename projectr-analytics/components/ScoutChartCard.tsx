@@ -1,5 +1,6 @@
 'use client'
 
+import type { ReactNode } from 'react'
 import type { ScoutChartOutput } from '@/lib/scout-chart-output'
 import {
   Bar,
@@ -46,7 +47,7 @@ function toRechartsRows(chart: ScoutChartOutput): Array<Record<string, string | 
   })
 }
 
-export function ScoutChartCard({ chart }: { chart: ScoutChartOutput }) {
+export function ScoutChartCard({ chart, actions }: { chart: ScoutChartOutput; actions?: ReactNode }) {
   const rows = toRechartsRows(chart)
 
   return (
@@ -57,13 +58,16 @@ export function ScoutChartCard({ chart }: { chart: ScoutChartOutput }) {
           {chart.subtitle ? <p className="text-[11px] text-zinc-400">{chart.subtitle}</p> : null}
           {chart.summary ? <p className="mt-1 text-[11px] leading-relaxed text-zinc-300">{chart.summary}</p> : null}
         </div>
-        <div className="flex flex-col items-end gap-1 text-[10px]">
-          {chart.placeholder ? (
-            <span className="rounded-full border border-amber-700/40 bg-amber-950/30 px-2 py-0.5 text-amber-200">
-              Placeholder
-            </span>
-          ) : null}
-          {chart.confidenceLabel ? <span className="text-zinc-500">{chart.confidenceLabel}</span> : null}
+        <div className="flex flex-col items-end gap-2 text-[10px]">
+          <div className="flex flex-col items-end gap-1">
+            {chart.placeholder ? (
+              <span className="rounded-full border border-amber-700/40 bg-amber-950/30 px-2 py-0.5 text-amber-200">
+                Placeholder
+              </span>
+            ) : null}
+            {chart.confidenceLabel ? <span className="text-zinc-500">{chart.confidenceLabel}</span> : null}
+          </div>
+          {actions ? <div className="flex items-center justify-end gap-2">{actions}</div> : null}
         </div>
       </div>
 
