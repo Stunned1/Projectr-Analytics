@@ -95,6 +95,28 @@ test('deduplicates repeated saves for the same chart signature', () => {
   assert.equal(useSavedChartsStore.getState().hasSavedChart(input), true)
 })
 
+test('deduplicates unlabeled legacy saves against labeled records', () => {
+  useSavedChartsStore.getState().resetForTests()
+
+  const labeledInput = {
+    chart: baseChart,
+    prompt: 'Show rent trend',
+    marketLabel: 'Austin, TX',
+  }
+
+  const firstId = useSavedChartsStore.getState().saveChart(labeledInput)
+  const legacyId = useSavedChartsStore.getState().saveChart({
+    chart: baseChart,
+    prompt: 'Show rent trend',
+    marketLabel: null,
+  })
+
+  const state = useSavedChartsStore.getState()
+  assert.equal(legacyId, firstId)
+  assert.equal(state.charts.length, 1)
+  assert.equal(useSavedChartsStore.getState().hasSavedChart({ ...labeledInput, marketLabel: null }), true)
+})
+
 test('keeps newest saved chart first', () => {
   useSavedChartsStore.getState().resetForTests()
 

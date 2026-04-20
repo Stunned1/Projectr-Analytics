@@ -84,19 +84,37 @@ function buildSavedChartSignature(input: {
   })
 }
 
+function matchesSavedChart(
+  input: { chart: ScoutChartOutput; prompt: string; marketLabel?: string | null },
+  existing: SavedChartRecord
+): boolean {
+  const inputSignature = buildSavedChartSignature(input)
+  const existingSignature = buildSavedChartSignature({
+    chart: existing.chart,
+    prompt: existing.prompt,
+    marketLabel: existing.marketLabel ?? null,
+  })
+  if (inputSignature === existingSignature) return true
+
+  const inputMarketLabel = input.marketLabel ?? null
+  const existingMarketLabel = existing.marketLabel ?? null
+  if (inputMarketLabel != null && existingMarketLabel != null) return false
+
+  return JSON.stringify({
+    chart: normalizeScoutChartOutput(input.chart),
+    prompt: input.prompt,
+  }) === JSON.stringify({
+    chart: normalizeScoutChartOutput(existing.chart),
+    prompt: existing.prompt,
+  })
+}
+
 export const useSavedChartsStore = create<SavedChartsStore>()(
   persist(
     (set, get) => ({
       charts: [],
       saveChart: (input) => {
-        const signature = buildSavedChartSignature(input)
-        const existing = get().charts.find((chart) =>
-          buildSavedChartSignature({
-            chart: chart.chart,
-            prompt: chart.prompt,
-            marketLabel: chart.marketLabel ?? null,
-          }) === signature
-        )
+        const existing = get().charts.find((chart) => matchesSavedChart(input, chart))
         if (existing) return existing.id
 
         const id = generateSavedChartId()
@@ -115,14 +133,7 @@ export const useSavedChartsStore = create<SavedChartsStore>()(
         return id
       },
       hasSavedChart: (input) => {
-        const signature = buildSavedChartSignature(input)
-        return get().charts.some((chart) =>
-          buildSavedChartSignature({
-            chart: chart.chart,
-            prompt: chart.prompt,
-            marketLabel: chart.marketLabel ?? null,
-          }) === signature
-        )
+        return get().charts.some((chart) => matchesSavedChart(input, chart))
       },
       removeChart: (id) =>
         set((state) => ({

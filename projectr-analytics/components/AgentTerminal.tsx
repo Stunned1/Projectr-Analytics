@@ -572,7 +572,7 @@ export default function AgentTerminal({
                   ? {
                       chart: msg.chart,
                       prompt: msg.chartSourcePrompt,
-                      marketLabel: msg.chartSourceMarketLabel ?? mapContext.label ?? null,
+                      marketLabel: msg.chartSourceMarketLabel ?? null,
                     }
                   : null
               const chartAlreadySaved = chartSaveInput ? savedCharts.length > 0 && hasSavedChart(chartSaveInput) : false

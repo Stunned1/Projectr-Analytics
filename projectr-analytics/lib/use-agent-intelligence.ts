@@ -63,32 +63,14 @@ type PersistedAgentSession = {
   caseStudyBundle: CaseStudyBundle | null
 }
 
-function normalizePersistedMessages(
-  messages: AgentMessage[],
-  fallbackChartMarketLabel: string | null | undefined
-): AgentMessage[] {
-  return messages.map((message) => {
-    if (!message.chart || !message.chartSourcePrompt || message.chartSourceMarketLabel !== undefined) {
-      return message
-    }
-    return {
-      ...message,
-      chartSourceMarketLabel: fallbackChartMarketLabel ?? null,
-    }
-  })
-}
-
-function readPersistedSession(fallbackChartMarketLabel?: string | null): PersistedAgentSession | null {
+function readPersistedSession(): PersistedAgentSession | null {
   if (typeof window === 'undefined') return null
   try {
     const raw = sessionStorage.getItem(AGENT_CHAT_STORAGE_KEY)
     if (!raw) return null
     const p = JSON.parse(raw) as PersistedAgentSession
     if (p.v !== 1 || !Array.isArray(p.messages)) return null
-    return {
-      ...p,
-      messages: normalizePersistedMessages(p.messages, fallbackChartMarketLabel),
-    }
+    return p
   } catch {
     return null
   }
@@ -171,14 +153,14 @@ export function useAgentIntelligence(
   }, [options?.shouldNotifyWhileClosed, options?.onNotifyWhileClosed, options?.onSlashSave])
 
   useEffect(() => {
-    const p = readPersistedSession(mapContext.label ?? null)
+    const p = readPersistedSession()
     if (p?.messages?.length) {
       setMessages(p.messages)
       setCaseStudyBundle(p.caseStudyBundle ?? null)
     }
     setTerminalFirstVisibleIndex(0)
     setStorageHydrated(true)
-  }, [mapContext.label])
+  }, [])
 
   useEffect(() => {
     if (!storageHydrated) {
