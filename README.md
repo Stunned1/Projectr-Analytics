@@ -184,6 +184,7 @@ _04.19.2026_
 _04.20.2026_
 - Removed cycle-derived payload fields and classifier fallbacks from the market report pipeline, so PDF headlines, dossier context, methodology rows, site comparison, and demo warmups now use the generic report signal set instead.
 - `/api/agent` now supports bounded Austin-vs-Houston and Austin-vs-Dallas Overture core-retail comparisons rendered as grouped bar charts from fixed-radius core snapshots, while still rejecting other city pairings.
+- Agent chart messages now retain the originating trimmed prompt in `chartSourcePrompt` so later saved-chart workflows can attach prompt metadata without changing the response contract.
 
 _04.16.2026_
 - Added shared geography gating and Texas MVP source / architecture / performance notes so Texas becomes the default product framing without deleting NYC-specific workflows.

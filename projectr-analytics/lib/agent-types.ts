@@ -370,6 +370,7 @@ export interface AgentMessage {
   analysisSites?: AnalysisSite[]
   trace?: AgentTrace
   chart?: ScoutChartOutput
+  chartSourcePrompt?: string
 }
 
 /** Last client CSV ingest — agent uses for “show my upload / pins / sidebar” intents. */

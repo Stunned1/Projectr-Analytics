@@ -829,7 +829,14 @@ export function useAgentIntelligence(
           })
           setMessages((prev) => [
             ...prev,
-            { role: 'agent', text: data.message, insight: data.insight, trace, chart: data.chart ?? undefined },
+            {
+              role: 'agent',
+              text: data.message,
+              insight: data.insight,
+              trace,
+              chart: data.chart ?? undefined,
+              chartSourcePrompt: data.chart ? userPrompt : undefined,
+            },
           ])
           maybeNotify()
           runSequence(data.steps, trace ?? null)
@@ -850,6 +857,7 @@ export function useAgentIntelligence(
             insight: data.insight,
             trace: data.trace as AgentTrace | undefined,
             chart: data.chart ?? undefined,
+            chartSourcePrompt: data.chart ? userPrompt : undefined,
           },
         ])
         maybeNotify()
