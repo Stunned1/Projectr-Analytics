@@ -466,7 +466,7 @@ export default function AgentTerminal({
             </span>
           ) : (
             <span className="truncate text-[9px] font-medium tracking-wide text-zinc-500">
-              SCOUT EDA ASSISTANT <span className="text-zinc-600">v1.0</span>
+              SCOUT EDA ASSISTANT <span className="text-zinc-600">v2.0</span>
               <span className="text-primary/80"> [{contextSubtitle}]</span>
             </span>
           )}
