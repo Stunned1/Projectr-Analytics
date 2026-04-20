@@ -106,6 +106,7 @@ GEMINI_API_KEY
 GOOGLE_MAPS_STATIC_KEY           # optional; unused by current PDF exports (reserved if static map returns)
 HUD_API_TOKEN                    # optional, falls back to Census ACS rent data
 TRANSITLAND_API_KEY=             # free at transit.land/sign-up (Developer API, 10k queries/month)
+OVERTURE_API_KEY                 # optional but required for live Texas POIs; otherwise `/api/pois` falls back to Overture's demo-city-only key
 ```
 
 BigQuery router reads use standard Google Cloud server credentials. If you want to exercise the helper locally, authenticate with Application Default Credentials or point `GOOGLE_APPLICATION_CREDENTIALS` at a service-account JSON before calling it.
@@ -129,6 +130,7 @@ For Texas statewide ZIP/ZCTA coverage seeding, run `npm run load:texas:zctas -- 
 - **Shortlist / `saved_sites`** - enable **Anonymous sign-ins** under Supabase Authentication → Providers (or use email/OAuth); the app calls `signInAnonymously()` when there is no session so `saved_sites` inserts satisfy RLS.
 - **Turbopack + Tailwind** - if you get `Can't resolve 'tailwindcss'`, kill any stale `next dev` processes and restart fresh. Stale processes hold onto old module resolution state.
 - **Google Maps Map ID** - must be a Vector type map for deck.gl `interleaved: true` mode. Raster maps cause `fromLatLngToDivPixel` errors.
+- **Overture POIs in Texas** - Overture's demo key only works near its demo cities, so Austin / Houston / Dallas POI requests need `OVERTURE_API_KEY` or the POI layer will come back empty.
 - **Zillow CSVs are gitignored** - ~they exceed GitHub's 100MB file limit. Each teammate needs to download them locally and run `ingest:zillow` once.~ You must download the CSV's locally and run ingest:zillow, OR just use a supabase with the zillow data already in.
 - **`ingest:zillow` runtime** - writing every ZIP × month into `zillow_zori_monthly` adds many upsert batches; expect a longer first run than snapshot-only ingests (on the order of tens of minutes depending on network and Supabase rate limits).
 
@@ -228,6 +230,9 @@ _04.19.2026_
 - Demo-mode grounded charts now stay visible when only the external Check Grounding service reports low support, while still suppressing charts whose citation objects are actually missing or malformed.
 
 **Bug Fixes**
+
+_04.20.2026_
+- `/api/pois` now honors `OVERTURE_API_KEY` before falling back to Overture's demo key and normalizes the live `value` response envelope, so Texas POI requests stop returning empty or malformed payloads when a real Overture key is configured.
 
 _4.11.2026_
 - Agent keys: `permits` / `nycPermits` normalization; clear tracts/blockGroups after `run_analysis`; `FlyToController` uses `moveCamera` + easing; layer chrome layout; PDF cycle layout, arrows, wrapping, sanitizers; restore `sites-store`; normalize JSON from Gemini; split `AGENT_CHAT_STORAGE_KEY`; default ZIP boundary + choropleth on; `/clear:layers` + override resync + `overlayReady`; Transit `paths` / `color` + legacy `path` caps.
