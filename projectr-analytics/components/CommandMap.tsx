@@ -498,9 +498,11 @@ function MapFitter({ boundary, fitKey }: { boundary: GeoJSON | null; fitKey: str
 function UploadedMarkersFitter({
   markers,
   active,
+  fitKey,
 }: {
   markers: Array<{ lat: number; lng: number }> | null | undefined
   active: boolean
+  fitKey?: string | number | null
 }) {
   const map = useMap()
   const lastSig = useRef<string>('')
@@ -512,7 +514,7 @@ function UploadedMarkersFitter({
     }
     if (!map || !markers?.length) return
 
-    const sig = markers.map((m) => `${m.lat.toFixed(5)},${m.lng.toFixed(5)}`).join('|')
+    const sig = `${fitKey ?? 'default'}:${markers.map((m) => `${m.lat.toFixed(5)},${m.lng.toFixed(5)}`).join('|')}`
     if (sig === lastSig.current) return
     lastSig.current = sig
 
@@ -544,7 +546,7 @@ function UploadedMarkersFitter({
       { lat: maxLat, lng: maxLng }
     )
     map.fitBounds(bounds, 56)
-  }, [map, active, markers])
+  }, [map, active, fitKey, markers])
 
   return null
 }
@@ -772,6 +774,7 @@ interface CommandMapProps {
   agentLayerOverrides?: Record<string, boolean>
   agentMetric?: 'zori' | 'zhvi' | null
   agentFlyTo?: { lat: number; lng: number } | null
+  uploadedMarkersFitNonce?: number
   /** Fired when toggles or agent overrides change - used for PDF export layer legend. */
   onLayersChange?: (snapshot: LayerState & { choroplethMetric: 'zori' | 'zhvi' }) => void
   /** Fired when user manually toggles a layer - clears agent override for that key */
@@ -805,6 +808,7 @@ function CommandMap({
   agentLayerOverrides,
   agentMetric,
   agentFlyTo,
+  uploadedMarkersFitNonce = 0,
   onLayersChange,
   onClearAgentOverride,
   layerStateResync,
@@ -841,6 +845,7 @@ function CommandMap({
     !zip &&
     !(cityZips && cityZips.length > 0) &&
     (uploadedMarkers?.length ?? 0) > 0
+  const fitUploadedMarkersRequested = uploadedMarkersFitNonce > 0 && (uploadedMarkers?.length ?? 0) > 0
   const [selectedPermit, setSelectedPermit] = useState<PermitPayload | null>(null)
   const [selectedTexasRawPermit, setSelectedTexasRawPermit] = useState<TexasRawPermitPayload | null>(null)
   const [selectedTexasPermit, setSelectedTexasPermit] = useState<TexasPermitActivityPayload | null>(null)
@@ -2200,7 +2205,11 @@ function CommandMap({
             boundary={visiblePrimaryBoundary ?? aggregateBoundaryGeoJson ?? (visibleCityBoundaries[0]?.geojson ?? null)}
             fitKey={boundaryFitKey}
           />
-          <UploadedMarkersFitter markers={uploadedMarkers ?? null} active={fitClientMarkersOnly} />
+          <UploadedMarkersFitter
+            markers={uploadedMarkers ?? null}
+            active={fitClientMarkersOnly || fitUploadedMarkersRequested}
+            fitKey={fitUploadedMarkersRequested ? uploadedMarkersFitNonce : null}
+          />
           <TiltController tilt={mapTilt} heading={mapHeading} />
           <ZoomTracker onZoomChange={handleZoomChange} />
           <FlyToController target={agentFlyTo} />

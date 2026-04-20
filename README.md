@@ -281,6 +281,7 @@ _04.18.2026_
 
 _04.19.2026_
 - `scripts/warm-houston-permit-geocodes.ts` now shims `server-only` in its Node entrypoint, so `npm run warm:houston:permits` executes the documented Houston geocode warm instead of crashing before the cache fill starts.
+- Imported client datasets with multiple mapped rows now fit the map to the uploaded marker bounds instead of flying to the average point at zoom 17, so Austin shortlist CSV pins stay visible even when a city context is already loaded.
 
 **Map & Visualization**
 
@@ -340,6 +341,7 @@ _04.19.2026_
 - When a bounded Texas city history prompt still comes back with insufficient metro history, the agent now retries through that city’s county proxy (for example Austin -> Travis County) and labels the chart honestly as a proxy instead of hard-failing the demo.
 - Austin city permit-history prompts are now routed onto a separate monthly raw-permits lane backed by the live Austin Open Data API, so demo requests like `show monthly permit activity in Austin over the last 12 months` chart Austin-only monthly counts with Austin citations instead of falling through to the shared warehouse tables.
 - Austin city permit-history prompts that still ask for multi-year windows now fail explicitly with a monthly-only / since-January-2024 explanation instead of silently falling back to misleading county or master-data series.
+- Added `fixtures/austin-demo-case-study/austin_opportunity_shortlist.csv`, a 4-row mixed Austin opportunity shortlist with two development sites and two multifamily acquisitions for demo upload and case-study flows.
 
 ## Known Bugs
 

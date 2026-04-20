@@ -16,6 +16,7 @@ import { useClientUploadMarkersStore, type ClientUploadMarker } from '@/lib/clie
 import { useClientUploadSessionStore } from '@/lib/client-upload-session-store'
 import type { NormalizerIngestPayload } from '@/lib/normalize-client-types'
 import { aggregateClientUploadSession } from '@/lib/client-upload-session-aggregate'
+import { planImportedMarkerFocus } from '@/lib/imported-marker-focus'
 import {
   buildMarketSnapshotEdaProfile,
   buildUploadedDatasetEdaProfile,
@@ -712,6 +713,7 @@ export default function Home() {
   const [agentPermitFilter, setAgentPermitFilter] = useState<string[] | null>(null)
   const [selectedSite, setSelectedSite] = useState<AnalysisSite | null>(null)
   const [agentFlyTo, setAgentFlyTo] = useState<{ lat: number; lng: number } | null>(null)
+  const [uploadedMarkersFitNonce, setUploadedMarkersFitNonce] = useState(0)
   const [transit, setTransit] = useState<TransitData | null>(null)
   const [trends, setTrends] = useState<TrendsData | null>(null)
   const [cycleData, setCycleData] = useState<CycleAnalysis | null>(null)
@@ -757,14 +759,19 @@ export default function Home() {
     setSelectedUploadedMarker(null)
     setMarketPanelTab('data')
     setPanelOpen(true)
-    if (markers.length > 0) {
-      setAgentLayerOverrides((prev) => ({ ...prev, clientData: true }))
-      const lat = markers.reduce((sum, marker) => sum + marker.lat, 0) / markers.length
-      const lng = markers.reduce((sum, marker) => sum + marker.lng, 0) / markers.length
-      setAgentFlyTo({ lat, lng })
-    } else {
+    const focusPlan = planImportedMarkerFocus(markers)
+    if (focusPlan.mode === 'clear') {
       setAgentLayerOverrides((prev) => ({ ...prev, clientData: false }))
+      setAgentFlyTo(null)
+      return
     }
+    setAgentLayerOverrides((prev) => ({ ...prev, clientData: true }))
+    if (focusPlan.mode === 'fly') {
+      setAgentFlyTo(focusPlan.target)
+      return
+    }
+    setAgentFlyTo(null)
+    setUploadedMarkersFitNonce((current) => current + 1)
   }, [])
 
   const handleNormalizerIngested = useCallback((payload: NormalizerIngestPayload) => {
@@ -1527,6 +1534,7 @@ export default function Home() {
           mapTilt={effectiveMapTilt}
           mapHeading={mapHeading}
           agentFlyTo={agentFlyTo}
+          uploadedMarkersFitNonce={uploadedMarkersFitNonce}
           onLayersChange={handleMapLayersChange}
           onClearAgentOverride={handleClearAgentOverride}
           layerStateResync={layerStateResync}

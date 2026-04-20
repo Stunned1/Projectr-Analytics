@@ -1,0 +1,5 @@
+opportunity_name,opportunity_type,submarket,zip,strategy,units,stage,target_basis_psf,estimated_project_cost_m,target_yield_pct,expected_delivery,risk_flag,notes
+East Cesar Chavez Assemblage,development_site,East Austin,78702,Ground-up mixed-income multifamily,182,LOI,265,71.4,6.1,2028-09,entitlement_timing,"Three-parcel assemblage near Cesar Chavez corridor; strong visibility but neighborhood opposition risk."
+South Congress Mid-Rise Site,development_site,South Central Austin,78704,Ground-up market-rate multifamily,146,IC_Memo,302,64.8,5.7,2028-03,construction_cost_pressure,"Walkable infill site targeting 5-over-1 delivery; pricing assumes moderated rent growth."
+Riverside Workforce Apartments,multifamily_acquisition,Riverside,78741,Acquire and light reposition,214,Underwriting,238,50.9,5.4,2026-12,lease_up_exposure,"1980s vintage asset with renovation upside, but nearby new deliveries may cap near-term rent push."
+Domain Garden Residences,multifamily_acquisition,North Austin,78758,Acquire stabilized asset,198,Term_Sheet,287,68.1,5.1,2026-08,pricing_gap,"Newer asset in a stronger employment node; seller still pricing off 2022 expectations."
