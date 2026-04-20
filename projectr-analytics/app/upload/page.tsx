@@ -58,8 +58,7 @@ export default function ClientUploadPage() {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border bg-muted/20 px-5 py-3">
           <div>
-            <h1 className="text-base font-semibold tracking-tight text-foreground">Client CSV</h1>
-            <p className="text-[11px] text-muted-foreground">Scout</p>
+            <h1 className="text-base font-semibold tracking-tight text-foreground">Upload Data</h1>
           </div>
           <div className="flex w-full max-w-[min(100%,280px)] shrink-0 items-center justify-end sm:max-w-[280px]">
             <Link

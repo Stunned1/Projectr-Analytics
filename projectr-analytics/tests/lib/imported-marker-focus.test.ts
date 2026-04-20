@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { planImportedMarkerFocus } from '@/lib/imported-marker-focus'
+import {
+  buildImportedMarkerSiteContextState,
+  planImportedMarkerFocus,
+} from '@/lib/imported-marker-focus'
 
 test('planImportedMarkerFocus clears focus when there are no imported markers', () => {
   assert.deepEqual(planImportedMarkerFocus([]), { mode: 'clear' })
@@ -22,5 +25,89 @@ test('planImportedMarkerFocus fits bounds when multiple imported markers are pre
       { lat: 30.2501, lng: -97.7494 },
     ]),
     { mode: 'fit' }
+  )
+})
+
+test('buildImportedMarkerSiteContextState returns idle when there is no selected marker', () => {
+  assert.deepEqual(
+    buildImportedMarkerSiteContextState({
+      marker: null,
+      context: null,
+      loading: false,
+      error: null,
+    }),
+    { status: 'idle', message: null, context: null }
+  )
+})
+
+test('buildImportedMarkerSiteContextState returns loading while nearby site context is in flight', () => {
+  assert.deepEqual(
+    buildImportedMarkerSiteContextState({
+      marker: { lat: 30.2672, lng: -97.7431, label: 'Demo site', value: null },
+      context: null,
+      loading: true,
+      error: null,
+    }),
+    { status: 'loading', message: null, context: null }
+  )
+})
+
+test('buildImportedMarkerSiteContextState returns ready when cached site context exists', () => {
+  const context = {
+    radiusMeters: 500,
+    summary: 'Within 500m: 1 coffee & cafe.',
+    countsByCategory: [{ category: 'coffee_cafe', label: 'Coffee & Cafe', count: 1 }],
+    topPlaces: [{ name: 'Merit Coffee', categoryLabel: 'Coffee & Cafe' }],
+    source: { provider: 'google_places' as const },
+  }
+
+  assert.deepEqual(
+    buildImportedMarkerSiteContextState({
+      marker: { lat: 30.2672, lng: -97.7431, label: 'Demo site', value: null },
+      context,
+      loading: false,
+      error: null,
+    }),
+    { status: 'ready', message: null, context }
+  )
+})
+
+test('buildImportedMarkerSiteContextState returns unavailable for request errors', () => {
+  assert.deepEqual(
+    buildImportedMarkerSiteContextState({
+      marker: { lat: 30.2672, lng: -97.7431, label: 'Demo site', value: null },
+      context: null,
+      loading: false,
+      error: 'Nearby place context is unavailable.',
+    }),
+    {
+      status: 'unavailable',
+      message: 'Nearby place context is unavailable.',
+      context: null,
+    }
+  )
+})
+
+test('buildImportedMarkerSiteContextState returns empty when the request succeeds with no nearby places', () => {
+  const emptyContext = {
+    radiusMeters: 500,
+    summary: 'No nearby place context found within 500m.',
+    countsByCategory: [],
+    topPlaces: [],
+    source: { provider: 'google_places' as const },
+  }
+
+  assert.deepEqual(
+    buildImportedMarkerSiteContextState({
+      marker: { lat: 30.2672, lng: -97.7431, label: 'Demo site', value: null },
+      context: emptyContext,
+      loading: false,
+      error: null,
+    }),
+    {
+      status: 'empty',
+      message: 'No nearby place context found within 500m.',
+      context: emptyContext,
+    }
   )
 })

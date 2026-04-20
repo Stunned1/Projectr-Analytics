@@ -22,8 +22,12 @@ import {
   updateSessionSourceAtIndex,
 } from '@/lib/client-upload-session-aggregate'
 import { ScoutChartCard } from '@/components/ScoutChartCard'
+import { useSiteContextStore } from '@/lib/site-context-store'
+import { buildImportedMarkerSiteContextState } from '@/lib/imported-marker-focus'
+import type { SitePlacesContextResponse } from '@/lib/google-places-site-context'
 
 type ImportedPanelView = 'recommended' | 'map' | 'chart' | 'table'
+const SITE_CONTEXT_RADIUS_METERS = 500
 
 const MAPABILITY_LABELS: Record<string, string> = {
   map_ready: 'Ready for map',
@@ -212,6 +216,9 @@ export function ImportedDataPanel({
   const [hydratingRowsSourceKey, setHydratingRowsSourceKey] = useState<string | null>(null)
   const [workingRowsError, setWorkingRowsError] = useState<string | null>(null)
   const [tableRowLimit, setTableRowLimit] = useState(INITIAL_TABLE_ROW_LIMIT)
+  const [selectedMarkerSiteContext, setSelectedMarkerSiteContext] = useState<SitePlacesContextResponse | null>(null)
+  const [selectedMarkerSiteContextLoading, setSelectedMarkerSiteContextLoading] = useState(false)
+  const [selectedMarkerSiteContextError, setSelectedMarkerSiteContextError] = useState<string | null>(null)
   let selectedSourceKey: string | null = null
   if (sources.length > 0) {
     if (selectedMarker?.file_name) {
@@ -275,11 +282,90 @@ export function ImportedDataPanel({
     selectedMarker.file_name != null &&
     selectedMarker.file_name === selectedSource?.fileName
   const resolveInFlight = resolvingSourceKey === selectedSourceKey
+  const siteContextStore = useSiteContextStore.getState()
+  const selectedMarkerSiteContextKey =
+    markerBelongsToSelected && selectedMarker
+      ? siteContextStore.buildKey({
+          lat: selectedMarker.lat,
+          lng: selectedMarker.lng,
+          radiusMeters: SITE_CONTEXT_RADIUS_METERS,
+        })
+      : null
 
   useEffect(() => {
     setTableRowLimit(INITIAL_TABLE_ROW_LIMIT)
     setWorkingRowsError(null)
   }, [selectedSourceKey])
+
+  useEffect(() => {
+    if (!selectedMarkerSiteContextKey || !selectedMarker) {
+      setSelectedMarkerSiteContext(null)
+      setSelectedMarkerSiteContextLoading(false)
+      setSelectedMarkerSiteContextError(null)
+      return
+    }
+
+    const input = {
+      lat: selectedMarker.lat,
+      lng: selectedMarker.lng,
+      radiusMeters: SITE_CONTEXT_RADIUS_METERS,
+    }
+    const cached = siteContextStore.read(input)
+    if (cached) {
+      setSelectedMarkerSiteContext(cached)
+      setSelectedMarkerSiteContextLoading(false)
+      setSelectedMarkerSiteContextError(null)
+      return
+    }
+
+    let cancelled = false
+    setSelectedMarkerSiteContext(null)
+    setSelectedMarkerSiteContextLoading(true)
+    setSelectedMarkerSiteContextError(null)
+
+    void fetch(
+      `/api/site-context/places?lat=${encodeURIComponent(String(selectedMarker.lat))}&lng=${encodeURIComponent(
+        String(selectedMarker.lng)
+      )}&radius=${SITE_CONTEXT_RADIUS_METERS}`
+    )
+      .then(async (response) => {
+        const payload = (await response.json().catch(() => null)) as SitePlacesContextResponse | { error?: string } | null
+        if (!response.ok) {
+          throw new Error(
+            payload && typeof payload === 'object' && 'error' in payload && typeof payload.error === 'string'
+              ? payload.error
+              : 'Nearby place context is unavailable.'
+          )
+        }
+        return payload as SitePlacesContextResponse
+      })
+      .then((payload) => {
+        if (cancelled) return
+        siteContextStore.write(input, payload)
+        setSelectedMarkerSiteContext(payload)
+      })
+      .catch((error) => {
+        if (cancelled) return
+        setSelectedMarkerSiteContextError(
+          error instanceof Error ? error.message : 'Nearby place context is unavailable.'
+        )
+      })
+      .finally(() => {
+        if (cancelled) return
+        setSelectedMarkerSiteContextLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [markerBelongsToSelected, selectedMarker, selectedMarkerSiteContextKey, siteContextStore])
+
+  const selectedMarkerSiteContextState = buildImportedMarkerSiteContextState({
+    marker: markerBelongsToSelected ? selectedMarker : null,
+    context: selectedMarkerSiteContext,
+    loading: selectedMarkerSiteContextLoading,
+    error: selectedMarkerSiteContextError,
+  })
 
   useEffect(() => {
     if (
@@ -310,7 +396,7 @@ export function ImportedDataPanel({
         }
 
         const message =
-          'Full imported rows could not be restored after reload, so Projectr is falling back to preview rows only.'
+          'Full imported rows could not be restored after reload, so Scout is falling back to preview rows only.'
         setWorkingRowsError(message)
         updateSession((currentSession) =>
           updateSessionSourceAtIndex(currentSession, selectedSourceIndex, (source) => ({
@@ -324,7 +410,7 @@ export function ImportedDataPanel({
         if (cancelled) return
 
         const message =
-          'Projectr could not reopen the full imported dataset from browser storage, so preview rows are being used instead.'
+          'Scout could not reopen the full imported dataset from browser storage, so preview rows are being used instead.'
         setWorkingRowsError(message)
         updateSession((currentSession) =>
           updateSessionSourceAtIndex(currentSession, selectedSourceIndex, (source) => ({
@@ -424,10 +510,10 @@ export function ImportedDataPanel({
       }
 
       if (resolved.normalization.status === 'failed') {
-        setResolveError(resolved.normalization.message ?? 'Projectr could not normalize this dataset for the map.')
+        setResolveError(resolved.normalization.message ?? 'Scout could not normalize this dataset for the map.')
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Projectr could not normalize this dataset for the map.'
+      const message = error instanceof Error ? error.message : 'Scout could not normalize this dataset for the map.'
       setResolveError(message)
       updateSession((currentSession) =>
         updateSessionSourceAtIndex(currentSession, selectedSourceIndex, (source) => ({
@@ -544,7 +630,7 @@ export function ImportedDataPanel({
               </p>
               <p className="mt-1 text-[11px] leading-relaxed text-zinc-300">
                 {resolvePreview.candidateRows.toLocaleString()} of {resolvePreview.totalRows.toLocaleString()} row
-                {resolvePreview.totalRows === 1 ? '' : 's'} expose coordinates, ZIPs, or address clues that Projectr can try
+                {resolvePreview.totalRows === 1 ? '' : 's'} expose coordinates, ZIPs, or address clues that Scout can try
                 to normalize for map rendering.
               </p>
               <p className="mt-1 text-[10px] text-zinc-500">
@@ -578,7 +664,7 @@ export function ImportedDataPanel({
                 {selectedSource.normalization?.failedCount?.toLocaleString() ?? 0} unresolved
               </p>
               <p className="mt-1 text-zinc-400">
-                {resolveError ?? selectedSource.normalization?.message ?? 'Projectr has not attempted geography normalization yet.'}
+                {resolveError ?? selectedSource.normalization?.message ?? 'Scout has not attempted geography normalization yet.'}
               </p>
             </div>
           )}
@@ -586,7 +672,45 @@ export function ImportedDataPanel({
       )}
 
       {markerBelongsToSelected && selectedMarker ? (
-        <SelectedMarkerDetail marker={selectedMarker} onClear={onClearSelectedMarker} />
+        <>
+          <SelectedMarkerDetail marker={selectedMarker} onClear={onClearSelectedMarker} />
+          <div className="rounded-lg border border-border/50 bg-muted/10 p-3">
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Around this site</p>
+            {selectedMarkerSiteContextState.status === 'loading' ? (
+              <p className="mt-2 text-[11px] text-zinc-400">Loading nearby place context…</p>
+            ) : null}
+            {selectedMarkerSiteContextState.status === 'unavailable' ? (
+              <p className="mt-2 text-[11px] text-zinc-400">{selectedMarkerSiteContextState.message}</p>
+            ) : null}
+            {selectedMarkerSiteContextState.status === 'empty' ? (
+              <p className="mt-2 text-[11px] text-zinc-400">{selectedMarkerSiteContextState.message}</p>
+            ) : null}
+            {selectedMarkerSiteContextState.status === 'ready' ? (
+              <div className="mt-2 space-y-3">
+                <p className="text-[11px] leading-relaxed text-zinc-300">
+                  {selectedMarkerSiteContextState.context.summary}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {selectedMarkerSiteContextState.context.countsByCategory.map((entry) => (
+                    <span
+                      key={entry.category}
+                      className="rounded-full border border-white/10 px-2 py-1 text-[10px] text-zinc-300"
+                    >
+                      {entry.label}: {entry.count}
+                    </span>
+                  ))}
+                </div>
+                <div className="space-y-1">
+                  {selectedMarkerSiteContextState.context.topPlaces.map((place) => (
+                    <p key={`${place.name}:${place.categoryLabel}`} className="text-[11px] text-zinc-400">
+                      <span className="text-zinc-200">{place.name}</span> · {place.categoryLabel}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </>
       ) : null}
 
       <div className="flex flex-wrap gap-2">

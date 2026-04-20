@@ -1,4 +1,5 @@
 import type { ClientUploadMarker } from '@/lib/client-upload-markers-store'
+import type { SitePlacesContextResponse } from '@/lib/google-places-site-context'
 
 export type ImportedMarkerFocusPlan =
   | { mode: 'clear' }
@@ -19,4 +20,48 @@ export function planImportedMarkerFocus(
     }
   }
   return { mode: 'fit' }
+}
+
+export type ImportedMarkerSiteContextState =
+  | { status: 'idle'; message: null; context: null }
+  | { status: 'loading'; message: null; context: null }
+  | { status: 'unavailable'; message: string; context: null }
+  | { status: 'empty'; message: string; context: SitePlacesContextResponse }
+  | { status: 'ready'; message: null; context: SitePlacesContextResponse }
+
+export function buildImportedMarkerSiteContextState(args: {
+  marker: ClientUploadMarker | null
+  context: SitePlacesContextResponse | null
+  loading: boolean
+  error: string | null
+}): ImportedMarkerSiteContextState {
+  if (!args.marker) {
+    return { status: 'idle', message: null, context: null }
+  }
+
+  if (args.loading) {
+    return { status: 'loading', message: null, context: null }
+  }
+
+  if (args.error) {
+    return { status: 'unavailable', message: args.error, context: null }
+  }
+
+  if (!args.context) {
+    return { status: 'loading', message: null, context: null }
+  }
+
+  if (args.context.countsByCategory.length === 0 && args.context.topPlaces.length === 0) {
+    return {
+      status: 'empty',
+      message: args.context.summary,
+      context: args.context,
+    }
+  }
+
+  return {
+    status: 'ready',
+    message: null,
+    context: args.context,
+  }
 }

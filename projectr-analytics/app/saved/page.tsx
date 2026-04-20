@@ -50,11 +50,7 @@ export default function SavedPage() {
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-l border-border/60">
         <header className="shrink-0 border-b border-border bg-muted/20 px-5 py-3">
-          <p className="text-[10px] font-semibold tracking-widest text-primary uppercase">Workspace</p>
-          <h1 className="text-base font-semibold tracking-tight text-foreground">Saved workspace</h1>
-          <p className="mt-1 max-w-xl text-xs text-muted-foreground">
-            Sites and areas you save from the map, plus terminal charts you save from the assistant, appear here. Use the sidebar search to jump to a ZIP, county, metro, or city on the map.
-          </p>
+          <h1 className="text-base font-semibold tracking-tight text-foreground">Saved Artifacts</h1>
         </header>
 
         <main className="min-h-0 flex-1 overflow-auto px-5 py-4 xl:overflow-hidden">
