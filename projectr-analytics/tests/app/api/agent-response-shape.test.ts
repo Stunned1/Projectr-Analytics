@@ -2042,10 +2042,48 @@ test('returns a grounded Austin vs Houston core retail comparison chart', async 
   assert.match(response.trace?.evidence?.join(' ') ?? '', /current retail-context comparison/i)
 })
 
-test('returns a bounded unsupported-city core retail comparison response for Austin and Dallas', async () => {
+test('returns a grounded Austin vs Dallas core retail comparison chart', async () => {
+  const calls: Array<{ cityA: string; cityB: string }> = []
+  let analyticalCalled = false
+  const response = await buildHistoryChartedResponseForTest(
+    'compare core retail context for Austin and Dallas',
+    null,
+    {
+      getAnalyticalComparison: async () => {
+        analyticalCalled = true
+        throw new Error('history router should not be called for core retail comparison')
+      },
+      getCoreRetailComparison: async (request) => {
+        calls.push(request)
+        return {
+          cityA: { key: 'austin', label: 'Austin', latitude: 30.2672, longitude: -97.7431 },
+          cityB: { key: 'dallas', label: 'Dallas', latitude: 32.7767, longitude: -96.797 },
+          radiusMeters: 1200,
+          buckets: [
+            { key: 'food_bev', label: 'Food & Bev', cityAValue: 8, cityBValue: 6 },
+            { key: 'coffee_cafe', label: 'Coffee & Cafe', cityAValue: 2, cityBValue: 2 },
+            { key: 'essentials', label: 'Essentials', cityAValue: 1, cityBValue: 1 },
+            { key: 'fitness', label: 'Fitness', cityAValue: 2, cityBValue: 1 },
+          ],
+        }
+      },
+    }
+  )
+
+  assert.equal(analyticalCalled, false)
+  assert.deepEqual(calls, [{ cityA: 'Austin', cityB: 'Dallas' }])
+  assert.equal(response.chart?.kind, 'bar')
+  assert.equal(response.chart?.series.length, 2)
+  assert.equal(response.chart?.series[0]?.label, 'Austin')
+  assert.equal(response.chart?.series[1]?.label, 'Dallas')
+  assert.deepEqual(response.chart?.series[1]?.points.map((point) => point.y), [6, 2, 1, 1])
+  assert.match(response.message, /Austin and Dallas/i)
+})
+
+test('returns a bounded unsupported-pair core retail comparison response for Houston and Dallas', async () => {
   let called = false
   const response = await buildHistoryChartedResponseForTest(
-    'compare downtown retail context between Austin and Dallas',
+    'compare downtown retail context between Houston and Dallas',
     null,
     {
       getCoreRetailComparison: async () => {
@@ -2057,9 +2095,9 @@ test('returns a bounded unsupported-city core retail comparison response for Aus
 
   assert.equal(called, false)
   assert.equal(response.chart ?? null, null)
-  assert.match(response.message, /Austin and Houston only/i)
+  assert.match(response.message, /Austin compared with Houston or Dallas only/i)
   assert.match(response.trace?.summary ?? '', /unsupported core retail comparison/i)
-  assert.match(response.trace?.evidence?.join(' ') ?? '', /Austin/i)
+  assert.match(response.trace?.evidence?.join(' ') ?? '', /Houston/i)
   assert.match(response.trace?.evidence?.join(' ') ?? '', /Dallas/i)
 })
 
@@ -2078,7 +2116,7 @@ test('returns a bounded unsupported-city core retail comparison response for Aus
 
   assert.equal(called, false)
   assert.equal(response.chart ?? null, null)
-  assert.match(response.message, /Austin and Houston only/i)
+  assert.match(response.message, /Austin compared with Houston or Dallas only/i)
   assert.match(response.trace?.summary ?? '', /unsupported core retail comparison/i)
   assert.match(response.trace?.evidence?.join(' ') ?? '', /Austin/i)
   assert.match(response.trace?.evidence?.join(' ') ?? '', /El Paso/i)

@@ -20,7 +20,39 @@ test('resolves supported core retail cities', () => {
     latitude: 29.7604,
     longitude: -95.3698,
   })
-  assert.equal(resolveCoreRetailCityForTest('Dallas'), null)
+  assert.deepEqual(resolveCoreRetailCityForTest('Dallas'), {
+    key: 'dallas',
+    label: 'Dallas',
+    latitude: 32.7767,
+    longitude: -96.797,
+  })
+  assert.equal(resolveCoreRetailCityForTest('El Paso'), null)
+})
+
+test('aggregates an Austin vs Dallas core retail comparison', async () => {
+  const result = await buildCoreRetailComparisonForTest(
+    { cityA: 'Austin', cityB: 'Dallas' },
+    async ({ cityKey }) =>
+      cityKey === 'austin'
+        ? [
+            fixturePlace('a1', 'Haraz Coffee House', 'coffee_shop'),
+            fixturePlace('a2', 'Thundercloud Subs', 'restaurant'),
+          ]
+        : [
+            fixturePlace('d1', 'K-Sha Coffee', 'coffee_shop'),
+            fixturePlace('d2', 'Big Deal Burger', 'burger_restaurant'),
+            fixturePlace('d3', 'CVS Pharmacy', 'pharmacy'),
+          ]
+  )
+
+  assert.equal(result.cityA.label, 'Austin')
+  assert.equal(result.cityB.label, 'Dallas')
+  assert.deepEqual(result.buckets, [
+    { key: 'food_bev', label: 'Food & Bev', cityAValue: 1, cityBValue: 1 },
+    { key: 'coffee_cafe', label: 'Coffee & Cafe', cityAValue: 1, cityBValue: 1 },
+    { key: 'essentials', label: 'Essentials', cityAValue: 0, cityBValue: 1 },
+    { key: 'fitness', label: 'Fitness', cityAValue: 0, cityBValue: 0 },
+  ])
 })
 
 test('maps Overture categories into bounded retail buckets', () => {
@@ -75,8 +107,8 @@ test('aggregates two city cores into grouped comparison buckets', async () => {
 
 test('rejects unsupported public helper inputs explicitly', async () => {
   await assert.rejects(
-    buildCoreRetailComparisonForTest({ cityA: '  Austin  ', cityB: ' Dallas ' }),
-    /supports Austin and Houston only/i
+    buildCoreRetailComparisonForTest({ cityA: '  Austin  ', cityB: ' El Paso ' }),
+    /supports Austin compared with Houston or Dallas only/i
   )
 })
 

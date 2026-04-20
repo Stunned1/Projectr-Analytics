@@ -15,6 +15,12 @@ const CORE_RETAIL_CITIES = {
     latitude: 30.2672,
     longitude: -97.7431,
   },
+  dallas: {
+    key: 'dallas',
+    label: 'Dallas',
+    latitude: 32.7767,
+    longitude: -96.797,
+  },
   houston: {
     key: 'houston',
     label: 'Houston',
@@ -59,6 +65,7 @@ type CoreRetailFetcher = (context: CoreRetailFetchContext) => Promise<OverturePl
 function resolveCoreRetailCity(name: string): CoreRetailCity | null {
   const normalized = name.trim().toLowerCase()
   if (normalized === 'austin') return CORE_RETAIL_CITIES.austin
+  if (normalized === 'dallas') return CORE_RETAIL_CITIES.dallas
   if (normalized === 'houston') return CORE_RETAIL_CITIES.houston
   return null
 }
@@ -105,7 +112,7 @@ export async function buildCoreRetailComparison(
   const cityB = resolveCoreRetailCity(input.cityB)
 
   if (!cityA || !cityB) {
-    throw new Error('Core retail comparison currently supports Austin and Houston only.')
+    throw new Error('Core retail comparison currently supports Austin compared with Houston or Dallas only.')
   }
 
   const [placesA, placesB] = await Promise.all([

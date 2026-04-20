@@ -1082,7 +1082,7 @@ function buildUnsupportedCoreRetailComparisonPayload(cities: string[]): AgentPip
   const cityList = renderedCities.length >= 2 ? `${renderedCities[0]} and ${renderedCities[1]}` : renderedCities.join(', ')
 
   return {
-    message: `Core retail comparison currently supports Austin and Houston only. I could not use ${cityList || 'that pair'} for this bounded path.`,
+    message: `Core retail comparison currently supports Austin compared with Houston or Dallas only. I could not use ${cityList || 'that pair'} for this bounded path.`,
     action: { type: 'none' as const },
     trace: {
       summary: 'Unsupported core retail comparison pair',
@@ -1092,10 +1092,13 @@ function buildUnsupportedCoreRetailComparisonPayload(cities: string[]): AgentPip
       keyFindings: ['No comparison chart was generated.'],
       evidence: [
         renderedCities.length > 0 ? `Resolved cities: ${renderedCities.join(', ')}.` : 'No explicit cities were resolved.',
-        'Supported core retail cities currently include Austin and Houston only.',
+        'Supported core retail pairs currently include Austin with Houston or Dallas only.',
       ],
-      caveats: ['Use Austin and Houston together for the bounded current retail comparison path.'],
-      nextQuestions: ['Ask to compare core retail context for Austin and Houston.'],
+      caveats: ['Use Austin with Houston or Dallas for the bounded current retail comparison path.'],
+      nextQuestions: [
+        'Ask to compare core retail context for Austin and Houston.',
+        'Ask to compare core retail context for Austin and Dallas.',
+      ],
     },
     chart: null,
   }
@@ -1112,8 +1115,11 @@ function buildUnresolvedCoreRetailComparisonPayload(): AgentPipelineResult {
         'Scout recognized a bounded core retail comparison prompt, but the prompt did not resolve to two explicit cities.',
       keyFindings: ['No comparison chart was generated.'],
       evidence: ['The bounded core retail path currently needs two explicit cities.'],
-      caveats: ['Ask for Austin and Houston together to use this path.'],
-      nextQuestions: ['Ask to compare core retail context for Austin and Houston.'],
+      caveats: ['Ask for Austin with Houston or Dallas to use this path.'],
+      nextQuestions: [
+        'Ask to compare core retail context for Austin and Houston.',
+        'Ask to compare core retail context for Austin and Dallas.',
+      ],
     },
     chart: null,
   }
@@ -1145,6 +1151,9 @@ function pickCoreRetailComparisonCities(cities: string[]): { cityA: string; city
   const citySet = new Set(cities)
   if (citySet.has('austin') && citySet.has('houston')) {
     return { cityA: 'Austin', cityB: 'Houston' }
+  }
+  if (citySet.has('austin') && citySet.has('dallas')) {
+    return { cityA: 'Austin', cityB: 'Dallas' }
   }
 
   return null
@@ -1201,7 +1210,7 @@ function buildCoreRetailComparisonTrace(comparison: CoreRetailComparisonResult):
       `Buckets: ${comparison.buckets.map((bucket) => bucket.label).join(', ')}.`,
       'This is a current retail-context comparison, not a historical trend.',
     ],
-    caveats: ['This bounded path supports Austin and Houston core comparisons only in v1.'],
+    caveats: ['This bounded path supports Austin core comparisons against Houston or Dallas only in v1.'],
     nextQuestions: ['Ask which Austin neighborhoods look early but have development demand forming nearby.'],
     citations: [
       {
