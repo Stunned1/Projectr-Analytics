@@ -3,14 +3,11 @@
 import { useState, useCallback, useMemo, useEffect, useRef, type CSSProperties } from 'react'
 import dynamic from 'next/dynamic'
 import AgenticNormalizer from '@/components/AgenticNormalizer'
-import MarketReportExport from '@/components/MarketReportExport'
 import { AgentThinkingPanel } from '@/components/AgentThinkingPanel'
 import AgentTerminal, { type AgentTerminalSize } from '@/components/AgentTerminal'
 import { ImportedDataPanel } from '@/components/ImportedDataPanel'
 import type { AgentAction, AgentTrace, AnalysisSite } from '@/lib/agent-types'
-import type { CycleAnalysis } from '@/lib/cycle/types'
 import type { MapLayersSnapshot } from '@/lib/report/types'
-import { parseCycleAnalysisField } from '@/lib/report/validate-cycle'
 import { useSitesStore } from '@/lib/sites-store'
 import { useClientUploadMarkersStore, type ClientUploadMarker } from '@/lib/client-upload-markers-store'
 import { useClientUploadSessionStore } from '@/lib/client-upload-session-store'
@@ -27,8 +24,6 @@ import CommandCenterSidebar from '@/components/CommandCenterSidebar'
 import { takePendingNav } from '@/lib/pending-navigation'
 import { RIGHT_PANEL_WIDTH_PX } from '@/lib/analyst-guide'
 import { MetricTooltip } from '@/components/MetricTooltip'
-import { MomentumExplainBlock } from '@/components/MomentumExplainBlock'
-import { CycleExplainCard } from '@/components/CycleExplainCard'
 import type { MetricKey } from '@/lib/metric-definitions'
 import { metricKeyFromDataRow, sparklineMetricKey } from '@/lib/metric-definitions'
 import { cn } from '@/lib/utils'
@@ -293,12 +288,6 @@ async function loadTransitData(zip: string): Promise<TransitData> {
   return dedupedFetchJson<TransitData>(`/api/transit?zip=${encodeURIComponent(zip)}`)
 }
 
-async function loadCycleData(zip: string, label?: string): Promise<unknown> {
-  const params = new URLSearchParams({ zip })
-  if (label) params.set('label', label)
-  return dedupedFetchJson(`/api/cycle?${params.toString()}`)
-}
-
 async function loadTrendsData(url: string): Promise<Record<string, unknown>> {
   return dedupedFetchJson<Record<string, unknown>>(url, {
     allowErrorBody: true,
@@ -458,10 +447,8 @@ function PanelSection({ title, children }: { title: string; children: React.Reac
 
 function ShortlistToggleButton({
   market,
-  cycle,
 }: {
   market: MarketData
-  cycle: CycleAnalysis | null
 }) {
   const zipCode = market.zip
   const geo = market.geo!
@@ -486,8 +473,6 @@ function ShortlistToggleButton({
       lat: geo.lat,
       lng: geo.lng,
       marketLabel: human,
-      cyclePosition: cycle?.cyclePosition,
-      cycleStage: cycle?.cycleStage,
       momentumScore: momentum,
     })
     setPending(false)
@@ -508,12 +493,10 @@ function ShortlistToggleButton({
 function AggregateShortlistToggle({
   aggregateData,
   cityZips,
-  cycle,
   savedSearch,
 }: {
   aggregateData: AggregateData
   cityZips: CityZip[]
-  cycle: CycleAnalysis | null
   savedSearch: string
 }) {
   const q = savedSearch.trim()
@@ -549,8 +532,6 @@ function AggregateShortlistToggle({
       marketLabel: human,
       isAggregate: true,
       savedSearch: q,
-      cyclePosition: cycle?.cyclePosition,
-      cycleStage: cycle?.cycleStage,
       momentumScore: momentum,
     })
     setPending(false)
@@ -716,7 +697,6 @@ export default function Home() {
   const [uploadedMarkersFitNonce, setUploadedMarkersFitNonce] = useState(0)
   const [transit, setTransit] = useState<TransitData | null>(null)
   const [trends, setTrends] = useState<TrendsData | null>(null)
-  const [cycleData, setCycleData] = useState<CycleAnalysis | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [panelOpen, setPanelOpen] = useState(false)
   const [mapLayersSnapshot, setMapLayersSnapshot] = useState<MapLayersSnapshot>(DEFAULT_MAP_LAYERS)
@@ -896,8 +876,6 @@ export default function Home() {
           lat: geo.lat,
           lng: geo.lng,
           marketLabel: human,
-          cyclePosition: cycleData?.cyclePosition,
-          cycleStage: cycleData?.cycleStage,
           momentumScore: momentum,
         })
         return ok
@@ -930,8 +908,6 @@ export default function Home() {
           marketLabel: human,
           isAggregate: true,
           savedSearch: q,
-          cyclePosition: cycleData?.cyclePosition,
-          cycleStage: cycleData?.cycleStage,
           momentumScore: momentum,
         })
         return ok
@@ -960,7 +936,7 @@ export default function Home() {
         message: 'Nothing to save — load a ZIP, county, metro, or city search, or wait for the map to finish loading.',
       }
     },
-    [result, aggregateData, cityZips, searchInput, cycleData]
+    [result, aggregateData, cityZips, searchInput]
   )
 
   const mapContext = useMemo(
@@ -1119,12 +1095,9 @@ export default function Home() {
       transitZip?: string | null
     }) => {
       const zipList = zips.map((z) => z.zip)
-      const anchorZip = zipList.find((candidate) => /^\d{5}$/.test(candidate)) ?? null
-
       try {
-        const [aggregate, cycleJson, transitData, trendsData] = await Promise.all([
+        const [aggregate, transitData, trendsData] = await Promise.all([
           loadAggregateData(zipList, label, areaKey ?? null).catch(() => null),
-          anchorZip ? loadCycleData(anchorZip, label).catch(() => null) : Promise.resolve(null),
           transitZip ? loadTransitData(transitZip).catch(() => null) : Promise.resolve(null),
           loadAreaTrendsData(zips, trendsArgs).catch(() => null),
         ])
@@ -1132,12 +1105,6 @@ export default function Home() {
         if (aggregate && !aggregate.error) {
           setAggregateData(aggregate)
         }
-
-        const parsedCycle =
-          cycleJson && !(hasErrorField(cycleJson) && cycleJson.error)
-            ? parseCycleAnalysisField(cycleJson)
-            : null
-        setCycleData(parsedCycle)
 
         if (transitZip) {
           if (transitData && !(hasErrorField(transitData) && transitData.error)) {
@@ -1151,7 +1118,6 @@ export default function Home() {
 
         applyTrendsApiBody(trendsData, Boolean(trendsData))
       } catch {
-        setCycleData(null)
         setTransit(null)
         applyTrendsApiBody(null, false)
       }
@@ -1169,13 +1135,11 @@ export default function Home() {
       setBoroughBoundary(null)
       setAggregateData(null)
       setTrends(null)
-      setCycleData(null)
       try {
-        const [data, transitData, trendsData, cycleJson] = await Promise.all([
+        const [data, transitData, trendsData] = await Promise.all([
           loadMarketData(zipInput),
           loadTransitData(zipInput).catch(() => null),
           loadTrendsData(`/api/trends?zip=${encodeURIComponent(zipInput)}`).catch(() => null),
-          loadCycleData(zipInput).catch(() => null),
         ])
         if (data.error) {
           setError(data.error)
@@ -1184,9 +1148,6 @@ export default function Home() {
         setResult(data)
         if (transitData && !(hasErrorField(transitData) && transitData.error)) setTransit(transitData)
         applyTrendsApiBody(trendsData, Boolean(trendsData))
-        const parsedCycle =
-          cycleJson && !(hasErrorField(cycleJson) && cycleJson.error) ? parseCycleAnalysisField(cycleJson) : null
-        setCycleData(parsedCycle)
         setPanelOpen(true)
       } catch {
         setError('Failed to fetch data')
@@ -1208,7 +1169,6 @@ export default function Home() {
     setBoroughBoundary(null)
     setAggregateData(null)
     setTrends(null)
-    setCycleData(null)
     setResult(null)
     setTransit(null)
     try {
@@ -1503,13 +1463,7 @@ export default function Home() {
         loading={loading}
         onAnalyzeSubmit={fetchMarket}
         activeMarket={sidebarActiveMarket}
-        activeMarketExtra={
-          cycleData ? (
-            <p className="mt-1 text-[9px] font-medium text-primary">
-              {cycleData.cycleStage} · {cycleData.cyclePosition}
-            </p>
-          ) : null
-        }
+        activeMarketExtra={null}
         panelOpen={panelOpen}
         onTogglePanel={() => setPanelOpen(!panelOpen)}
       />
@@ -1772,32 +1726,7 @@ export default function Home() {
               />
             )}
             {marketPanelTab === 'analysis' && (
-              <>
-            <MomentumExplainBlock
-              anchorZip={cityZips?.find((z) => /^\d{5}$/.test(z.zip))?.zip ?? null}
-              aggregateZips={cityZips?.map((z) => z.zip).filter((z) => /^\d{5}$/.test(z)) ?? null}
-            />
-            {cycleData && (
-              <CycleExplainCard
-                marketLabel={aggregateData.label}
-                cycle={cycleData}
-                subtitle="Cycle geography uses the first ZIP in this area; county-level signals (BPS, FRED) follow that anchor."
-              />
-            )}
-
-            <PanelSection title="Market Report (PDF)">
-              <MarketReportExport
-                mapLayersSnapshot={mapLayersSnapshot}
-                uploadedMarkers={uploadedMarkers}
-                comparisonPins={pdfComparisonPins}
-                result={null}
-                aggregateData={aggregateData}
-                cityZips={cityZips}
-                trends={trendsShapeForReport(trends)}
-                cycleAnalysis={cycleData}
-              />
-            </PanelSection>
-              </>
+              <></>
             )}
 
             {marketPanelTab === 'data' && (
@@ -1914,7 +1843,6 @@ export default function Home() {
               <AggregateShortlistToggle
                 aggregateData={aggregateData}
                 cityZips={cityZips}
-                cycle={cycleData}
                 savedSearch={searchInput}
               />
             )}
@@ -1963,25 +1891,7 @@ export default function Home() {
               />
             )}
             {marketPanelTab === 'analysis' && (
-              <>
-            <MomentumExplainBlock anchorZip={/^\d{5}$/.test(result.zip) ? result.zip : null} aggregateZips={null} />
-            {cycleData && (
-              <CycleExplainCard marketLabel={result.zillow?.city ?? result.zip} cycle={cycleData} />
-            )}
-
-            <PanelSection title="Market Report (PDF)">
-              <MarketReportExport
-                mapLayersSnapshot={mapLayersSnapshot}
-                uploadedMarkers={uploadedMarkers}
-                comparisonPins={pdfComparisonPins}
-                result={result}
-                aggregateData={null}
-                cityZips={null}
-                trends={trendsShapeForReport(trends)}
-                cycleAnalysis={cycleData}
-              />
-            </PanelSection>
-              </>
+              <></>
             )}
 
             {marketPanelTab === 'data' && (
@@ -2091,7 +2001,7 @@ export default function Home() {
             )}
 
             {result?.geo && /^\d{5}$/.test(result.zip) && (
-              <ShortlistToggleButton market={result} cycle={cycleData} />
+              <ShortlistToggleButton market={result} />
             )}
 
             <details className="mb-4 rounded-lg border border-border/60 bg-muted/10 px-3 py-2">

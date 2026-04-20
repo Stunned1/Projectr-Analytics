@@ -6,7 +6,6 @@ import { GoogleGenerativeAI } from '@google/generative-ai'
 import { GEMINI_NO_EM_DASH_RULE } from '@/lib/gemini-text-rules'
 import { stripGeminiStringWrappers } from '@/lib/sanitize-gemini-string'
 import type { ClientReportPayload, GeminiBriefResult, MetroBenchmark, SignalIndicator } from './types'
-import type { CycleAnalysis } from '@/lib/cycle/types'
 
 export interface MarketDossierThematicBlock {
   title: string
@@ -56,14 +55,13 @@ function buildDossierContext(input: {
   payload: ClientReportPayload
   brief: GeminiBriefResult
   signals: SignalIndicator[]
-  cycleAnalysis: CycleAnalysis | null
   metro: MetroBenchmark | null
   zoriSeriesPointCount: number
   zoriLatest: number | null
   trendsPointCount: number
   trendsLatest: number | null
 }): string {
-  const { payload, brief, signals, cycleAnalysis, metro } = input
+  const { payload, brief, signals, metro } = input
   const fredTail = [...(payload.fred.unemployment_monthly ?? [])].slice(-8)
   const signalLines = signals.map((s) => `${s.label} (${s.arrow}): ${s.line}`).join('\n')
 
@@ -88,21 +86,6 @@ function buildDossierContext(input: {
       zori_chart_points: input.zoriSeriesPointCount,
       zori_level_latest: input.zoriLatest,
       computed_signals: signalLines,
-      cycle_classifier: cycleAnalysis
-        ? {
-            stage: cycleAnalysis.cycleStage,
-            position: cycleAnalysis.cyclePosition,
-            confidence: cycleAnalysis.confidence,
-            dataQuality: cycleAnalysis.dataQuality,
-            agreement: cycleAnalysis.signalsAgreement,
-            signal_sources: Object.fromEntries(
-              (['rent', 'vacancy', 'permits', 'employment'] as const).map((k) => [
-                k,
-                cycleAnalysis.signals[k].source,
-              ])
-            ),
-          }
-        : null,
       metro_peer_benchmark: metro
         ? {
             zip_count: metro.zip_count,
@@ -147,7 +130,6 @@ export async function generateMarketDossierWithGemini(input: {
   payload: ClientReportPayload
   brief: GeminiBriefResult
   signals: SignalIndicator[]
-  cycleAnalysis: CycleAnalysis | null
   metro: MetroBenchmark | null
   zoriSeries: { date: string; value: number }[]
   trendsSeries: { date: string; value: number }[]
@@ -161,7 +143,6 @@ export async function generateMarketDossierWithGemini(input: {
     payload: input.payload,
     brief: input.brief,
     signals: input.signals,
-    cycleAnalysis: input.cycleAnalysis,
     metro: input.metro,
     zoriSeriesPointCount: input.zoriSeries.length,
     zoriLatest,

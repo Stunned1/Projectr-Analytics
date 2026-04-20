@@ -4,7 +4,7 @@ import { stripGeminiStringWrappers } from '@/lib/sanitize-gemini-string'
 import type { ClientReportPayload, GeminiBriefResult, SignalIndicator } from './types'
 
 const FALLBACK: GeminiBriefResult = {
-  cycleHeadline: 'Submarket under mixed signals - review data pack',
+  cycleHeadline: 'Submarket snapshot - review data pack',
   narrative:
     'Current indicators point to a balanced market without a single dominant driver. Rent, occupancy, permits, and labor are sending overlapping signals, so underwriting should stress-test both upside lease scenarios and downside absorption.',
   confidenceLine: 'Signal mix - proceed with scenario-based planning.',
@@ -40,20 +40,15 @@ Confidence (deterministic): ${confidenceLine}
 
   const prompt = `You are a senior real estate analyst at Scout. Output ONLY valid JSON (no markdown).
 
-Choose ONE cycle phase for the headline sentence fragment (after the submarket name):
-- Early Recovery
-- Mid Expansion
-- Late Expansion
-- Early Contraction
-- Deep Contraction
+Choose ONE concise market headline fragment that fits the data.
 
-The client-facing headline format must be: "{Submarket} is in {Phase}" - use the exact submarket name from context.
+The client-facing headline format must be: "{Submarket}: {Headline fragment}" - use the exact submarket name from context.
 
 Also write narrative: exactly 2 or 3 sentences, professional, as if a human analyst wrote it. No bullet points. Reference at most two specific numbers from the data.
 
 Return JSON shape:
 {
-  "cyclePhase": "Late Expansion",
+  "headlineFragment": "Balanced demand with stable supply signals",
   "narrative": "two or three sentences here",
   "confidenceEcho": "short optional echo of agreement line"
 }
@@ -74,20 +69,20 @@ ${ctx}`
     const result = await model.generateContent(prompt)
     const raw = result.response.text().trim().replace(/^```json\n?/, '').replace(/\n?```$/, '')
     const parsed = JSON.parse(raw) as {
-      cyclePhase?: string
+      headlineFragment?: string
       narrative?: string
       confidenceEcho?: string | null
     }
 
-    const phase = stripGeminiStringWrappers(
-      typeof parsed.cyclePhase === 'string' ? parsed.cyclePhase.trim() : 'Market Assessment'
+    const fragment = stripGeminiStringWrappers(
+      typeof parsed.headlineFragment === 'string' ? parsed.headlineFragment.trim() : 'Market Assessment'
     )
     const narrative =
       typeof parsed.narrative === 'string' && parsed.narrative.length > 20
         ? stripGeminiStringWrappers(parsed.narrative.trim())
         : FALLBACK.narrative
 
-    const headline = `${payload.marketLabel} is in ${phase}`
+    const headline = `${payload.marketLabel}: ${fragment}`
 
     const conf =
       typeof parsed.confidenceEcho === 'string' && parsed.confidenceEcho.length > 5

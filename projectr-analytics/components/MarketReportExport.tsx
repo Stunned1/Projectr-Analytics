@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import type { CycleAnalysis } from '@/lib/cycle/types'
 import type { ClientReportPayload, ClientReportPin, MapLayersSnapshot } from '@/lib/report/types'
 import {
   buildClientReportPayloadFromAggregate,
@@ -23,7 +22,6 @@ interface MarketReportExportProps {
   aggregateData: AggregateShape | null
   cityZips: CityZipShape[] | null
   trends: TrendsShape | null
-  cycleAnalysis?: CycleAnalysis | null
 }
 
 export default function MarketReportExport({
@@ -34,7 +32,6 @@ export default function MarketReportExport({
   aggregateData,
   cityZips,
   trends,
-  cycleAnalysis = null,
 }: MarketReportExportProps) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -56,7 +53,6 @@ export default function MarketReportExport({
           trends,
           layers: mapLayersSnapshot,
           pins,
-          cycleAnalysis,
         }),
       }
     }
@@ -69,7 +65,6 @@ export default function MarketReportExport({
           layers: mapLayersSnapshot,
           pins,
           trends,
-          cycleAnalysis,
         }),
       }
     }
@@ -77,7 +72,7 @@ export default function MarketReportExport({
       ok: false,
       reason: 'Run a ZIP, county, metro, or city search first. NYC boroughs also work when you need borough-specific analysis.',
     }
-  }, [aggregateData, cityZips, comparisonPins, cycleAnalysis, mapLayersSnapshot, result, trends, uploadedMarkers])
+  }, [aggregateData, cityZips, comparisonPins, mapLayersSnapshot, result, trends, uploadedMarkers])
 
   const downloadPdf = useCallback(async () => {
     setError(null)
@@ -132,7 +127,7 @@ export default function MarketReportExport({
       </button>
       {error && <p className="text-red-400 text-[10px]">{error}</p>}
       <p className="text-zinc-600 text-[9px] leading-relaxed">
-        Multi-page market brief: cycle headline, signals, metrics vs metro, charts, and site comparison
+        Multi-page market brief: market headline, signals, metrics vs metro, charts, and site comparison
         when 2+ saved sites are checked for compare or 2+ uploaded CSV pins are on the map.
       </p>
     </div>

@@ -1,5 +1,5 @@
 /**
- * Pre-warm Next.js API + Supabase cache for demo ZIPs (market, transit, trends, cycle).
+ * Pre-warm Next.js API + Supabase cache for demo ZIPs (market, transit, trends).
  * Requires a running dev server and valid .env.local (same as the app).
  *
  *   cd projectr-analytics && npm run dev
@@ -15,12 +15,10 @@ const BASE = process.env.WARM_BASE_URL ?? 'http://127.0.0.1:3000'
 const DEMO_ZIPS = ['77002', '75201', '78701']
 
 async function warmZip(zip: string): Promise<void> {
-  const label = `Demo ${zip}`
   const steps: { path: string; method?: string }[] = [
     { path: `/api/market?zip=${encodeURIComponent(zip)}` },
     { path: `/api/transit?zip=${encodeURIComponent(zip)}` },
     { path: `/api/trends?zip=${encodeURIComponent(zip)}` },
-    { path: `/api/cycle?zip=${encodeURIComponent(zip)}&label=${encodeURIComponent(label)}` },
   ]
 
   for (const { path } of steps) {

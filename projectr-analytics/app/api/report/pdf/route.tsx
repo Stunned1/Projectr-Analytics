@@ -3,16 +3,12 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { renderToBuffer } from '@react-pdf/renderer'
 import { supabase } from '@/lib/supabase'
 import type { ClientReportPayload, MetroBenchmark, SignalIndicator } from '@/lib/report/types'
-import { analyzeCycleForZip, cycleHeadline } from '@/lib/cycle/run-analysis'
-import { cycleAnalysisToSignalIndicators } from '@/lib/report/cycle-signals'
 import { buildSignalIndicators, confidenceFromSignals } from '@/lib/report/signals'
 import { resolveZoriSeriesForReport } from '@/lib/report/fetch-zori-series'
 import { generateBriefWithGemini } from '@/lib/report/gemini-brief'
 import { generateMarketDossierWithGemini, type MarketDossierGemini } from '@/lib/report/gemini-market-dossier'
-import { parseCycleAnalysisField } from '@/lib/report/validate-cycle'
 import { MarketReportDocument, type SiteCompareRow } from '@/lib/report/pdf-document'
 import { loadScoutLogoDataUri } from '@/lib/report/load-scout-logo'
-import type { CycleAnalysis } from '@/lib/cycle/types'
 import { resolveZctaFromCoordinates } from '@/lib/upload/resolve-zcta'
 
 export const dynamic = 'force-dynamic'
@@ -103,29 +99,14 @@ async function buildSiteRows(
 
   const zoriByZip = new Map((snaps ?? []).map((s) => [s.zip, s.zori_latest]))
 
-  const cycleByZip = new Map<string, CycleAnalysis>()
-  await Promise.all(
-    zips.map(async (z) => {
-      try {
-        const row = resolved.find((r) => r.zip === z)
-        const a = await analyzeCycleForZip(z, row?.label ?? z, { skipGemini: true })
-        cycleByZip.set(z, a)
-      } catch {
-        /* skip */
-      }
-    })
-  )
-
   const rows: SiteCompareRow[] = resolved.map((r) => {
     const z = /^\d{5}$/.test(r.zip) ? r.zip : null
-    const cycle = z ? cycleByZip.get(z) ?? null : null
     return {
       label: r.label,
       zip: r.zip,
       zori: z ? zoriByZip.get(z) ?? null : null,
       momentum: z ? momentumMap.get(z) ?? null : null,
       signalLine: signalLineForScore(z ? momentumMap.get(z) ?? null : null),
-      cyclePhase: cycle ? `${cycle.cycleStage} ${cycle.cyclePosition}` : null,
     }
   })
 
@@ -139,9 +120,7 @@ function validatePayload(body: unknown): ClientReportPayload | null {
   if (!b.layers || typeof b.layers !== 'object') return null
   if (!b.zillow || !b.census || !b.permits || !b.employment || !b.fred || !b.trends) return null
   if (!Array.isArray(b.pins)) return null
-  const cycle = parseCycleAnalysisField(b.cycleAnalysis)
-  const payload = { ...b, cycleAnalysis: cycle } as unknown as ClientReportPayload
-  return payload
+  return b as unknown as ClientReportPayload
 }
 
 async function renderMarketReportPdf(args: {
@@ -149,7 +128,6 @@ async function renderMarketReportPdf(args: {
   brief: { cycleHeadline: string; narrative: string; confidenceLine: string }
   dossier: MarketDossierGemini
   signals: SignalIndicator[]
-  cycleAnalysis: CycleAnalysis | null
   zoriSeries: Awaited<ReturnType<typeof resolveZoriSeriesForReport>>['series']
   zoriSeriesSource: Awaited<ReturnType<typeof resolveZoriSeriesForReport>>['source']
   trendsSeries: ClientReportPayload['trends']['series']
@@ -163,7 +141,6 @@ async function renderMarketReportPdf(args: {
       brief={args.brief}
       dossier={args.dossier}
       signals={args.signals}
-      cycleAnalysis={args.cycleAnalysis}
       zoriSeries={args.zoriSeries}
       zoriSeriesSource={args.zoriSeriesSource}
       trendsSeries={args.trendsSeries}
@@ -183,31 +160,9 @@ export async function POST(request: NextRequest) {
     }
 
     const origin = appOrigin(request)
-
-    let cycle = payload.cycleAnalysis ?? null
-    if (!cycle && payload.primaryZip && /^\d{5}$/.test(payload.primaryZip)) {
-      try {
-        cycle = await analyzeCycleForZip(payload.primaryZip, payload.marketLabel)
-      } catch {
-        cycle = null
-      }
-    }
-
-    let brief: { cycleHeadline: string; narrative: string; confidenceLine: string }
-    let signals: SignalIndicator[]
-
-    if (cycle) {
-      brief = {
-        cycleHeadline: cycleHeadline(payload.marketLabel, cycle),
-        narrative: cycle.narrative,
-        confidenceLine: `${cycle.confidenceLine} Data quality: ${cycle.dataQuality}.`,
-      }
-      signals = cycleAnalysisToSignalIndicators(cycle)
-    } else {
-      signals = buildSignalIndicators(payload)
-      const confidenceLine = confidenceFromSignals(signals)
-      brief = await generateBriefWithGemini(payload, signals, confidenceLine)
-    }
+    const signals = buildSignalIndicators(payload)
+    const confidenceLine = confidenceFromSignals(signals)
+    const brief = await generateBriefWithGemini(payload, signals, confidenceLine)
 
     const { series: zoriSeries, source: zoriSeriesSource } = await resolveZoriSeriesForReport(payload)
     const trendsSeries = payload.trends.series ?? []
@@ -221,7 +176,6 @@ export async function POST(request: NextRequest) {
       payload,
       brief,
       signals,
-      cycleAnalysis: cycle,
       metro,
       zoriSeries,
       trendsSeries,
@@ -233,7 +187,6 @@ export async function POST(request: NextRequest) {
       brief,
       dossier,
       signals,
-      cycleAnalysis: cycle,
       zoriSeries,
       zoriSeriesSource,
       trendsSeries,

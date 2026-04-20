@@ -181,6 +181,9 @@ _04.19.2026_
 - `/api/agent` with `stream: true` returns **`application/x-ndjson`**: `thinking_delta` lines (Gemini stream) then `status` + final `done` JSON; client `lib/consume-agent-ndjson-stream.ts`.
 - Agent NDJSON stream sends **`ping` keepalives** during the silent JSON map-action call so idle proxies less often drop the connection; route `maxDuration` 120s for long runs.
 
+_04.20.2026_
+- Removed cycle-derived payload fields and classifier fallbacks from the market report pipeline, so PDF headlines, dossier context, methodology rows, site comparison, and demo warmups now use the generic report signal set instead.
+
 _04.16.2026_
 - Added shared geography gating and Texas MVP source / architecture / performance notes so Texas becomes the default product framing without deleting NYC-specific workflows.
 
@@ -316,6 +319,9 @@ _4.12.2026_
 
 _4.15.2026_
 - Browser tab icon now uses the Scout logo asset.
+
+_04.20.2026_
+- Cleared the right-panel Analysis tab for ZIP and aggregate views and stopped loading cycle state into the map page so the tab stays intentionally blank for future work.
 - Intelligence terminal and `/api/agent` now block off-topic prompts before Gemini runs, while every leading `/` input stays on the local slash-command path.
 
 _04.16.2026_

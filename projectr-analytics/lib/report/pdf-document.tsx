@@ -1,6 +1,5 @@
 import React from 'react'
 import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/renderer'
-import type { CycleAnalysis } from '@/lib/cycle/types'
 import type {
   ClientReportPayload,
   GeminiBriefResult,
@@ -9,8 +8,7 @@ import type {
 } from './types'
 import type { MarketDossierGemini } from './gemini-market-dossier'
 import { BarChartPdf, SparklinePdf } from './pdf-charts'
-import { CycleSignalTilesPdf, CycleWheelPdf } from './pdf-cycle-visual'
-import { PdfTrendArrow, trendKindToVariant, signalIndicatorToVariant } from './pdf-trend-arrow'
+import { PdfTrendArrow, signalIndicatorToVariant } from './pdf-trend-arrow'
 import type { ZoriSeriesSource } from './fetch-zori-series'
 import { METHODOLOGY_PDF_ROWS } from '@/lib/metric-definitions'
 import {
@@ -23,6 +21,7 @@ import {
 
 /** A4 content width (595.28pt − 40pt padding × 2). Fixed pt width fixes @react-pdf Text wrap. */
 const PDF_CONTENT_WIDTH_PT = 515
+const PDF_METHOD_ROWS = METHODOLOGY_PDF_ROWS.filter((row) => !/^Cycle /i.test(row.metric))
 
 const accent = '#D76B3D'
 const ink = '#1a1a1a'
@@ -230,7 +229,6 @@ export interface SiteCompareRow {
   zori: number | null
   momentum: number | null
   signalLine: string
-  cyclePhase: string | null
 }
 
 export interface MarketReportPdfInput {
@@ -238,7 +236,6 @@ export interface MarketReportPdfInput {
   brief: GeminiBriefResult
   dossier: MarketDossierGemini
   signals: SignalIndicator[]
-  cycleAnalysis: CycleAnalysis | null
   zoriSeries: { date: string; value: number }[]
   zoriSeriesSource: ZoriSeriesSource
   trendsSeries: { date: string; value: number }[]
@@ -253,7 +250,6 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
     brief,
     dossier,
     signals,
-    cycleAnalysis,
     zoriSeries,
     zoriSeriesSource,
     trendsSeries,
@@ -338,6 +334,7 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
   const pdfZoriSeries = buildPdfSeriesFromScoutChart(zoriChart)
   const pdfPermitBars = buildPdfBarRowsFromScoutChart(permitChart)
   const pdfTrendsSeries = buildPdfSeriesFromScoutChart(trendsChart)
+  const signalsById = new Map(signals.map((signal) => [signal.id, signal]))
 
   return (
     <Document title={`Scout Brief - ${payload.marketLabel}`} author="Scout">
@@ -371,62 +368,34 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
             </Text>
           ))}
 
-          {cycleAnalysis ? (
-            <>
-              <Text style={[styles.sectionTitle, { marginTop: 8 }]}>Cycle map</Text>
-              <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 8, width: '100%' }}>
-                <CycleWheelPdf cycle={cycleAnalysis} />
-                <View style={{ flex: 1, minWidth: 120, paddingTop: 4, marginLeft: 14 }}>
-                  <Text
-                    style={{ fontSize: 8, color: ink, fontFamily: 'Helvetica', fontWeight: 'bold', width: '100%' }}
-                    wrap
-                    hyphenationCallback={(word) => [word]}
-                  >
-                    {cycleAnalysis.cycleStage} {cycleAnalysis.cyclePosition}
-                  </Text>
-                  <Text
-                    style={{ fontSize: 7, color: muted, marginTop: 4, lineHeight: 1.35, width: '100%' }}
-                    wrap
-                    hyphenationCallback={(word) => [word]}
-                  >
-                    Dot color reflects confidence; stroke indicates trajectory hint. Quadrants: Recovery (upper-left),
-                    Expansion (upper-right), Hypersupply (lower-right), Recession (lower-left).
-                  </Text>
+          <View style={styles.signalRow}>
+            {signals.map((s) => (
+              <View key={s.id} style={styles.signalCard}>
+                <Text style={styles.signalTitle}>{s.label}</Text>
+                <View style={{ height: 14, marginBottom: 2, justifyContent: 'center' }}>
+                  <PdfTrendArrow variant={signalIndicatorToVariant(s)} color={accent} />
                 </View>
+                <Text style={styles.signalLine} wrap>
+                  {s.line}
+                </Text>
               </View>
-              <Text style={[styles.sectionTitle, { marginTop: 4 }]}>Signals</Text>
-              <CycleSignalTilesPdf cycle={cycleAnalysis} />
-            </>
-          ) : (
-            <View style={styles.signalRow}>
-              {signals.map((s) => (
-                <View key={s.id} style={styles.signalCard}>
-                  <Text style={styles.signalTitle}>{s.label}</Text>
-                  <View style={{ height: 14, marginBottom: 2, justifyContent: 'center' }}>
-                    <PdfTrendArrow variant={signalIndicatorToVariant(s)} color={accent} />
-                  </View>
-                  <Text style={styles.signalLine} wrap>
-                    {s.line}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          )}
+            ))}
+          </View>
           <Text style={styles.confidence} wrap hyphenationCallback={(word) => [word]}>
             Confidence - {brief.confidenceLine}
           </Text>
 
           <Text style={styles.methTitle}>Methodology & definitions</Text>
           <Text style={{ fontSize: 6.5, color: muted, marginBottom: 6, width: PDF_CONTENT_WIDTH_PT }} wrap>
-            Key metrics below are documented for client deliverables. Cycle position uses four directional signals (rent,
-            vacancy, permits, employment); momentum blends labor, rent level, and permit volume vs. a ZIP comparison set.
+            Key metrics below are documented for client deliverables. Momentum blends labor, rent level, and permit
+            volume vs. a ZIP comparison set.
           </Text>
           <View style={styles.methHeaderRow}>
             <Text style={styles.methColMetric}>Metric</Text>
             <Text style={styles.methColDef}>Definition</Text>
             <Text style={styles.methColSrc}>Source</Text>
           </View>
-          {METHODOLOGY_PDF_ROWS.map((row) => (
+          {PDF_METHOD_ROWS.map((row) => (
             <View key={row.metric} style={styles.methRow}>
               <Text style={styles.methColMetric}>{row.metric}</Text>
               <Text style={styles.methColDef} wrap hyphenationCallback={(word) => [word]}>
@@ -437,14 +406,6 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
               </Text>
             </View>
           ))}
-
-          {cycleAnalysis && (
-            <Text style={[styles.foot, { marginBottom: 6, width: PDF_CONTENT_WIDTH_PT }]} wrap hyphenationCallback={(word) => [word]}>
-              Analytical cycle classifier: {cycleAnalysis.signalsAgreement}/4 signals agree · data quality{' '}
-              {cycleAnalysis.dataQuality}
-              {cycleAnalysis.transitional ? ' · transitional / mixed read' : ''}.
-            </Text>
-          )}
 
           <Text style={[styles.foot, { width: PDF_CONTENT_WIDTH_PT }]} wrap hyphenationCallback={(word) => [word]}>
             Scout · Data: Zillow Research (ZORI/ZHVI), Census ACS & BPS, FRED, Google Trends.
@@ -600,9 +561,9 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
               {r.sub}
             </Text>
             <View style={{ width: '10%', alignItems: 'center', justifyContent: 'flex-start', paddingTop: 2, minHeight: 14 }}>
-              {r.signalKey && cycleAnalysis ? (
+              {r.signalKey && signalsById.has(r.signalKey) ? (
                 <PdfTrendArrow
-                  variant={trendKindToVariant(r.signalKey, cycleAnalysis.signals[r.signalKey].score)}
+                  variant={signalIndicatorToVariant(signalsById.get(r.signalKey)!)}
                   color={ink}
                 />
               ) : (
@@ -663,19 +624,18 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
           <Text style={styles.sectionTitle}>Ranked by momentum score</Text>
           <View style={{ flexDirection: 'row', paddingBottom: 4 }}>
             <Text style={[styles.th, { width: '7%' }]}>#</Text>
-            <Text style={[styles.th, { width: '18%' }]}>Site</Text>
+            <Text style={[styles.th, { width: '24%' }]}>Site</Text>
             <Text style={[styles.th, { width: '12%' }]}>ZIP</Text>
             <Text style={[styles.th, { width: '12%' }]}>ZORI</Text>
             <Text style={[styles.th, { width: '10%' }]}>Mom.</Text>
-            <Text style={[styles.th, { width: '18%' }]}>Cycle</Text>
-            <Text style={[styles.th, { width: '23%' }]}>Read</Text>
+            <Text style={[styles.th, { width: '35%' }]}>Read</Text>
           </View>
           {[...siteRows].sort((a, b) => (b.momentum ?? -1) - (a.momentum ?? -1)).map((r, i) => (
             <View key={r.label + r.zip} style={[styles.tableRow, { flexDirection: 'row', alignItems: 'flex-start' }]}>
               <Text style={[styles.td, { width: '7%' }]} wrap={false}>
                 {i + 1}
               </Text>
-              <Text style={[styles.td, { width: '18%' }]} wrap hyphenationCallback={(word) => [word]}>
+              <Text style={[styles.td, { width: '24%' }]} wrap hyphenationCallback={(word) => [word]}>
                 {r.label}
               </Text>
               <Text style={[styles.td, { width: '12%' }]} wrap={false}>
@@ -687,17 +647,14 @@ export function MarketReportDocument(props: MarketReportPdfInput) {
               <Text style={[styles.td, { width: '10%' }]} wrap={false}>
                 {r.momentum != null ? String(r.momentum) : '-'}
               </Text>
-              <Text style={[styles.td, { width: '18%', fontSize: 7 }]} wrap hyphenationCallback={(word) => [word]}>
-                {r.cyclePhase ?? '-'}
-              </Text>
-              <Text style={[styles.td, { width: '23%', fontSize: 7 }]} wrap hyphenationCallback={(word) => [word]}>
+              <Text style={[styles.td, { width: '35%', fontSize: 7 }]} wrap hyphenationCallback={(word) => [word]}>
                 {r.signalLine}
               </Text>
             </View>
           ))}
 
           <Text style={styles.foot}>
-            Momentum score from /api/momentum; cycle phase from the same cached inputs as the ZIP classifier (no extra API calls).
+            Momentum score from /api/momentum using the current cached comparison-set inputs.
           </Text>
         </Page>
       )}
