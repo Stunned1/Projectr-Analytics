@@ -13,43 +13,43 @@ export const SLASH_MAP_TILT_MAX_DEG = 67.5
 /** Implemented today — order is how they appear under `/`. */
 export const SLASH_COMMANDS: SlashCommandDef[] = [
   { command: 'help', summary: 'List commands, tips, and roadmap ideas' },
-  { command: 'view', summary: 'Map tilt — `/view 3d` or `/view 2d`' },
+  { command: 'view', summary: 'Map tilt: `/view 3d` or `/view 2d`' },
   {
     command: 'tilt',
-    summary: '`/tilt 0–100` — percent of max tilt (0°–67.5°); see /help for bounds & edge cases',
+    summary: '`/tilt 0–100`: percent of max tilt (0°–67.5°); see /help for bounds and edge cases',
   },
   {
     command: 'rotate',
-    summary: '`/rotate <degrees>` — map bearing (clockwise from north); see /help for wrapping',
+    summary: '`/rotate <degrees>`: map bearing (clockwise from north); see /help for wrapping',
   },
   {
     command: 'go',
-    summary: '`/go <zip | city | county | metro>` — same as sidebar search / agent navigate',
+    summary: '`/go <zip | city | county | metro>`: same as sidebar search / agent navigate',
   },
   {
     command: 'save',
-    summary: '`/save` or `/save <name>` — save loaded market or current map view to **Saved**',
+    summary: '`/save` or `/save <name>`: save loaded market or current map view to **Saved**',
   },
   {
     command: 'layers',
-    summary: '`/layers:a,b` — turn **on** listed layers (comma-separated); see /help',
+    summary: '`/layers:a,b`: turn **on** listed layers (comma-separated); see /help',
   },
   {
     command: 'clear',
-    summary: '`/clear:layers|terminal|memory|workspace` — see /help',
+    summary: '`/clear:layers|terminal|memory|workspace`: see /help',
   },
   {
     command: 'restart',
-    summary: '`/restart` then type `y` or `n` — wipe all `projectr-*` keys + reload, or cancel',
+    summary: '`/restart` then type `y` or `n`: wipe all `projectr-*` keys + reload, or cancel',
   },
 ]
 
 /** Shown inside /help only — not executable yet. */
 export const SLASH_COMMAND_IDEAS: string[] = [
-  '/data — open right panel on Data tab',
-  '/zip <5-digit or city> — same as sidebar search (or use `/go`)',
-  '/brief — market brief PDF export',
-  '/context — copy sanitized map context for debugging',
+  '/data: open right panel on Data tab',
+  '/zip <5-digit or city>: same as sidebar search (or use `/go`)',
+  '/brief: market brief PDF export',
+  '/context: copy sanitized map context for debugging',
 ]
 
 export function getSlashPaletteState(input: string): { open: boolean; matches: SlashCommandDef[] } {
@@ -81,11 +81,11 @@ export function getSlashPaletteState(input: string): { open: boolean; matches: S
 /** Full `/tilt` usage (also sent when you run `/tilt` with no value). */
 export function tiltSlashUsageLines(): string {
   return [
-    'Usage: `/tilt <0–100>` — percent of maximum camera tilt (not degrees).',
+    'Usage: `/tilt <0–100>`: percent of maximum camera tilt (not degrees).',
     `• 0% → flat (0°). 100% → full pitch (${SLASH_MAP_TILT_MAX_DEG}°), same ceiling as the map 3D control.`,
     '• Decimals OK (`/tilt 33.3`). Optional percent sign (`/tilt 50%`); trailing % is stripped once.',
     '• Values below 0 or above 100 are clamped to 0–100; the reply notes when that happens.',
-    '• One number only — extra tokens after the value are rejected.',
+    '• One number only. Extra tokens after the value are rejected.',
     '• Non-numeric, empty, or Infinity values are rejected with a hint.',
     '• Presets: `/view 2d` = 0°; `/view 3d` = fixed 45° (`/tilt 66.7` is ~45° on this scale).',
   ].join('\n')
@@ -93,19 +93,19 @@ export function tiltSlashUsageLines(): string {
 
 export function clearSlashUsageLines(): string {
   return [
-    'Usage: `/clear:<target>` — no spaces around the colon.',
-    '• `/clear:layers` — turns **off** every map layer and clears any active permit-type filter (map view unchanged).',
-    '• `/clear:terminal` — **clean canvas**: only the default greeting remains (the command is not echoed); case-brief bundle unchanged.',
-    '• `/clear:memory` or `/clear:mem` — **clean canvas**: default greeting only; clears the case-brief bundle; **does not** reload, change market, or clear Client CSV.',
-    '• `/clear:workspace` — **Clear local test data**: confirm, then wipe session keys (upload, pins, chat, pending nav) and **reload** the tab.',
-    '• **`/restart`** — asks **Are you sure? y/n**; then send plain **`y`** / **`yes`** or **`n`** / **`no`** (no slash). One-liner **`/restart y`** / **`/restart n`** also works.',
-    '• Bare `/clear` is invalid — pick a target. Unknown target → error with hints.',
+    'Usage: `/clear:<target>`: no spaces around the colon.',
+    '• `/clear:layers` turns **off** every map layer and clears any active permit-type filter (map view unchanged).',
+    '• `/clear:terminal` keeps only the default greeting (the command is not echoed); case-brief bundle unchanged.',
+    '• `/clear:memory` or `/clear:mem` keeps only the default greeting, clears the case-brief bundle, and does not reload, change market, or clear Client CSV.',
+    '• `/clear:workspace` confirms, then wipes session keys (upload, pins, chat, pending nav) and reloads the tab.',
+    '• **`/restart`** asks **Are you sure? y/n**; then send plain **`y`** / **`yes`** or **`n`** / **`no`** (no slash). One-line **`/restart y`** / **`/restart n`** also works.',
+    '• Bare `/clear` is invalid. Pick a target. Unknown target → error with hints.',
   ].join('\n')
 }
 
 export function goSlashUsageLines(): string {
   return [
-    'Usage: `/go <query>` — one line of text (ZIP, city, county, metro, or `City, ST`).',
+    'Usage: `/go <query>`: one line of text (ZIP, city, county, metro, or `City, ST`).',
     '• Runs the same navigation as the sidebar search (Enter).',
     '• Empty query after `/go` is rejected.',
     '• Extra leading/trailing spaces are trimmed.',
@@ -114,7 +114,7 @@ export function goSlashUsageLines(): string {
 
 export function layersSlashUsageLines(): string {
   return [
-    'Usage: `/layers:name1,name2,...` — **colon required**; comma-separated names; turns **on** those layers (others unchanged).',
+    'Usage: `/layers:name1,name2,...`: **colon required**; comma-separated names; turns **on** those layers (others unchanged).',
     `• ${layerSlashValidNamesHint()}`,
     '• Aliases: e.g. `rent` → rent/value fill, `client` → Client markers, `permits` → NYC permits (only when the active market is in New York City).',
     '• Empty list or unknown names → error listing bad tokens.',
@@ -128,7 +128,7 @@ export const RESTART_CONFIRM_PROMPT_MESSAGE = 'Are you sure? y/n'
 export function restartSlashUsageLines(): string {
   return [
     'Usage: terminal-style **two lines** (no browser `confirm`).',
-    '• Send **`/restart`** — prior transcript is cleared; only **Are you sure? y/n** appears (no echo of `/restart`).',
+    '• Send **`/restart`**. Prior transcript is cleared; only **Are you sure? y/n** appears (no echo of `/restart`).',
     '• Then send plain **`y`** or **`yes`** to wipe every `sessionStorage` / `localStorage` key starting with **`projectr-`** and reload (no extra lines before reload); **`n`** or **`no`** returns to the default greeting only.',
     '• Shortcut: **`/restart y`** or **`/restart n`** in one line (same as above).',
     '• Does **not** change Supabase, auth, or shortlist.',
@@ -139,10 +139,10 @@ export function restartSlashUsageLines(): string {
 
 export function buildSlashHelpMessage(): string {
   const lines = [
-    'Slash commands — type / then filter with letters; use ↑↓ and Enter to complete, or click a row.',
+    'Slash commands: type / then filter with letters; use ↑↓ and Enter to complete, or click a row.',
     '',
     'Available:',
-    ...SLASH_COMMANDS.map((c) => `  /${c.command} — ${c.summary}`),
+    ...SLASH_COMMANDS.map((c) => `  /${c.command}: ${c.summary}`),
     '',
     '/tilt (detail):',
     ...tiltSlashUsageLines().split('\n').map((ln) => `  ${ln}`),
@@ -165,7 +165,7 @@ export function buildSlashHelpMessage(): string {
     '/restart (detail):',
     ...restartSlashUsageLines().split('\n').map((ln) => `  ${ln}`),
     '',
-    'Roadmap (not wired yet — tell us what you want first):',
+    'Roadmap (not wired yet. Tell us what you want first):',
     ...SLASH_COMMAND_IDEAS.map((s) => `  ${s}`),
     '',
     'Anything starting with `/` is treated as a slash command. Unknown slash commands return a local error and are never sent to the Gemini agent.',
@@ -245,7 +245,7 @@ export function parseTiltSlashCommand(trimmed: string): ParsedTiltSlash | null {
 
   let userFacingSummary = `Map tilt ${degStr}° (${clamped}% of max ${SLASH_MAP_TILT_MAX_DEG}°).`
   if (clampNotes.length > 0) {
-    userFacingSummary = `${clampNotes[0]} — ${userFacingSummary}`
+    userFacingSummary = `${clampNotes[0]}. ${userFacingSummary}`
   }
 
   return { kind: 'run', tiltDegrees, userFacingSummary }
@@ -266,11 +266,11 @@ function formatHeadingDegrees(n: number): string {
 
 export function rotateSlashUsageLines(): string {
   return [
-    'Usage: `/rotate <degrees>` — camera **bearing** (rotation), not tilt.',
+    'Usage: `/rotate <degrees>`: camera **bearing** (rotation), not tilt.',
     '• 0° = north up. Values increase **clockwise** (east = 90°, south = 180°, west = 270°).',
     '• Any finite number is accepted; the app **normalizes** to the range [0, 360) (e.g. 370° → 10°, −90° → 270°).',
     '• Decimals OK. Optional **°** suffix (`/rotate 45°`) is stripped.',
-    '• One number only — extra tokens are rejected.',
+    '• One number only. Extra tokens are rejected.',
     '• Infinity / NaN / non-numeric input is rejected.',
   ].join('\n')
 }
@@ -311,7 +311,7 @@ export function parseRotateSlashCommand(trimmed: string): ParsedRotateSlash | nu
   const norm = normalizeHeadingDegrees(num)
   let userFacingSummary = `Map heading ${formatHeadingDegrees(norm)}° (clockwise from north).`
   if (Math.abs(num - norm) > 1e-4) {
-    userFacingSummary = `Input ${formatHeadingDegrees(num)}° → ${formatHeadingDegrees(norm)}° — ${userFacingSummary}`
+    userFacingSummary = `Input ${formatHeadingDegrees(num)}° normalized to ${formatHeadingDegrees(norm)}°. ${userFacingSummary}`
   }
 
   return { kind: 'run', headingDegrees: norm, userFacingSummary }
@@ -366,10 +366,10 @@ export type ParsedSaveSlash = { kind: 'run'; customLabel: string | null }
 
 export function saveSlashUsageLines(): string {
   return [
-    'Usage: `/save` or `/save <name>` — adds a row to **Saved** (same Supabase flow as the data panel).',
-    '• **ZIP loaded** — saves that market (optional name replaces the default place label).',
-    '• **County / metro / city loaded** — saves the area (optional name; reopen uses your sidebar search text when set). NYC boroughs also work when relevant.',
-    '• **Otherwise** — saves the **current map center** as a bookmark (optional name; default label uses rounded coordinates).',
+    'Usage: `/save` or `/save <name>`: adds a row to **Saved** (same Supabase flow as the data panel).',
+    '• **ZIP loaded** saves that market (optional name replaces the default place label).',
+    '• **County / metro / city loaded** saves the area (optional name; reopen uses your sidebar search text when set). NYC boroughs also work when relevant.',
+    '• **Otherwise** saves the **current map center** as a bookmark (optional name; default label uses rounded coordinates).',
     '• Requires Auth (enable **Anonymous** sign-ins in Supabase if you see a sign-in error).',
   ].join('\n')
 }
@@ -394,7 +394,7 @@ export function parseLayersSlashCommand(trimmed: string): ParsedLayersSlash | nu
     return {
       kind: 'bad_arg',
       message:
-        'Use a colon after `layers`: `/layers:rent,permits` — not a space before the first name.',
+        'Use a colon after `layers`: `/layers:rent,permits`, not a space before the first name.',
     }
   }
   const m = trimmed.match(/^\/layers:\s*(.*)$/i)

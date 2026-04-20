@@ -62,7 +62,7 @@ function trimLines(lines: Array<string | null | undefined>, max = 4): string[] {
 }
 
 function formatNumber(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) return '—'
+  if (value == null || !Number.isFinite(value)) return 'N/A'
   return value.toLocaleString(undefined, {
     maximumFractionDigits: Math.abs(value) >= 100 ? 0 : 1,
   })

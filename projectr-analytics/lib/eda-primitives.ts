@@ -48,7 +48,7 @@ function parseDateValue(value: UploadCellValue): number | null {
 }
 
 function formatCompactNumber(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) return '—'
+  if (value == null || !Number.isFinite(value)) return 'N/A'
   const abs = Math.abs(value)
   if (abs >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(1)}B`
   if (abs >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
@@ -57,7 +57,7 @@ function formatCompactNumber(value: number | null | undefined): string {
 }
 
 function formatPercent(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) return '—'
+  if (value == null || !Number.isFinite(value)) return 'N/A'
   return `${value.toFixed(1)}%`
 }
 

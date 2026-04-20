@@ -6,7 +6,7 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-martel-sans);
   --font-mono: var(--font-geist-mono);
   --font-heading: var(--font-sans);
   --color-sidebar-ring: var(--sidebar-ring);
@@ -48,7 +48,7 @@
 }
 
 body {
-  font-family: 'Gill Sans', 'Gill Sans MT', Calibri, 'Trebuchet MS', sans-serif;
+  font-family: var(--font-martel-sans), sans-serif;
 }
 
 :root {
@@ -217,7 +217,7 @@ body {
   }
 }
 
-/* App-wide sans (Geist variables on <html>; Gill for body copy per UI spec) */
+/* App-wide UI font uses the Next font variable; terminal surfaces keep DM Mono explicitly. */
 body {
-  font-family: 'Gill Sans', 'Gill Sans MT', Calibri, 'Trebuchet MS', sans-serif;
+  font-family: var(--font-martel-sans), sans-serif;
 }

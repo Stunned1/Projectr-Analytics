@@ -1,6 +1,14 @@
 'use client'
 
 import { useState, useRef, useCallback } from 'react'
+import {
+  ChartLine,
+  FileSpreadsheet,
+  FolderOpen,
+  MapPinned,
+  TableProperties,
+  type LucideIcon,
+} from 'lucide-react'
 import { useClientUploadMarkersStore } from '@/lib/client-upload-markers-store'
 import {
   useClientUploadSessionStore,
@@ -30,10 +38,10 @@ const BUCKET_COLORS: Record<string, string> = {
   TABULAR: '#a3a3a3',
 }
 
-const BUCKET_ICONS: Record<string, string> = {
-  GEOSPATIAL: '🗺',
-  TEMPORAL: '📈',
-  TABULAR: '📋',
+const BUCKET_ICONS: Record<string, LucideIcon> = {
+  GEOSPATIAL: MapPinned,
+  TEMPORAL: ChartLine,
+  TABULAR: TableProperties,
 }
 
 const VISUAL_LABELS: Record<string, string> = {
@@ -356,7 +364,7 @@ export default function AgenticNormalizer({ currentZip, onIngested }: AgenticNor
           </div>
         ) : (
           <div className="flex flex-col items-center gap-2">
-            <span className="text-2xl">📂</span>
+            <FolderOpen className="h-8 w-8 text-zinc-300" strokeWidth={1.75} aria-hidden />
             <p className="text-xs font-medium text-white">Drop CSV(s) here or click to review</p>
             <p className="text-[10px] text-zinc-500">
               Up to {MAX_FILES_PER_DROP} files at once. Review happens before import so you can confirm mapability,
@@ -426,7 +434,10 @@ export default function AgenticNormalizer({ currentZip, onIngested }: AgenticNor
           {results.map((result, idx) => (
             <div key={idx} className="rounded-lg border border-white/8 bg-white/3 p-3">
               <div className="mb-3 flex items-center gap-2">
-                <span className="text-lg">{BUCKET_ICONS[result.triage.bucket] ?? '📄'}</span>
+                {(() => {
+                  const BucketIcon = BUCKET_ICONS[result.triage.bucket] ?? FileSpreadsheet
+                  return <BucketIcon className="h-5 w-5 text-zinc-200" strokeWidth={1.75} aria-hidden />
+                })()}
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-xs font-semibold text-white">{result.triage.metric_name}</p>
                   <p className="text-[10px]" style={{ color: BUCKET_COLORS[result.triage.bucket] ?? '#888' }}>
@@ -512,7 +523,7 @@ export default function AgenticNormalizer({ currentZip, onIngested }: AgenticNor
               {(result.marker_points?.length ?? 0) > 0 && (
                 <p className="mt-2 text-[10px] text-primary">
                   {stage === 'reviewed' ? 'Review detected' : 'Imported'} {result.marker_points!.length} pin
-                  {result.marker_points!.length === 1 ? '' : 's'} in this file →{' '}
+                  {result.marker_points!.length === 1 ? '' : 's'} in this file {'->'}{' '}
                   <span className="font-semibold">Client</span> layer
                 </p>
               )}

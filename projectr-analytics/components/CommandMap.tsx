@@ -1764,7 +1764,7 @@ function CommandMap({
             if (f) {
               setTooltip({
                 x: info.x, y: info.y,
-                text: `⚠️ ${f.properties.label ?? f.properties.FLD_ZONE}`,
+                text: `Flood zone · ${f.properties.label ?? f.properties.FLD_ZONE}`,
               })
             } else setTooltip(null)
           },
@@ -2057,7 +2057,7 @@ function CommandMap({
             const d = info.object as POIPoint | undefined
             if (d) setTooltipStable({
               x: info.x, y: info.y,
-              text: `${d.isAnchor ? '★ ' : ''}${d.name}${d.address ? ' · ' + d.address : ''}`,
+              text: `${d.isAnchor ? 'Anchor · ' : ''}${d.name}${d.address ? ' · ' + d.address : ''}`,
             })
             else setTooltipStable(null)
           },
@@ -2120,7 +2120,7 @@ function CommandMap({
             const d = info.object as AnalysisSite | undefined
             if (d) setTooltipStable({
               x: info.x, y: info.y,
-              text: `★ ${d.address} · Score ${d.score.toFixed(0)} · ${(d.air_rights_sqft/1000).toFixed(0)}k sqft air rights`,
+              text: `Scored site · ${d.address} · Score ${d.score.toFixed(0)} · ${(d.air_rights_sqft/1000).toFixed(0)}k sqft air rights`,
             })
             else setTooltipStable(null)
           },
@@ -2153,7 +2153,7 @@ function CommandMap({
           pickable: true,
           onHover: (info: PickingInfo) => {
             const d = info.object as ClientUploadMarker | undefined
-            if (d) setTooltipStable({ x: info.x, y: info.y, text: `📍 ${d.label}${d.value != null ? ': $' + d.value.toLocaleString() : ''}` })
+            if (d) setTooltipStable({ x: info.x, y: info.y, text: `Client pin · ${d.label}${d.value != null ? ': $' + d.value.toLocaleString() : ''}` })
             else setTooltipStable(null)
           },
           onClick: (info: PickingInfo) => {

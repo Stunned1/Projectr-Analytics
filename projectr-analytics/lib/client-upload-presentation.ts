@@ -144,7 +144,7 @@ export function buildImportedSummaryStats(source: ClientUploadSourcePart): Impor
       value:
         average != null
           ? formatCompactNumber(average)
-          : source.triage.value_column ?? '—',
+          : source.triage.value_column ?? 'N/A',
       sub: average != null ? `avg ${source.triage.value_column ?? 'value'}` : 'no numeric value',
     },
   ]
@@ -228,9 +228,9 @@ export function getImportedTableRows(source: ClientUploadSourcePart): UploadRawR
 }
 
 export function formatImportedCell(value: UploadCellValue): string {
-  if (value === null || value === undefined) return '—'
+  if (value === null || value === undefined) return 'N/A'
   if (typeof value === 'boolean') return value ? 'true' : 'false'
-  if (typeof value === 'number') return Number.isFinite(value) ? value.toLocaleString() : '—'
+  if (typeof value === 'number') return Number.isFinite(value) ? value.toLocaleString() : 'N/A'
   const text = String(value).trim()
-  return text.length > 0 ? text : '—'
+  return text.length > 0 ? text : 'N/A'
 }
