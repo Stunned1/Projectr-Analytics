@@ -48,12 +48,11 @@ export default function SavedPage() {
       />
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-l border-border/60">
-        <header className="shrink-0 border-b border-border bg-muted/20 px-5 py-3">
-          <p className="text-[10px] font-semibold tracking-widest text-primary uppercase">Workspace</p>
-          <h1 className="text-base font-semibold tracking-tight text-foreground">Saved sites</h1>
-          <p className="mt-1 max-w-xl text-xs text-muted-foreground">
-            Sites and areas you save from the map appear here. Use the sidebar search to jump to a ZIP, county, metro, or city on the map.
-          </p>
+        <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border bg-muted/20 px-5 py-3">
+          <div>
+            <h1 className="text-base font-semibold tracking-tight text-foreground">Saved Sites</h1>
+            <p className="text-[11px] text-muted-foreground">Scout</p>
+          </div>
         </header>
 
         <main className="min-h-0 flex-1 overflow-hidden px-5 py-4">

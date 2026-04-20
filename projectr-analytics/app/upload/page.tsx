@@ -81,11 +81,12 @@ export default function ClientUploadPage() {
             <div>
               <h2 className="text-lg font-semibold tracking-tight text-foreground">Upload a file</h2>
               <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                Gemini classifies each file. <span className="text-foreground/90">Geospatial</span> rows (lat/lng or ZIP)
-                become orange <span className="text-foreground/90">3D cone pins</span> on the map when you open{' '}
+                Scout reviews each file with Gemini when available, with structural fallback heuristics if needed. Rows
+                with coordinates, ZIPs, or resolvable addresses can appear as orange{' '}
+                <span className="text-foreground/90">3D client pins</span> on the map when you open{' '}
                 <span className="text-foreground/90">Map</span> and enable the <span className="text-foreground/90">Client</span>{' '}
-                layer. Non-map datasets stay usable here through the imported-data workspace with summary, chart, and
-                raw-table fallbacks.
+                layer. Datasets that are not map-ready still stay usable here through summary stats, tables, and chart
+                fallbacks when the data supports them.
               </p>
             </div>
             <AgenticNormalizer />
@@ -160,7 +161,7 @@ export default function ClientUploadPage() {
               <div className="flex flex-col gap-3 rounded-xl border border-border/80 bg-card/80 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-xs text-muted-foreground">
                   <span className="font-medium text-foreground">{markers.length}</span> pin{markers.length === 1 ? '' : 's'}{' '}
-                  ready — turn on <span className="text-primary">Client</span> on the map
+                  ready. Turn on <span className="text-primary">Client</span> on the map
                 </p>
                 <div className="flex flex-wrap gap-2">
                   <button

@@ -591,7 +591,7 @@ export function useAgentIntelligence(
           setMessages((prev) => [
             ...prev,
             { role: 'user', text: userPrompt, ts: Date.now() },
-            { role: 'agent', text: 'Save failed — try again.' },
+            { role: 'agent', text: 'Save failed. Try again.' },
           ])
         }
         return
@@ -865,7 +865,7 @@ export function useAgentIntelligence(
             ? e.message === 'Agent stream ended without a result'
               ? 'Stream ended before the EDA response completed. Retry the same prompt; partial notes may already be visible in the right panel.'
               : e.message === 'Failed to fetch' || e.name === 'TypeError'
-                ? 'Network error—check connection and retry.'
+                ? 'Network error. Check connection and retry.'
                 : e.message
             : 'Connection error.'
         setMessages((prev) => [...prev, { role: 'agent', text: msg }])

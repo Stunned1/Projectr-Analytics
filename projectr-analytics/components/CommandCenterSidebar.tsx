@@ -187,7 +187,7 @@ export default function CommandCenterSidebar({
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 disabled={loading}
-                placeholder="77002 · Harris County, TX · Dallas-Fort Worth, TX · Houston, TX"
+                placeholder="Enter a location"
                 className={cn(
                   'h-8 rounded-md border-input bg-input/40 pl-7 text-xs text-sidebar-foreground placeholder:text-muted-foreground',
                   'focus-visible:border-primary focus-visible:ring-primary/25',

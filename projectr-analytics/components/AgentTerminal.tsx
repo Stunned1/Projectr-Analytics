@@ -382,7 +382,7 @@ export default function AgentTerminal({
         return line.length > 72 ? `${line.slice(0, 69)}…` : line
       }
     }
-    return 'Idle — ask about the loaded market, imported dataset, or map.'
+    return 'Idle. Ask about the loaded market, imported dataset, or map.'
   }, [visibleTerminalMessages])
 
   function renderSiteTable(sites: AnalysisSite[]) {
@@ -519,16 +519,7 @@ export default function AgentTerminal({
         {size !== 'collapsed' && (
         <>
           <div className="shrink-0 border-b border-zinc-800/80 px-2 py-0.5 text-[9px] text-zinc-600">
-            <span className="text-zinc-500">Slash:</span> type <span className="font-mono text-zinc-500">/</span> for
-            suggestions; <span className="font-mono text-zinc-500">/help</span>;{' '}
-            <span className="font-mono text-zinc-500">/view 3d</span> /{' '}
-            <span className="font-mono text-zinc-500">/view 2d</span>;{' '}
-            <span className="font-mono text-zinc-500">/tilt 0–100</span> (% of max 67.5°);{' '}
-            <span className="font-mono text-zinc-500">/rotate °</span> (bearing);{' '}
-            <span className="font-mono text-zinc-500">/go</span> search;{' '}
-            <span className="font-mono text-zinc-500">/layers:a,b</span>;{' '}
-            <span className="font-mono text-zinc-500">/clear:…</span>; ask for EDA on the loaded market or imported dataset;{' '}
-            <span className="font-mono text-zinc-500">/restart</span> → y/n; see /help
+            type <span className="font-mono text-zinc-500">/</span> for suggestions
           </div>
 
           <div ref={outputRef} className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
@@ -668,7 +659,7 @@ export default function AgentTerminal({
                   aria-label="Slash commands"
                 >
                   {slashPalette.matches.length === 0 ? (
-                    <div className="px-2 py-1.5 font-mono text-[10px] text-zinc-500">No matching commands — try /help</div>
+                    <div className="px-2 py-1.5 font-mono text-[10px] text-zinc-500">No matching commands. Try /help.</div>
                   ) : (
                     slashPalette.matches.map((cmd, i) => (
                       <button

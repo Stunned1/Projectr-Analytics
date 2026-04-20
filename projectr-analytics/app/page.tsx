@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useMemo, useEffect, useRef, type CSSProperties } from 'react'
 import dynamic from 'next/dynamic'
+import { ArrowUpRight, Check, X } from 'lucide-react'
 import AgenticNormalizer from '@/components/AgenticNormalizer'
 import { AgentThinkingPanel } from '@/components/AgentThinkingPanel'
 import AgentTerminal, { type AgentTerminalSize } from '@/components/AgentTerminal'
@@ -483,9 +484,18 @@ function ShortlistToggleButton({
       type="button"
       onClick={() => void toggle()}
       disabled={pending}
-      className="mt-3 mb-4 w-full py-2 rounded-lg text-xs font-semibold border transition-colors disabled:opacity-50 bg-white/8 hover:bg-white/12 border-white/15 text-white"
+      className="mt-3 mb-4 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border bg-white/8 py-2 text-xs font-semibold text-white transition-colors hover:bg-white/12 disabled:opacity-50 border-white/15"
     >
-      {pending ? 'Saving…' : hasZip ? '✓ Saved - tap to remove' : 'Save Site'}
+      {pending ? (
+        'Saving…'
+      ) : hasZip ? (
+        <>
+          <Check className="h-3.5 w-3.5" strokeWidth={2.25} aria-hidden />
+          Saved. Tap to remove
+        </>
+      ) : (
+        'Save Site'
+      )}
     </button>
   )
 }
@@ -543,9 +553,18 @@ function AggregateShortlistToggle({
         type="button"
         onClick={() => void toggle()}
         disabled={pending || !q}
-        className="mt-3 w-full py-2 rounded-lg text-xs font-semibold border transition-colors disabled:opacity-50 bg-white/8 hover:bg-white/12 border-white/15 text-white"
+        className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border bg-white/8 py-2 text-xs font-semibold text-white transition-colors hover:bg-white/12 disabled:opacity-50 border-white/15"
       >
-        {pending ? 'Saving…' : hasArea ? '✓ Area saved - tap to remove' : 'Save'}
+        {pending ? (
+          'Saving…'
+        ) : hasArea ? (
+          <>
+            <Check className="h-3.5 w-3.5" strokeWidth={2.25} aria-hidden />
+            Area saved. Tap to remove
+          </>
+        ) : (
+          'Save'
+        )}
       </button>
       {localError && <p className="text-[9px] text-red-400 mt-1.5 px-0.5">{localError}</p>}
     </div>
@@ -888,7 +907,7 @@ export default function Home() {
         if (!q) {
           return {
             ok: false,
-            message: 'Could not determine the area search text — try searching again, then `/save`.',
+            message: 'Could not determine the area search text. Try searching again, then `/save`.',
           }
         }
         if (useSitesStore.getState().hasAggregateSaved(q)) {
@@ -933,7 +952,7 @@ export default function Home() {
 
       return {
         ok: false,
-        message: 'Nothing to save — load a ZIP, county, metro, or city search, or wait for the map to finish loading.',
+        message: 'Nothing to save. Load a ZIP, county, metro, or city search, or wait for the map to finish loading.',
       }
     },
     [result, aggregateData, cityZips, searchInput]
@@ -1612,9 +1631,13 @@ export default function Home() {
             <button
               type="button"
               onClick={() => setPanelOpen(!panelOpen)}
-              className="flex-shrink-0 border-l border-border/80 px-3 py-2 text-[11px] font-semibold whitespace-nowrap text-primary transition-colors hover:text-foreground"
+              className="inline-flex flex-shrink-0 items-center justify-center border-l border-border/80 px-3 py-2 text-[11px] font-semibold whitespace-nowrap text-primary transition-colors hover:text-foreground"
             >
-              {panelOpen ? '✕' : '↗'}
+              {panelOpen ? (
+                <X className="h-3.5 w-3.5" strokeWidth={2.1} aria-hidden />
+              ) : (
+                <ArrowUpRight className="h-3.5 w-3.5" strokeWidth={2.1} aria-hidden />
+              )}
             </button>
           </div>
         )}

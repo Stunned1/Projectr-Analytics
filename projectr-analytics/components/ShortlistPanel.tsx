@@ -126,7 +126,7 @@ export default function ShortlistPanel({
           {!loading && sites.length === 0 && (
             <p className="text-sm leading-relaxed text-muted-foreground">
               Nothing saved yet. Load a market on the map, then use <strong className="text-foreground">Save Site</strong>,{' '}
-              <strong className="text-foreground">Save area</strong> in the right data panel, or the EDA assistant{' '}
+              <strong className="text-foreground">Save area</strong> in the right data panel, or the terminal command{' '}
               <strong className="text-foreground">/save</strong>.
             </p>
           )}

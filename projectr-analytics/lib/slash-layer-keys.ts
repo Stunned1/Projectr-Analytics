@@ -94,5 +94,5 @@ export function normalizeLayerSlashToken(token: string): SlashLayerKey | null {
 }
 
 export function layerSlashValidNamesHint(): string {
-  return `Valid names (comma-separated): ${SLASH_LAYER_KEYS.join(', ')} — plus aliases like rent, permits, transit, parcels, client, …`
+  return `Valid names (comma-separated): ${SLASH_LAYER_KEYS.join(', ')}. Also aliases like rent, permits, transit, parcels, client, ...`
 }

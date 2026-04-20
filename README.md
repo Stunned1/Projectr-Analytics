@@ -324,6 +324,14 @@ _4.15.2026_
 _04.20.2026_
 - Cleared the right-panel Analysis tab for ZIP and aggregate views and stopped loading cycle state into the map page so the tab stays intentionally blank for future work.
 - Intelligence terminal and `/api/agent` now block off-topic prompts before Gemini runs, while every leading `/` input stays on the local slash-command path.
+- The shared app sans font now uses Archivo Narrow while the terminal keeps its existing DM Mono styling.
+- The shared app font now uses Amiri instead of Archivo Narrow, while the terminal still keeps its existing DM Mono styling.
+- The shared app font now uses Red Hat Text instead of Amiri, while the terminal still keeps its existing DM Mono styling.
+- The shared app font now uses Martel Sans instead of Red Hat Text, while the terminal still keeps its existing DM Mono styling.
+- Product-facing UI copy now removes emoji glyphs and em-dash placeholders, uses SVG icons where the interface rendered emoji before, and shortens the shared search placeholder to `location`.
+- The terminal helper strip now shows only `type / for suggestions` instead of the longer slash-command cheat sheet.
+- The Saved and Upload pages now use the same header chrome dimensions, and the extra Saved-page descriptor was removed to keep that screen cleaner.
+- The Upload page explainer now accurately describes Scout’s Gemini-first import review, heuristic fallback path, and when imported rows can appear as Client-layer map pins.
 
 _04.16.2026_
 - Search, guide, and agent copy now lead with Texas market examples while keeping NYC borough entry points available only when relevant.
