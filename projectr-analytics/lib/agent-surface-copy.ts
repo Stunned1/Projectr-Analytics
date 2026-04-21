@@ -41,11 +41,11 @@ export function buildAgentGreeting(context: SurfaceContext): string {
 }
 
 export function buildAgentStarterSuggestions(context: SurfaceContext): string[] {
-  void context
+  const label = context.label?.trim() || context.zip?.trim() || 'this market'
   return dedupeSuggestions([
     '/help',
+    `Summarize ${label} and highlight rent, vacancy, and income`,
     'Analyze rent and vacancy in Harris County, TX',
-    'Show me transit routes in Houston, TX',
   ])
 }
 

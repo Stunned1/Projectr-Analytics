@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { supabase } from '@/lib/supabase'
+import { createJSONStorage, persist } from 'zustand/middleware'
 
 export interface Site {
   id: string
@@ -8,7 +8,6 @@ export interface Site {
   lat: number
   lng: number
   marketLabel: string
-  /** City/borough row: replay this exact search to reload the area. */
   isAggregate?: boolean
   savedSearch?: string | null
   cyclePosition?: string
@@ -18,61 +17,46 @@ export interface Site {
   createdAt?: string
 }
 
-type SavedSiteRow = {
-  id: string
-  user_id: string
-  label: string
-  zip: string
-  lat: number | string | null
-  lng: number | string | null
-  market_label: string | null
-  is_aggregate?: boolean | null
-  saved_search?: string | null
-  cycle_position: string | null
-  cycle_stage: string | null
-  momentum_score: number | string | null
-  notes: string | null
-  created_at: string
-}
-
 export function normalizeSavedSearch(q: string): string {
   return q.trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
-function toNum(v: number | string | null | undefined): number | null {
-  if (v == null || v === '') return null
-  const n = typeof v === 'number' ? v : Number(v)
-  return Number.isFinite(n) ? n : null
+const SITES_STORAGE_KEY = 'projectr-saved-sites-v2'
+
+function generateSiteId(): string {
+  return `site-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 }
 
-export function rowToSite(r: SavedSiteRow): Site | null {
-  const lat = toNum(r.lat)
-  const lng = toNum(r.lng)
-  if (lat == null || lng == null) return null
-  return {
-    id: r.id,
-    label: r.label,
-    zip: r.zip,
-    lat,
-    lng,
-    marketLabel: r.market_label ?? '',
-    isAggregate: Boolean(r.is_aggregate),
-    savedSearch: r.saved_search ?? null,
-    cyclePosition: r.cycle_position ?? undefined,
-    cycleStage: r.cycle_stage ?? undefined,
-    momentumScore: toNum(r.momentum_score),
-    notes: r.notes ?? undefined,
-    createdAt: r.created_at,
+function normalizeSite(value: unknown): Site | null {
+  if (!value || typeof value !== 'object') return null
+  const record = value as Record<string, unknown>
+  if (
+    typeof record.id !== 'string' ||
+    typeof record.label !== 'string' ||
+    typeof record.zip !== 'string' ||
+    typeof record.lat !== 'number' ||
+    typeof record.lng !== 'number' ||
+    !Number.isFinite(record.lat) ||
+    !Number.isFinite(record.lng)
+  ) {
+    return null
   }
-}
 
-/** Anonymous sign-in (Supabase Auth → Providers → Anonymous). */
-async function ensureAuthUser(): Promise<{ id: string } | null> {
-  const { data: first } = await supabase.auth.getSession()
-  if (first.session?.user) return first.session.user
-  const { data, error } = await supabase.auth.signInAnonymously()
-  if (error || !data.session?.user) return null
-  return data.session.user
+  return {
+    id: record.id,
+    label: record.label,
+    zip: record.zip,
+    lat: record.lat,
+    lng: record.lng,
+    marketLabel: typeof record.marketLabel === 'string' ? record.marketLabel : '',
+    isAggregate: record.isAggregate === true,
+    savedSearch: typeof record.savedSearch === 'string' ? record.savedSearch : null,
+    cyclePosition: typeof record.cyclePosition === 'string' ? record.cyclePosition : undefined,
+    cycleStage: typeof record.cycleStage === 'string' ? record.cycleStage : undefined,
+    momentumScore: typeof record.momentumScore === 'number' && Number.isFinite(record.momentumScore) ? record.momentumScore : null,
+    notes: typeof record.notes === 'string' ? record.notes : undefined,
+    createdAt: typeof record.createdAt === 'string' ? record.createdAt : undefined,
+  }
 }
 
 interface SitesStore {
@@ -93,127 +77,106 @@ interface SitesStore {
   getAggregateSiteId: (searchInput: string) => string | undefined
 }
 
-export const useSitesStore = create<SitesStore>((set, get) => ({
-  sites: [],
-  selectedForComparison: [],
-  loading: false,
-  syncError: null,
+export const useSitesStore = create<SitesStore>()(
+  persist(
+    (set, get) => ({
+      sites: [],
+      selectedForComparison: [],
+      loading: false,
+      syncError: null,
 
-  hasZip: (zip) => get().sites.some((s) => !s.isAggregate && s.zip === zip),
+      hasZip: (zip) => get().sites.some((s) => !s.isAggregate && s.zip === zip),
 
-  getSiteIdByZip: (zip) => get().sites.find((s) => !s.isAggregate && s.zip === zip)?.id,
+      getSiteIdByZip: (zip) => get().sites.find((s) => !s.isAggregate && s.zip === zip)?.id,
 
-  hasAggregateSaved: (searchInput) => {
-    const key = normalizeSavedSearch(searchInput)
-    if (!key) return false
-    return get().sites.some(
-      (s) => s.isAggregate && s.savedSearch && normalizeSavedSearch(s.savedSearch) === key
-    )
-  },
+      hasAggregateSaved: (searchInput) => {
+        const key = normalizeSavedSearch(searchInput)
+        if (!key) return false
+        return get().sites.some(
+          (s) => s.isAggregate && s.savedSearch && normalizeSavedSearch(s.savedSearch) === key
+        )
+      },
 
-  getAggregateSiteId: (searchInput) => {
-    const key = normalizeSavedSearch(searchInput)
-    return get().sites.find(
-      (s) => s.isAggregate && s.savedSearch && normalizeSavedSearch(s.savedSearch) === key
-    )?.id
-  },
+      getAggregateSiteId: (searchInput) => {
+        const key = normalizeSavedSearch(searchInput)
+        return get().sites.find(
+          (s) => s.isAggregate && s.savedSearch && normalizeSavedSearch(s.savedSearch) === key
+        )?.id
+      },
 
-  loadSites: async () => {
-    set({ loading: true, syncError: null })
-    try {
-      const user = await ensureAuthUser()
-      if (!user) {
-        set({
-          sites: [],
-          loading: false,
-          syncError: 'Sign in unavailable - enable Anonymous sign-ins in Supabase Auth (Authentication → Providers).',
-        })
-        return
-      }
-      const { data, error } = await supabase
-        .from('saved_sites')
-        .select('*')
-        .order('created_at', { ascending: false })
-      if (error) throw new Error(error.message)
-      const rows = (data ?? []) as SavedSiteRow[]
-      const sites = rows.map(rowToSite).filter((s): s is Site => s != null)
-      set({ sites, loading: false, syncError: null })
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Could not load saved sites'
-      set({ sites: [], loading: false, syncError: msg })
-    }
-  },
+      loadSites: async () => {
+        set({ loading: false, syncError: null })
+      },
 
-  addSite: async (site) => {
-    const user = await ensureAuthUser()
-    if (!user) {
-      set({
-        syncError: 'Cannot save - enable Anonymous sign-ins in Supabase Auth (Authentication → Providers).',
-      })
-      return false
-    }
-    const row = {
-      user_id: user.id,
-      label: site.label,
-      zip: site.zip,
-      lat: site.lat,
-      lng: site.lng,
-      market_label: site.marketLabel || null,
-      is_aggregate: site.isAggregate ?? false,
-      saved_search: site.savedSearch ?? null,
-      cycle_position: site.cyclePosition ?? null,
-      cycle_stage: site.cycleStage ?? null,
-      momentum_score: site.momentumScore ?? null,
-      notes: site.notes ?? null,
-    }
-    const { data, error } = await supabase.from('saved_sites').insert(row).select('*').single()
-    if (error) {
-      set({ syncError: error.message })
-      return false
-    }
-    const mapped = rowToSite(data as SavedSiteRow)
-    if (mapped) set((s) => ({ sites: [mapped, ...s.sites.filter((x) => x.id !== mapped.id)], syncError: null }))
-    return true
-  },
+      addSite: async (site) => {
+        const record: Site = {
+          ...site,
+          id: generateSiteId(),
+          createdAt: new Date().toISOString(),
+        }
+        set((state) => ({
+          sites: [record, ...state.sites.filter((entry) => entry.id !== record.id)],
+          syncError: null,
+        }))
+        return true
+      },
 
-  removeSite: async (id) => {
-    const prev = get().sites
-    set((s) => ({
-      sites: s.sites.filter((x) => x.id !== id),
-      selectedForComparison: s.selectedForComparison.filter((x) => x !== id),
-    }))
-    const { error } = await supabase.from('saved_sites').delete().eq('id', id)
-    if (error) {
-      set({ sites: prev, syncError: error.message })
-    }
-  },
+      removeSite: async (id) => {
+        set((state) => ({
+          sites: state.sites.filter((entry) => entry.id !== id),
+          selectedForComparison: state.selectedForComparison.filter((entry) => entry !== id),
+        }))
+      },
 
-  updateLabel: async (id, label) => {
-    const trimmed = label.trim()
-    if (!trimmed) return
-    set((s) => ({
-      sites: s.sites.map((x) => (x.id === id ? { ...x, label: trimmed } : x)),
-    }))
-    const { error } = await supabase.from('saved_sites').update({ label: trimmed }).eq('id', id)
-    if (error) set({ syncError: error.message })
-  },
+      updateLabel: async (id, label) => {
+        const trimmed = label.trim()
+        if (!trimmed) return
+        set((state) => ({
+          sites: state.sites.map((entry) => (entry.id === id ? { ...entry, label: trimmed } : entry)),
+        }))
+      },
 
-  updateNotes: async (id, notes) => {
-    set((s) => ({
-      sites: s.sites.map((x) => (x.id === id ? { ...x, notes } : x)),
-    }))
-    const { error } = await supabase.from('saved_sites').update({ notes }).eq('id', id)
-    if (error) set({ syncError: error.message })
-  },
+      updateNotes: async (id, notes) => {
+        set((state) => ({
+          sites: state.sites.map((entry) => (entry.id === id ? { ...entry, notes } : entry)),
+        }))
+      },
 
-  toggleComparison: (id) =>
-    set((s) => {
-      const on = s.selectedForComparison.includes(id)
-      const selectedForComparison = on
-        ? s.selectedForComparison.filter((x) => x !== id)
-        : [...s.selectedForComparison, id]
-      return { selectedForComparison }
+      toggleComparison: (id) =>
+        set((state) => {
+          const on = state.selectedForComparison.includes(id)
+          return {
+            selectedForComparison: on
+              ? state.selectedForComparison.filter((entry) => entry !== id)
+              : [...state.selectedForComparison, id],
+          }
+        }),
+
+      clearComparisonSelection: () => set({ selectedForComparison: [] }),
     }),
-
-  clearComparisonSelection: () => set({ selectedForComparison: [] }),
-}))
+    {
+      name: SITES_STORAGE_KEY,
+      storage: createJSONStorage(() => localStorage),
+      partialize: (state) => ({
+        sites: state.sites,
+        selectedForComparison: state.selectedForComparison,
+      }),
+      merge: (persisted, current) => {
+        const record = persisted as Partial<SitesStore> | null
+        const persistedSites = Array.isArray(record?.sites)
+          ? record.sites.map(normalizeSite).filter((site): site is Site => site != null)
+          : []
+        const selectedForComparison = Array.isArray(record?.selectedForComparison)
+          ? record.selectedForComparison.filter((entry): entry is string => typeof entry === 'string')
+          : []
+        return {
+          ...current,
+          sites: persistedSites,
+          selectedForComparison,
+          loading: false,
+          syncError: null,
+        }
+      },
+    }
+  )
+)

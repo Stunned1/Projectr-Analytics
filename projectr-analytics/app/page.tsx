@@ -43,8 +43,10 @@ import { MAP_VIEW_SAVE_ZIP } from '@/lib/saved-viewport'
 import { isNycBoroughName } from '@/lib/geography'
 import { fetchMomentumScores, getMomentumScore, normalizeMomentumZipList } from '@/lib/momentum-client'
 import { dedupedFetchJson } from '@/lib/request-cache'
+import { useSavedChartsStore, type SaveOutputInput } from '@/lib/saved-charts-store'
 
 const CommandMap = dynamic(() => import('@/components/CommandMap'), { ssr: false })
+const CURATED_DEFAULT_ZIP = '78701'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -715,6 +717,9 @@ export default function Home() {
   const [agentThinkingStreaming, setAgentThinkingStreaming] = useState(false)
   const [savedChartsExportOpen, setSavedChartsExportOpen] = useState(false)
   const mapViewportRef = useRef<MapViewportSnapshot | null>(null)
+  const savedOutputs = useSavedChartsStore((state) => state.outputs)
+  const saveOutput = useSavedChartsStore((state) => state.saveOutput)
+  const hasSavedOutput = useSavedChartsStore((state) => state.hasSavedOutput)
 
   const handleShowAgentThinking = useCallback((trace: AgentTrace) => {
     setSelectedSite(null)
@@ -1048,6 +1053,70 @@ export default function Home() {
     return marketLabel ? `${marketLabel} chart report` : 'Scout chart report'
   }, [aggregateData?.label, mapContext.label, result?.zip, result?.zillow?.city])
 
+  const starterExportOutput = useMemo<SaveOutputInput | null>(() => {
+    const marketLabel =
+      aggregateData?.label?.trim() ||
+      result?.zillow?.city?.trim() ||
+      result?.zip?.trim() ||
+      mapContext.label?.trim() ||
+      null
+    if (!marketLabel) return null
+
+    const stats: Array<{ label: string; value: string; sublabel?: string | null }> = []
+    const pushStat = (label: string, value: string | null | undefined, sublabel?: string | null) => {
+      if (!value || value === '-') return
+      stats.push({ label, value, sublabel: sublabel ?? null })
+    }
+
+    if (result) {
+      const vacancyRateValue = result.data.find((row) => row.metric_name === 'Vacancy_Rate')?.metric_value
+      const populationValue = result.data.find((row) => row.metric_name === 'Total_Population')?.metric_value
+      pushStat(
+        'Median Rent',
+        fmtMoney(result.zillow?.zori_latest),
+        fmtGrowth(result.zillow?.zori_growth_12m) ?? null
+      )
+      pushStat('Home Value', fmtMoney(result.zillow?.zhvi_latest), fmtGrowth(result.zillow?.zhvi_growth_12m) ?? null)
+      pushStat('Vacancy Rate', vacancyRateValue != null ? formatMetricValue('Vacancy_Rate', vacancyRateValue) : null)
+      pushStat('Population', populationValue != null ? formatMetricValue('Total_Population', populationValue) : null)
+      pushStat('Transit Stops', transit?.stop_count != null ? fmtNum(transit.stop_count) : null)
+    } else if (aggregateData) {
+      pushStat(
+        'Avg Rent',
+        fmtMoney(aggregateData.zillow.avg_zori),
+        aggregateData.zillow.zori_growth_12m != null ? `${fmtGrowth(aggregateData.zillow.zori_growth_12m)} YoY` : null
+      )
+      pushStat(
+        'Avg Home Value',
+        fmtMoney(aggregateData.zillow.avg_zhvi),
+        aggregateData.zillow.zhvi_growth_12m != null ? `${fmtGrowth(aggregateData.zillow.zhvi_growth_12m)} YoY` : null
+      )
+      pushStat('Vacancy Rate', fmtNum(aggregateData.housing.vacancy_rate, '%'))
+      pushStat('Population', fmtNum(aggregateData.total_population))
+      pushStat('Transit Stops', transit?.stop_count != null ? fmtNum(transit.stop_count) : null)
+    }
+
+    if (stats.length === 0) return null
+
+    return {
+      kind: 'stat_card',
+      prompt: 'Auto-saved starter export from the loaded market snapshot.',
+      marketLabel,
+      payload: {
+        title: `${marketLabel} market snapshot`,
+        summary: 'Grounded snapshot captured from the current workspace so export stays usable before any charts are saved.',
+        stats: stats.slice(0, 5),
+      },
+    }
+  }, [aggregateData, mapContext.label, result, transit])
+
+  const openSavedChartsExport = useCallback(() => {
+    if (savedOutputs.length === 0 && starterExportOutput && !hasSavedOutput(starterExportOutput)) {
+      saveOutput(starterExportOutput)
+    }
+    setSavedChartsExportOpen(true)
+  }, [hasSavedOutput, saveOutput, savedOutputs.length, starterExportOutput])
+
   /** Normalize `/api/trends` JSON into panel + PDF state (always sets `trends` so analysts see errors). */
   const applyTrendsApiBody = useCallback((body: Record<string, unknown> | null, httpOk: boolean) => {
     if (!httpOk || !body || typeof body !== 'object') {
@@ -1363,19 +1432,24 @@ export default function Home() {
 
   useEffect(() => {
     const nav = takePendingNav()
-    if (!nav) return
-    if (nav.type === 'coords') {
-      setAgentFlyTo({ lat: nav.lat, lng: nav.lng })
+    if (nav) {
+      if (nav.type === 'coords') {
+        setAgentFlyTo({ lat: nav.lat, lng: nav.lng })
+        return
+      }
+      if (nav.type === 'zip') {
+        setSearchInput(nav.zip)
+        void loadZipMarket(nav.zip)
+      } else {
+        setSearchInput(nav.query)
+        void runAggregateSearch(nav.query)
+      }
       return
     }
-    if (nav.type === 'zip') {
-      setSearchInput(nav.zip)
-      void loadZipMarket(nav.zip)
-    } else {
-      setSearchInput(nav.query)
-      void runAggregateSearch(nav.query)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot session handoff from /upload
+
+    setSearchInput(CURATED_DEFAULT_ZIP)
+    void loadZipMarket(CURATED_DEFAULT_ZIP)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot startup bootstrap for the curated deploy landing state
   }, [])
 
   const fredSeries: Record<string, Array<{ date: string; value: number }>> = {}
@@ -1530,6 +1604,16 @@ export default function Home() {
         />
         </div>
 
+        {!result && !aggregateData && !loading && !error && (
+          <div className="pointer-events-none absolute top-5 left-5 z-[34] max-w-sm rounded-2xl border border-white/10 bg-black/70 px-4 py-3 shadow-[0_16px_48px_rgba(0,0,0,0.35)] backdrop-blur">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-primary">Curated demo</p>
+            <p className="mt-1 text-sm font-semibold text-white">Loading Austin first</p>
+            <p className="mt-1 text-[11px] leading-relaxed text-zinc-300">
+              Scout starts in a warmed Texas market so the map, panel, and analyst assistant are populated immediately.
+            </p>
+          </div>
+        )}
+
         <AgentTerminal
           mapContext={mapContext}
           onAction={handleAgentAction}
@@ -1537,7 +1621,7 @@ export default function Home() {
           onSizeChange={setAgentTerminalSize}
           onOpenHeightPxChange={setAgentTerminalOpenHeightPx}
           onSlashSave={handleSlashSave}
-          onSlashExport={() => setSavedChartsExportOpen(true)}
+          onSlashExport={openSavedChartsExport}
           onShowThinking={handleShowAgentThinking}
           onAgentThinkingUpdate={handleAgentThinkingUpdate}
           onAgentThinkingStreamFinished={handleAgentThinkingStreamFinished}
@@ -1679,7 +1763,7 @@ export default function Home() {
                 <div className="min-w-0">
                   <h2 className="text-base font-bold leading-tight text-foreground">Workspace</h2>
                   <p className="mt-0.5 text-xs text-muted-foreground">
-                    {clientUploadAgg.fileNameLabel ?? 'Last imported dataset'}
+                    {clientUploadAgg?.fileNameLabel ?? 'Last imported dataset'}
                   </p>
                 </div>
                 <div className="flex flex-shrink-0 items-center gap-1.5">
@@ -1710,7 +1794,7 @@ export default function Home() {
           </div>
         )}
 
-        {panelOpen && !selectedSite && !result && (aggregateData != null || clientUploadAgg != null || agentSidebarTrace != null) && (
+        {panelOpen && !selectedSite && (result != null || aggregateData != null || clientUploadAgg != null || agentSidebarTrace != null) && (
           <div className="flex min-h-0 min-w-[360px] flex-1 flex-col overflow-hidden">
             <div className="shrink-0 border-b border-border/50 p-4 pb-3">
               <div className="flex items-start justify-between gap-2">
@@ -1751,7 +1835,164 @@ export default function Home() {
 
             {marketPanelTab === 'data' && (
               <>
-            {aggregateData ? (
+            {result ? (
+              <>
+            {result.zillow && (
+              <PanelSection title="Market Pricing">
+                <MetricRow metricKey="zori" label="Median Rent (ZORI)" value={fmtMoney(result.zillow.zori_latest)} sub={zoriGrowth ? `${zoriGrowth} YoY` : undefined} />
+                <MetricRow metricKey="zhvi" label="Home Value (ZHVI)" value={fmtMoney(result.zillow.zhvi_latest)} sub={fmtGrowth(result.zillow.zhvi_growth_12m) ?? undefined} />
+                <MetricRow
+                  metricKey="zhvf"
+                  label="1yr Forecast"
+                  value={result.zillow.zhvf_growth_1yr != null && Math.abs(result.zillow.zhvf_growth_1yr ?? 0) < 50
+                    ? fmtNum(result.zillow.zhvf_growth_1yr, '%') : '-'}
+                />
+              </PanelSection>
+            )}
+
+            {result.metro_velocity && (
+              <PanelSection title="Market Velocity">
+                <MetricRow metricKey="dozPending" label="Days to Pending" value={fmtNum(result.metro_velocity.doz_pending_latest, ' days')} />
+                <MetricRow metricKey="priceCuts" label="Price Cuts" value={fmtNum(result.metro_velocity.price_cut_pct_latest, '%')} sub="of listings" />
+                <MetricRow metricKey="inventory" label="Active Inventory" value={fmtNum(result.metro_velocity.inventory_latest)} />
+              </PanelSection>
+            )}
+
+            {tabularRows.length > 0 && (
+              <PanelSection title="Demographics & Affordability">
+                {tabularRows.map((r) => (
+                  <MetricRow
+                    key={r.metric_name + r.data_source}
+                    metricKey={metricKeyFromDataRow(r.metric_name) ?? undefined}
+                    label={r.metric_name}
+                    value={formatMetricValue(r.metric_name, r.metric_value)}
+                    sub={r.data_source}
+                  />
+                ))}
+              </PanelSection>
+            )}
+
+            {Object.keys(fredSeries).length > 0 && (
+              <PanelSection title="Economic Indicators">
+                {Object.entries(fredSeries).map(([metric, points]) => {
+                  const sorted = [...points].sort((a, b) => a.date.localeCompare(b.date))
+                  const latest = sorted.at(-1)
+                  const max = Math.max(...sorted.map((x) => x.value))
+                  const min = Math.min(...sorted.map((x) => x.value))
+                  const isRate = metric.includes('Rate')
+                  const isMoney = metric.includes('GDP') || metric.includes('Value') || metric.includes('Permit_Value')
+                  const latestDisplay = isMoney ? fmtMoney(latest?.value) : isRate ? fmtNum(latest?.value, '%') : fmtNum(latest?.value)
+                  const mk = sparklineMetricKey(metric)
+                  const labelText = metric.replace(/_/g, ' ')
+                  return (
+                    <div key={metric} className="mb-3">
+                      <div className="mb-1 flex justify-between">
+                        <p className="text-zinc-400 text-[11px]">
+                          {mk ? <MetricTooltip metricKey={mk}>{labelText}</MetricTooltip> : labelText}
+                        </p>
+                        <p className="text-white text-[11px] font-medium">{latestDisplay}</p>
+                      </div>
+                      <div className="flex h-7 items-end gap-px">
+                        {sorted.map((p, i) => {
+                          const height = max === min ? 50 : ((p.value - min) / (max - min)) * 100
+                          return <div key={i} className="flex-1 rounded-sm bg-primary/45" style={{ height: `${Math.max(height, 6)}%` }} />
+                        })}
+                      </div>
+                    </div>
+                  )
+                })}
+              </PanelSection>
+            )}
+
+            {trends && (
+              <PanelSection title="Search sentiment (Google Trends)">
+                {trends.error && <p className="mb-2 text-[10px] leading-snug text-amber-400">{trends.error}</p>}
+                {!trends.error && trends.empty_message && (
+                  <p className="mb-2 text-[10px] leading-snug text-zinc-500">{trends.empty_message}</p>
+                )}
+                {trends.geo_note && (
+                  <p className="mb-2 text-[9px] leading-snug text-zinc-600">{trends.geo_note}</p>
+                )}
+                <MetricRow
+                  metricKey="trends"
+                  label="Interest score"
+                  value={trends.latest_score != null ? `${trends.latest_score} / 100` : '-'}
+                  sub={trends.keyword_scope}
+                />
+                {trends.data_points > 1 && trends.series.length > 1 && (
+                  <div className="mt-2 flex h-7 items-end gap-px">
+                    {trends.series.map((p, i) => (
+                      <div key={i} className="flex-1 rounded-sm bg-white/20" style={{ height: `${Math.max(p.value, 4)}%` }} />
+                    ))}
+                  </div>
+                )}
+              </PanelSection>
+            )}
+
+            {transit && transit.stop_count > 0 && (
+              <PanelSection title="Transit Connectivity">
+                <MetricRow metricKey="transit" label="Nearby Stops" value={transit.stop_count.toLocaleString()} sub="bus stops within radius" />
+              </PanelSection>
+            )}
+
+            {result.geo && /^\d{5}$/.test(result.zip) && (
+              <ShortlistToggleButton market={result} />
+            )}
+
+            <details className="mb-4 rounded-lg border border-border/60 bg-muted/10 px-3 py-2">
+              <summary className="cursor-pointer text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                All metrics (flat table)
+              </summary>
+              <div className="mt-3 space-y-0 border-t border-border/40 pt-2">
+                {result.zillow && (
+                  <>
+                    <MetricRow label="Median Rent (ZORI)" value={fmtMoney(result.zillow.zori_latest)} sub={zoriGrowth ?? undefined} />
+                    <MetricRow label="Home Value (ZHVI)" value={fmtMoney(result.zillow.zhvi_latest)} sub={fmtGrowth(result.zillow.zhvi_growth_12m) ?? undefined} />
+                    <MetricRow
+                      label="1yr Forecast"
+                      value={
+                        result.zillow.zhvf_growth_1yr != null && Math.abs(result.zillow.zhvf_growth_1yr ?? 0) < 50
+                          ? fmtNum(result.zillow.zhvf_growth_1yr, '%')
+                          : '-'
+                      }
+                    />
+                  </>
+                )}
+                {result.metro_velocity && (
+                  <>
+                    <MetricRow label="Days to Pending" value={fmtNum(result.metro_velocity.doz_pending_latest, ' days')} />
+                    <MetricRow label="Price Cuts" value={fmtNum(result.metro_velocity.price_cut_pct_latest, '%')} sub="of listings" />
+                    <MetricRow
+                      label="Active Inventory"
+                      value={fmtNum(result.metro_velocity.inventory_latest)}
+                      sub={result.metro_velocity.region_name}
+                    />
+                  </>
+                )}
+                {tabularRows.map((r) => (
+                  <MetricRow
+                    key={r.metric_name}
+                    label={r.metric_name}
+                    value={formatMetricValue(r.metric_name, r.metric_value)}
+                    sub={r.data_source}
+                  />
+                ))}
+                {transit && <MetricRow label="Transit Stops" value={transit.stop_count.toLocaleString()} sub="nearby stops" />}
+                {trends?.latest_score != null && (
+                  <MetricRow
+                    label="Search Interest"
+                    value={`${trends.latest_score} / 100`}
+                    sub={trends.is_fallback ? 'state-level' : 'local'}
+                  />
+                )}
+              </div>
+            </details>
+
+            <PanelSection title="Agentic Normalizer">
+              <AgenticNormalizer currentZip={result.zip} onIngested={handleNormalizerIngested} />
+            </PanelSection>
+              </>
+            ) : aggregateData ? (
               <>
             <PanelSection title="Market Pricing (Zillow)">
               <MetricRow metricKey="zori" label="Avg Median Rent (ZORI)" value={fmtMoney(aggregateData.zillow.avg_zori)} sub={aggregateData.zillow.zori_growth_12m != null ? `${fmtGrowth(aggregateData.zillow.zori_growth_12m)} YoY avg` : undefined} />
@@ -1800,22 +2041,22 @@ export default function Home() {
 
             {trends && (
               <PanelSection title="Search sentiment (Google Trends)">
-                {trends.error && <p className="text-amber-400 text-[10px] mb-2 leading-snug">{trends.error}</p>}
-                {!trends.error && trends.empty_message && (
-                  <p className="text-zinc-500 text-[10px] mb-2 leading-snug">{trends.empty_message}</p>
+                {trends!.error && <p className="text-amber-400 text-[10px] mb-2 leading-snug">{trends!.error}</p>}
+                {!trends!.error && trends!.empty_message && (
+                  <p className="text-zinc-500 text-[10px] mb-2 leading-snug">{trends!.empty_message}</p>
                 )}
-                {trends.geo_note && (
-                  <p className="text-zinc-600 text-[9px] mb-2 leading-snug">{trends.geo_note}</p>
+                {trends!.geo_note && (
+                  <p className="text-zinc-600 text-[9px] mb-2 leading-snug">{trends!.geo_note}</p>
                 )}
                 <MetricRow
                   metricKey="trends"
                   label="Interest score"
-                  value={trends.latest_score != null ? `${trends.latest_score} / 100` : '-'}
-                  sub={trends.keyword_scope}
+                  value={trends!.latest_score != null ? `${trends!.latest_score} / 100` : '-'}
+                  sub={trends!.keyword_scope}
                 />
-                {trends.data_points > 1 && trends.series.length > 1 && (
+                {trends!.data_points > 1 && trends!.series.length > 1 && (
                   <div className="flex items-end gap-px h-7 mt-2">
-                    {trends.series.map((p, i) => (
+                    {trends!.series.map((p, i) => (
                       <div key={i} className="flex-1 bg-white/20 rounded-sm" style={{ height: `${Math.max(p.value, 4)}%` }} />
                     ))}
                   </div>
@@ -1910,8 +2151,8 @@ export default function Home() {
             <div className="shrink-0 border-b border-border/50 p-4 pb-3">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <h2 className="text-base font-bold leading-tight text-foreground">{result.zillow?.city ?? result.zip}</h2>
-                  <p className="mt-0.5 text-xs text-muted-foreground">{result.zillow?.metro_name ?? ''} · {result.zip}</p>
+                  <h2 className="text-base font-bold leading-tight text-foreground">{result!.zillow?.city ?? result!.zip}</h2>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{result!.zillow?.metro_name ?? ''} · {result!.zip}</p>
                 </div>
                 <div className="flex flex-shrink-0 items-center gap-1.5">
                   <button type="button" onClick={() => setPanelOpen(false)} className="text-xl leading-none text-muted-foreground hover:text-foreground">×</button>
@@ -1947,25 +2188,25 @@ export default function Home() {
             {marketPanelTab === 'data' && (
               <>
             {/* Zillow pricing */}
-            {result.zillow && (
+            {result!.zillow && (
               <PanelSection title="Market Pricing">
-                <MetricRow metricKey="zori" label="Median Rent (ZORI)" value={fmtMoney(result.zillow.zori_latest)} sub={zoriGrowth ? `${zoriGrowth} YoY` : undefined} />
-                <MetricRow metricKey="zhvi" label="Home Value (ZHVI)" value={fmtMoney(result.zillow.zhvi_latest)} sub={fmtGrowth(result.zillow.zhvi_growth_12m) ?? undefined} />
+                <MetricRow metricKey="zori" label="Median Rent (ZORI)" value={fmtMoney(result!.zillow!.zori_latest)} sub={zoriGrowth ? `${zoriGrowth} YoY` : undefined} />
+                <MetricRow metricKey="zhvi" label="Home Value (ZHVI)" value={fmtMoney(result!.zillow!.zhvi_latest)} sub={fmtGrowth(result!.zillow!.zhvi_growth_12m) ?? undefined} />
                 <MetricRow
                   metricKey="zhvf"
                   label="1yr Forecast"
-                  value={result.zillow.zhvf_growth_1yr != null && Math.abs(result.zillow.zhvf_growth_1yr) < 50
-                    ? fmtNum(result.zillow.zhvf_growth_1yr, '%') : '-'}
+                  value={result!.zillow!.zhvf_growth_1yr != null && Math.abs(result!.zillow!.zhvf_growth_1yr ?? 0) < 50
+                    ? fmtNum(result!.zillow!.zhvf_growth_1yr, '%') : '-'}
                 />
               </PanelSection>
             )}
 
             {/* Metro velocity */}
-            {result.metro_velocity && (
+            {result!.metro_velocity && (
               <PanelSection title="Market Velocity">
-                <MetricRow metricKey="dozPending" label="Days to Pending" value={fmtNum(result.metro_velocity.doz_pending_latest, ' days')} />
-                <MetricRow metricKey="priceCuts" label="Price Cuts" value={fmtNum(result.metro_velocity.price_cut_pct_latest, '%')} sub="of listings" />
-                <MetricRow metricKey="inventory" label="Active Inventory" value={fmtNum(result.metro_velocity.inventory_latest)} />
+                <MetricRow metricKey="dozPending" label="Days to Pending" value={fmtNum(result!.metro_velocity!.doz_pending_latest, ' days')} />
+                <MetricRow metricKey="priceCuts" label="Price Cuts" value={fmtNum(result!.metro_velocity!.price_cut_pct_latest, '%')} sub="of listings" />
+                <MetricRow metricKey="inventory" label="Active Inventory" value={fmtNum(result!.metro_velocity!.inventory_latest)} />
               </PanelSection>
             )}
 
@@ -2020,22 +2261,22 @@ export default function Home() {
             {/* Google Trends */}
             {trends && (
               <PanelSection title="Search sentiment (Google Trends)">
-                {trends.error && <p className="text-amber-400 text-[10px] mb-2 leading-snug">{trends.error}</p>}
-                {!trends.error && trends.empty_message && (
-                  <p className="text-zinc-500 text-[10px] mb-2 leading-snug">{trends.empty_message}</p>
+                {trends!.error && <p className="text-amber-400 text-[10px] mb-2 leading-snug">{trends!.error}</p>}
+                {!trends!.error && trends!.empty_message && (
+                  <p className="text-zinc-500 text-[10px] mb-2 leading-snug">{trends!.empty_message}</p>
                 )}
-                {trends.geo_note && (
-                  <p className="text-zinc-600 text-[9px] mb-2 leading-snug">{trends.geo_note}</p>
+                {trends!.geo_note && (
+                  <p className="text-zinc-600 text-[9px] mb-2 leading-snug">{trends!.geo_note}</p>
                 )}
                 <MetricRow
                   metricKey="trends"
                   label="Interest score"
-                  value={trends.latest_score != null ? `${trends.latest_score} / 100` : '-'}
-                  sub={trends.keyword_scope}
+                  value={trends!.latest_score != null ? `${trends!.latest_score} / 100` : '-'}
+                  sub={trends!.keyword_scope}
                 />
-                {trends.data_points > 1 && trends.series.length > 1 && (
+                {trends!.data_points > 1 && trends!.series.length > 1 && (
                   <div className="flex items-end gap-px h-7 mt-2">
-                    {trends.series.map((p, i) => (
+                    {trends!.series.map((p, i) => (
                       <div key={i} className="flex-1 bg-white/20 rounded-sm" style={{ height: `${Math.max(p.value, 4)}%` }} />
                     ))}
                   </div>
@@ -2044,14 +2285,14 @@ export default function Home() {
             )}
 
             {/* Transit */}
-            {transit && transit.stop_count > 0 && (
+            {transit && transit!.stop_count > 0 && (
               <PanelSection title="Transit Connectivity">
-                <MetricRow metricKey="transit" label="Nearby Stops" value={transit.stop_count.toLocaleString()} sub="bus stops within radius" />
+                <MetricRow metricKey="transit" label="Nearby Stops" value={transit!.stop_count.toLocaleString()} sub="bus stops within radius" />
               </PanelSection>
             )}
 
-            {result?.geo && /^\d{5}$/.test(result.zip) && (
-              <ShortlistToggleButton market={result} />
+            {result?.geo && /^\d{5}$/.test(result!.zip) && (
+              <ShortlistToggleButton market={result!} />
             )}
 
             <details className="mb-4 rounded-lg border border-border/60 bg-muted/10 px-3 py-2">
@@ -2059,28 +2300,28 @@ export default function Home() {
                 All metrics (flat table)
               </summary>
               <div className="mt-3 space-y-0 border-t border-border/40 pt-2">
-                {result.zillow && (
+                {result!.zillow && (
                   <>
-                    <MetricRow label="Median Rent (ZORI)" value={fmtMoney(result.zillow.zori_latest)} sub={zoriGrowth ?? undefined} />
-                    <MetricRow label="Home Value (ZHVI)" value={fmtMoney(result.zillow.zhvi_latest)} sub={fmtGrowth(result.zillow.zhvi_growth_12m) ?? undefined} />
+                    <MetricRow label="Median Rent (ZORI)" value={fmtMoney(result!.zillow!.zori_latest)} sub={zoriGrowth ?? undefined} />
+                    <MetricRow label="Home Value (ZHVI)" value={fmtMoney(result!.zillow!.zhvi_latest)} sub={fmtGrowth(result!.zillow!.zhvi_growth_12m) ?? undefined} />
                     <MetricRow
                       label="1yr Forecast"
                       value={
-                        result.zillow.zhvf_growth_1yr != null && Math.abs(result.zillow.zhvf_growth_1yr) < 50
-                          ? fmtNum(result.zillow.zhvf_growth_1yr, '%')
+                        result!.zillow!.zhvf_growth_1yr != null && Math.abs(result!.zillow!.zhvf_growth_1yr ?? 0) < 50
+                          ? fmtNum(result!.zillow!.zhvf_growth_1yr, '%')
                           : '-'
                       }
                     />
                   </>
                 )}
-                {result.metro_velocity && (
+                {result!.metro_velocity && (
                   <>
-                    <MetricRow label="Days to Pending" value={fmtNum(result.metro_velocity.doz_pending_latest, ' days')} />
-                    <MetricRow label="Price Cuts" value={fmtNum(result.metro_velocity.price_cut_pct_latest, '%')} sub="of listings" />
+                    <MetricRow label="Days to Pending" value={fmtNum(result!.metro_velocity!.doz_pending_latest, ' days')} />
+                    <MetricRow label="Price Cuts" value={fmtNum(result!.metro_velocity!.price_cut_pct_latest, '%')} sub="of listings" />
                     <MetricRow
                       label="Active Inventory"
-                      value={fmtNum(result.metro_velocity.inventory_latest)}
-                      sub={result.metro_velocity.region_name}
+                      value={fmtNum(result!.metro_velocity!.inventory_latest)}
+                      sub={result!.metro_velocity!.region_name}
                     />
                   </>
                 )}
@@ -2092,19 +2333,19 @@ export default function Home() {
                     sub={r.data_source}
                   />
                 ))}
-                {transit && <MetricRow label="Transit Stops" value={transit.stop_count.toLocaleString()} sub="nearby stops" />}
+                {transit && <MetricRow label="Transit Stops" value={transit!.stop_count.toLocaleString()} sub="nearby stops" />}
                 {trends?.latest_score != null && (
                   <MetricRow
                     label="Search Interest"
-                    value={`${trends.latest_score} / 100`}
-                    sub={trends.is_fallback ? 'state-level' : 'local'}
+                    value={`${trends!.latest_score} / 100`}
+                    sub={trends!.is_fallback ? 'state-level' : 'local'}
                   />
                 )}
               </div>
             </details>
 
             <PanelSection title="Agentic Normalizer">
-              <AgenticNormalizer currentZip={result.zip} onIngested={handleNormalizerIngested} />
+              <AgenticNormalizer currentZip={result!.zip} onIngested={handleNormalizerIngested} />
             </PanelSection>
               </>
             )}

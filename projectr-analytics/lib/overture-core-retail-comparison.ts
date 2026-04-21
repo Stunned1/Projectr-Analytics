@@ -73,7 +73,10 @@ function resolveCoreRetailCity(name: string): CoreRetailCity | null {
 function bucketCategory(category: string | null | undefined): keyof typeof BUCKET_LABELS | null {
   if (!category) return null
   const normalized = category.trim().toLowerCase()
-  return OVERTURE_CORE_RETAIL_CATEGORY_TO_BUCKET[normalized] ?? null
+  if (!(normalized in OVERTURE_CORE_RETAIL_CATEGORY_TO_BUCKET)) return null
+  return OVERTURE_CORE_RETAIL_CATEGORY_TO_BUCKET[
+    normalized as keyof typeof OVERTURE_CORE_RETAIL_CATEGORY_TO_BUCKET
+  ] ?? null
 }
 
 function countBuckets(places: OverturePlace[]): Record<keyof typeof BUCKET_LABELS, number> {

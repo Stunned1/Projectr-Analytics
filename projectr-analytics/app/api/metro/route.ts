@@ -24,22 +24,6 @@ type MetroLookupRow = {
   lng: number | null
 }
 
-function mapTexasMetroRows(rows: Awaited<ReturnType<typeof fetchTexasZctaRowsByMetro>>): MetroZipCoverageRow[] {
-  return rows.map((row) => ({
-    zip: row.zcta5,
-    city: row.city ?? `ZIP ${row.zcta5}`,
-    state: row.state_abbr,
-    metro_name: row.metro_name,
-    metro_name_short: row.metro_name_short,
-    lat: row.lat,
-    lng: row.lng,
-    zori_latest: row.zori_latest,
-    zhvi_latest: row.zhvi_latest,
-    zori_growth_12m: row.zori_growth_12m,
-    zhvi_growth_12m: row.zhvi_growth_12m,
-  }))
-}
-
 async function queryMetroRows(
   column: 'metro_name' | 'metro_name_short',
   pattern: string,
@@ -68,7 +52,7 @@ function metroShortAlias(value: string): string | null {
 async function queryTexasMetroRows(
   metroName: string,
   stateAbbr?: string | null
-): Promise<MetroZipCoverageRow[]> {
+): Promise<Awaited<ReturnType<typeof fetchTexasZctaRowsByMetro>>> {
   if (stateAbbr && stateAbbr !== 'TX') return []
 
   let rows = await fetchTexasZctaRowsByMetro(metroName, 'TX', { limit: MAX_METRO_ZIPS })
@@ -84,8 +68,7 @@ async function queryTexasMetroRows(
       rows = await fetchTexasZctaRowsByMetro(alias, 'TX', { limit: MAX_METRO_ZIPS })
     }
   }
-
-  return mapTexasMetroRows(rows)
+  return rows
 }
 
 export async function GET(request: NextRequest) {
@@ -121,8 +104,9 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    if (shouldMergeTexasMetroCoverage(stateAbbr, rows)) {
-      const texasCoverageRows = await queryTexasMetroRows(metroName, stateAbbr)
+    const normalizedStateAbbr = stateAbbr ?? undefined
+    if (shouldMergeTexasMetroCoverage(normalizedStateAbbr, rows)) {
+      const texasCoverageRows = await queryTexasMetroRows(metroName, normalizedStateAbbr)
       if (texasCoverageRows.length > 0) {
         rows = mergeTexasMetroCoverageRows(rows, texasCoverageRows)
       }

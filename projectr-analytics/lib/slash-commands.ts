@@ -12,7 +12,7 @@ export const SLASH_MAP_TILT_MAX_DEG = 67.5
 
 /** Implemented today — order is how they appear under `/`. */
 export const SLASH_COMMANDS: SlashCommandDef[] = [
-  { command: 'help', summary: 'List commands, tips, and roadmap ideas' },
+  { command: 'help', summary: 'List commands and usage tips' },
   { command: 'view', summary: 'Map tilt: `/view 3d` or `/view 2d`' },
   {
     command: 'tilt',
@@ -46,14 +46,6 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
     command: 'restart',
     summary: '`/restart` then type `y` or `n`: wipe all `projectr-*` keys + reload, or cancel',
   },
-]
-
-/** Shown inside /help only — not executable yet. */
-export const SLASH_COMMAND_IDEAS: string[] = [
-  '/data: open right panel on Data tab',
-  '/zip <5-digit or city>: same as sidebar search (or use `/go`)',
-  '/brief: market brief PDF export',
-  '/context: copy sanitized map context for debugging',
 ]
 
 export function getSlashPaletteState(input: string): { open: boolean; matches: SlashCommandDef[] } {
@@ -195,10 +187,6 @@ export function buildSlashHelpMessage(): string {
     '',
     '/restart (detail):',
     ...restartSlashUsageLines().split('\n').map((ln) => `  ${ln}`),
-    '',
-    'Roadmap (not wired yet. Tell us what you want first):',
-    ...SLASH_COMMAND_IDEAS.map((s) => `  ${s}`),
-    '',
     'Anything starting with `/` is treated as a slash command. Unknown slash commands return a local error and are never sent to the Gemini agent.',
     'Natural-language prompts without `/` are sent to the Gemini agent only when they look related to Scout real estate, map, market, or uploaded-data work.',
   ]
@@ -397,11 +385,11 @@ export type ParsedSaveSlash = { kind: 'run'; customLabel: string | null }
 
 export function saveSlashUsageLines(): string {
   return [
-    'Usage: `/save` or `/save <name>`: adds a row to **Saved** (same Supabase flow as the data panel).',
+    'Usage: `/save` or `/save <name>`: adds a row to **Saved** in this browser.',
     '• **ZIP loaded** saves that market (optional name replaces the default place label).',
     '• **County / metro / city loaded** saves the area (optional name; reopen uses your sidebar search text when set). NYC boroughs also work when relevant.',
     '• **Otherwise** saves the **current map center** as a bookmark (optional name; default label uses rounded coordinates).',
-    '• Requires Auth (enable **Anonymous** sign-ins in Supabase if you see a sign-in error).',
+    '• Saved entries stay local to this browser and do not require sign-in.',
   ].join('\n')
 }
 

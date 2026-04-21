@@ -27,6 +27,7 @@ export interface CycleRawInputs {
 
 type CycleMetricSeriesArgs = Parameters<typeof getMetricSeries>[0]
 type ZillowSnapshot = { zori_growth_12m: number | null; zori_latest: number | null } | null
+type ZillowZoriMonthlyRow = { month: string | Date; zori: number | string | null }
 
 export interface LoadCycleRawInputsDependencies {
   now?: Date
@@ -54,7 +55,7 @@ async function fetchDefaultZoriMonthly(zip: string): Promise<ZoriMonthlyPoint[]>
 
   if (error) throw new Error(error.message)
 
-  return (monthly ?? [])
+  return ((monthly ?? []) as ZillowZoriMonthlyRow[])
     .map((r) => ({
       month: typeof r.month === 'string' ? r.month : String(r.month),
       zori: Number(r.zori),

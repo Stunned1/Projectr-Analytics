@@ -192,18 +192,19 @@ async function readGeocodeFromDb(zip: string): Promise<GeoResult | null> {
 
 async function persistGeocodeToDb(zip: string, geo: GeoResult, source: string): Promise<void> {
   try {
+    const row = {
+      zip,
+      lat: geo.lat,
+      lng: geo.lng,
+      city: geo.city,
+      state: geo.state,
+      state_fips: geo.stateFips,
+      county_fips: geo.countyFips,
+      source,
+      updated_at: new Date().toISOString(),
+    }
     await supabase.from('zip_geocode_cache').upsert(
-      {
-        zip,
-        lat: geo.lat,
-        lng: geo.lng,
-        city: geo.city,
-        state: geo.state,
-        state_fips: geo.stateFips,
-        county_fips: geo.countyFips,
-        source,
-        updated_at: new Date().toISOString(),
-      },
+      row as never,
       { onConflict: 'zip' }
     )
   } catch {

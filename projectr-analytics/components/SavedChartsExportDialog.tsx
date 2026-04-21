@@ -147,7 +147,7 @@ export default function SavedChartsExportDialog({
               <div className="pr-4">
                 {outputs.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-border bg-muted/20 p-4 text-sm leading-relaxed text-muted-foreground">
-                    Save at least one output first, then run <span className="font-semibold text-foreground">/export</span>.
+                    No saved outputs are available yet. Load a market and run <span className="font-semibold text-foreground">/export</span> to auto-seed a starter snapshot, or save a chart or companion output first.
                   </div>
                 ) : (
                   <div className="grid gap-4 xl:grid-cols-2">
@@ -172,7 +172,9 @@ export default function SavedChartsExportDialog({
                                       ? output.payload.title
                                       : output.kind === 'stat_card'
                                         ? output.payload.title
-                                        : output.payload.siteLabel}
+                                        : output.kind === 'permit_detail'
+                                          ? output.payload.title
+                                          : output.payload.siteLabel}
                                   </p>
                                   <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
                                     {'prompt' in output && output.prompt ? output.prompt : 'Saved sidebar artifact'}

@@ -10,7 +10,7 @@ export interface AnalyticalSourceRegistryEntry {
   system: AnalyticalSourceSystem
   tableOrEndpoint: string
   topics: readonly AnalyticalTopic[]
-  geographyKinds: readonly Array<AnalyticalSubject['kind']>
+  geographyKinds: ReadonlyArray<AnalyticalSubject['kind']>
   notes: string
   enabled: boolean
 }

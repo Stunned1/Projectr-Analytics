@@ -7,7 +7,7 @@ A geospatial data engine, bounded EDA assistant, and automated reporting platfor
 * **Unified Pipeline:** Ingests and normalizes data from 8 public sources, including Zillow, Census ACS, FRED, HUD, Transitland, and NYC Open Data.
 * **CSV Import + Normalization:** Drag-and-drop CSV uploads are automatically categorized, classified for mapability, and routed to map, chart, or table views.
 * **EDA Assistant:** The default AI surface summarizes loaded markets and uploaded datasets, explains metrics, flags outliers, and calls out data-quality issues using deterministic workspace evidence.
-* **Saved Workspace:** Saved Sites persists map/site context, and Saved Charts collects terminal-generated charts for the current browser session.
+* **Saved Workspace:** Saved Sites now persist in local browser storage with no sign-in requirement, and Saved Charts collect terminal-generated charts for the current browser session.
 * **Spatial Engine:** Renders dense datasets, including parcels and building permits, smoothly via WebGL.
 * **Automated Reporting:** Generates structured, exportable PDF market briefs directly from the live map state.
 
@@ -18,6 +18,13 @@ A geospatial data engine, bounded EDA assistant, and automated reporting platfor
 * **Database:** Supabase (PostgreSQL, PostGIS)
 * **Intelligence:** Gemini 2.5 Flash over deterministic EDA summaries and explicit map-control guards
 * **Reporting:** @react-pdf/renderer
+
+## Judge Deploy Scope
+
+- The current deploy posture is Texas-first and judge-oriented rather than fully generalized.
+- First load opens directly into a warmed Austin market state so the map, data panel, and assistant are populated immediately.
+- Upload remains available by route, but the primary navigation stays focused on Map, Saved, and Guide.
+- NYC-only and experimental paths remain in the repo, but they are intentionally de-emphasized in the deployed surface.
 
 ## EDA Assistant Boundary
 
@@ -117,7 +124,7 @@ For Texas statewide ZIP/ZCTA coverage seeding, run `npm run load:texas:zctas -- 
 ### First-time data setup
 1. Download Zillow CSVs (see section below) into `zillow-csv's/` at repo root
 2. `cd projectr-analytics && npm install`
-3. In Supabase SQL Editor, run migrations under `projectr-analytics/supabase/migrations/`: `20260411120000_zip_geocode_cache.sql` (ZIP geocode cache), `20260411180000_zillow_zori_monthly.sql` (monthly ZORI for PDF charts), `20260411190000_saved_sites.sql` (analyst shortlist; requires Auth), `20260411200000_saved_sites_aggregate.sql` (multi-area shortlist replay), and `20260419090000_address_geocode_cache.sql` (persistent forward-geocode cache for uploads and Houston raw permits)
+3. In Supabase SQL Editor, run migrations under `projectr-analytics/supabase/migrations/`: `20260411120000_zip_geocode_cache.sql` (ZIP geocode cache), `20260411180000_zillow_zori_monthly.sql` (monthly ZORI for PDF charts), and `20260419090000_address_geocode_cache.sql` (persistent forward-geocode cache for uploads and Houston raw permits)
 4. `npm run ingest:zillow` - loads Zillow data into Supabase
 5. `npm run populate:centroids` - run 6-7 times until "All centroids already populated" (geocodes ~7,661 ZIPs)
 6. `npm run ingest:permits` - ingests NYC DOB building permits into `nyc_permits` table (all 5 boroughs, NB/A1/A2/DM, 2022+); takes ~10-20 min
@@ -128,7 +135,7 @@ For Texas statewide ZIP/ZCTA coverage seeding, run `npm run load:texas:zctas -- 
 11. Optional before Houston permit demos: run `npm run warm:houston:permits -- --limit 500` first, then rerun without `--limit` when you want the full recent archive geocoded into `address_geocode_cache` for point rendering instead of ZIP-centroid fallbacks.
 
 ### Known setup issues
-- **Shortlist / `saved_sites`** - enable **Anonymous sign-ins** under Supabase Authentication → Providers (or use email/OAuth); the app calls `signInAnonymously()` when there is no session so `saved_sites` inserts satisfy RLS.
+- **Saved Sites are browser-local** - shortlist entries now live in local browser storage for the judge deploy surface, so they do not sync across browsers or devices.
 - **Turbopack + Tailwind** - if you get `Can't resolve 'tailwindcss'`, kill any stale `next dev` processes and restart fresh. Stale processes hold onto old module resolution state.
 - **Google Maps Map ID** - must be a Vector type map for deck.gl `interleaved: true` mode. Raster maps cause `fromLatLngToDivPixel` errors.
 - **Overture POIs in Texas** - Overture's demo key only works near its demo cities, so Austin / Houston / Dallas POI requests need `OVERTURE_API_KEY` or the POI layer will come back empty.
@@ -187,6 +194,9 @@ _04.20.2026_
 - `/api/agent` now supports bounded Austin-vs-Houston and Austin-vs-Dallas Overture core-retail comparisons rendered as grouped bar charts from fixed-radius core snapshots, while still rejecting other city pairings.
 - Agent chart messages now retain the originating trimmed prompt in `chartSourcePrompt` so later saved-chart workflows can attach prompt metadata without changing the response contract.
 
+_04.21.2026_
+- Saved Sites now persist in local browser storage instead of relying on Supabase anonymous auth, and the production build passes again after tightening older route and helper typing.
+
 _04.16.2026_
 - Added shared geography gating and Texas MVP source / architecture / performance notes so Texas becomes the default product framing without deleting NYC-specific workflows.
 
@@ -242,6 +252,11 @@ _04.20.2026_
 - Terminal chart saves now dedupe by chart, prompt, and market label signature, and chart messages preserve their originating market label so the `Saved` state survives remounts without creating duplicate records.
 - `/clear:workspace` now clears session-local saved charts alongside chat and upload state so the Saved Charts panel resets predictably.
 - Saved-chart PDF export now uses a valid Next App Router `route.ts` handler, so `/export` can generate merged-session chart reports again.
+
+_04.21.2026_
+- Cleared the older TypeScript regressions across report helpers, market-data routing, permit APIs, and warming scripts so `npm run build` now completes successfully again.
+- Restored the shared right-panel data path for loaded ZIP markets so the Data, Imported Data, and Assistant tabs no longer render blank in the dev build.
+- Narrowed the bounded public-macro router and rewrote the lead market-summary starter prompt so Austin demo suggestions fall through to grounded market EDA instead of the unsupported macro-metric message.
 
 _4.11.2026_
 - Agent keys: `permits` / `nycPermits` normalization; clear tracts/blockGroups after `run_analysis`; `FlyToController` uses `moveCamera` + easing; layer chrome layout; PDF cycle layout, arrows, wrapping, sanitizers; restore `sites-store`; normalize JSON from Gemini; split `AGENT_CHAT_STORAGE_KEY`; default ZIP boundary + choropleth on; `/clear:layers` + override resync + `overlayReady`; Transit `paths` / `color` + legacy `path` caps.
@@ -366,6 +381,11 @@ _04.19.2026_
 - Austin city permit-history prompts that still ask for multi-year windows now fail explicitly with a monthly-only / since-January-2024 explanation instead of silently falling back to misleading county or master-data series.
 - Added `fixtures/austin-demo-case-study/austin_opportunity_shortlist.csv`, a 4-row mixed Austin opportunity shortlist with two development sites and two multifamily acquisitions for demo upload and case-study flows.
 
+_04.21.2026_
+- The judge-facing map now opens directly into Austin ZIP `78701`, keeps the right panel ready on first load, and trims primary navigation to the strongest discovery paths.
+- Terminal starter prompts and slash-help copy now stay inside the curated Texas-first deploy surface instead of advertising unwired roadmap ideas or auth-gated flows.
+- `/export` now auto-seeds a grounded market snapshot when the current session has no saved outputs, so the demo can still generate a valid PDF before any charts are explicitly saved.
+
 ## Known Bugs
 
 - **DC Metro velocity null** - Zips in the Washington-Arlington-Alexandria metro return `metro_velocity: null` because the metro name is too long to match the short name stored in `zillow_metro_snapshot`. The `getZillowData` function in `app/api/market/route.ts` needs smarter truncation logic for multi-city metro names.
@@ -379,8 +399,6 @@ _04.19.2026_
 - **Transit lines missing but yellow circles remain** - When `TRANSITLAND_API_KEY` is absent or Transitland returns no drawable routes, `/api/transit` falls back to `lib/fetchGtfs.ts`; if that Overpass query fails and hits the smaller retry, the retry only requests stop nodes and no rail ways, so the map renders yellow subway entrance circles without PathLayer route lines.
 
 - **EDA fallback still crashes on malformed profile entries** - `lib/eda-assistant.ts` now normalizes missing workspace arrays, but `/api/agent` can still throw if `uploadedDatasets` or `market.metrics` contain `null` entries; the fallback normalizer needs object-shape guards before it dereferences dataset and metric fields.
-- **Full build still hits untyped Supabase route payloads** - `npm run build` now gets past the shared chart and router code, but older API routes like `app/api/borough/route.ts` still infer Supabase `data` payloads as `never[]`; each affected route needs explicit local row typing before the production build baseline is fully clean.
-
 ## Minor Gaps
 
 - **Saved Charts are session-local** - Terminal chart saves persist only in the current browser tab/session and are cleared by workspace reset; cross-device persistence would require a dedicated saved-chart backend model.
@@ -428,7 +446,7 @@ _04.19.2026_
 
 - **After you load a new location** — Session pins and the assistant CSV context **stay** until you upload another file or clear pins; they are **not** tied to the searched ZIP. Supabase ingested rows are keyed by **row geography + metric + period**, not by whatever ZIP is on screen—so changing markets does not delete prior uploads, but the **Data** tab metrics view is still filtered to the **current** market unless you query elsewhere.
 
-- **Shortlist** — `saved_sites` stores label, ZIP/aggregate hint, geo, cycle snapshot, and notes only; it does **not** store CSV blobs or agent transcripts. Restoring a shortlist row reloads that market, not a prior upload or chat (see **Deferred**).
+- **Shortlist** — Saved Sites now live in browser-local storage and store label, ZIP/aggregate hint, geo, cycle snapshot, and notes only; they do **not** store CSV blobs or agent transcripts. Restoring a shortlist row reloads that market, not a prior upload or chat (see **Deferred**).
 - **Reset local workspace (QA)** — Use **`/clear:workspace`** on the map EDA assistant to wipe this tab’s Client CSV session, pins, assistant chat, and pending sidebar→map navigation, then reload. Ingested **Client Upload** rows remain in Supabase until you remove them in the database.
 - **EDA assistant** — Type **`/`** for suggestions; **`/help`** lists commands; **`/view`**, **`/tilt`**, **`/rotate`**, **`/go`**, **`/layers:`…**, **`/clear:`…** (see changelog); **`/clear:workspace`** runs **Clear local test data** (confirm + reload). **`/clear:terminal`** and **`/clear:memory`** replace the visible transcript with the default greeting only (no echo of the slash command); **`/restart`** clears to the y/n prompt the same way. Inputs starting with **`/`** are always local commands, and unknown commands return an error instead of reaching Gemini; natural-language prompts are screened for bounded EDA relevance or explicit map-control intent before `/api/agent` runs.
 
@@ -464,6 +482,6 @@ npm run ingest:zillow
 
 - **Statewide raw Texas permit records** — Texas now has a live place-level permit activity layer plus city-specific raw adapters for Austin and Houston, but the broader statewide raw-permit pass is still deferred because Houston still depends on a warmed address cache and the remaining major cities would require their own source validation, coordinate strategy, and normalization adapters.
 
-- **Shortlist attachments (CSV + agent chat)** — Would require `saved_sites` JSONB column(s) or a sibling table, size limits, and UI to “attach workspace” on save plus restore flow (rehydrate markers store + optional transcript). Blocked on schema/auth product decisions.
+- **Shortlist attachments (CSV + agent chat)** — Would require a durable backend model for saved workspace bundles plus UI to attach and restore upload rows, markers, and chat state. Deferred because the judge deploy now keeps Saved Sites browser-local on purpose.
 
 - **Travel-time accessibility scoring** - Adding Google routing-based catchments or commute-time scoring would strengthen site-selection analysis and the Google technology story, but it is deferred until scope, quota, and UX tradeoffs are defined.

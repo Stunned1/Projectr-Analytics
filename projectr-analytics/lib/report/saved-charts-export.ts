@@ -218,7 +218,11 @@ export function normalizeSavedChartsPdfPayload(value: unknown): SavedChartsPdfPa
   }
 
   const isLegacyChartsPayload = !Array.isArray(value.outputs) && Array.isArray(value.charts)
-  const records = Array.isArray(value.outputs) ? value.outputs : isLegacyChartsPayload ? value.charts : null
+  const records: unknown[] | null = Array.isArray(value.outputs)
+    ? (value.outputs as unknown[])
+    : isLegacyChartsPayload
+      ? (value.charts as unknown[])
+      : null
   if (!records || records.length === 0) return null
   if (isLegacyChartsPayload ? records.length > CHART_COUNT_MAX : records.length > OUTPUT_COUNT_MAX) return null
 

@@ -58,13 +58,11 @@ async function loadWarmHoustonPermitGeocodes(): Promise<WarmHoustonPermitGeocode
   }
 
   try {
-    const module = await import('../lib/texas-raw-permits.ts')
+    const module = await import('../lib/texas-raw-permits')
     const warmHoustonPermitGeocodes =
       typeof module.warmHoustonPermitGeocodes === 'function'
         ? module.warmHoustonPermitGeocodes
-        : typeof module.default?.warmHoustonPermitGeocodes === 'function'
-          ? module.default.warmHoustonPermitGeocodes
-          : null
+        : null
 
     if (!warmHoustonPermitGeocodes) {
       throw new Error('warmHoustonPermitGeocodes export was not found')

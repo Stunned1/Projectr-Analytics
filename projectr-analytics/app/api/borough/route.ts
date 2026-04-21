@@ -14,6 +14,23 @@ import { supabase } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
 
+type LookupZipRow = {
+  zip: string
+  city: string | null
+  state: string | null
+  metro_name: string | null
+  lat: number | null
+  lng: number | null
+}
+
+type ZillowSnapshotRow = {
+  zip: string
+  zori_latest: number | null
+  zhvi_latest: number | null
+  zori_growth_12m: number | null
+  zhvi_growth_12m: number | null
+}
+
 const BOROUGH_MAP: Record<string, { county: string; state: string; name: string; zipRange: [string, string] }> = {
   manhattan:     { county: '061', state: '36', name: 'Manhattan',     zipRange: ['10001', '10282'] },
   brooklyn:      { county: '047', state: '36', name: 'Brooklyn',      zipRange: ['11200', '11256'] },
@@ -49,7 +66,7 @@ export async function GET(request: NextRequest) {
       .lte('zip', borough.zipRange[1])
       .not('lat', 'is', null)
 
-    const zips = lookupZips ?? []
+    const zips = (lookupZips ?? []) as LookupZipRow[]
 
     // Get Zillow snapshots
     const zipList = zips.map((z) => z.zip)
@@ -58,7 +75,7 @@ export async function GET(request: NextRequest) {
       .select('zip, zori_latest, zhvi_latest, zori_growth_12m, zhvi_growth_12m')
       .in('zip', zipList)
 
-    const snapshotMap = new Map(snapshots?.map((s) => [s.zip, s]) ?? [])
+    const snapshotMap = new Map(((snapshots ?? []) as ZillowSnapshotRow[]).map((s) => [s.zip, s]))
 
     const results = zips.map((z) => {
       const snap = snapshotMap.get(z.zip)

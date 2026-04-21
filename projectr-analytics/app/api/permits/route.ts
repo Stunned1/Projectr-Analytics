@@ -25,6 +25,31 @@ const JOB_TYPE_WEIGHT: Record<string, number> = {
   DM: 1,
 }
 
+type PermitHeatmapRow = {
+  lat: number
+  lng: number
+  job_type: string | null
+}
+
+type PermitScatterRow = {
+  id: string | number
+  borough: string | null
+  house_number: string | null
+  street_name: string | null
+  zip_code: string | null
+  job_type: string | null
+  job_status: string | null
+  job_description: string | null
+  owner_business: string | null
+  initial_cost: number | null
+  proposed_stories: number | null
+  proposed_units: number | null
+  filing_date: string | null
+  lat: number
+  lng: number
+  nta_name: string | null
+}
+
 export async function GET(request: NextRequest) {
   const borough = request.nextUrl.searchParams.get('borough')?.toUpperCase()
   const zip = request.nextUrl.searchParams.get('zip')
@@ -56,7 +81,7 @@ export async function GET(request: NextRequest) {
       const { data, error } = await query
       if (error) throw new Error(error.message)
 
-      const points = (data ?? []).map((p) => ({
+      const points = ((data ?? []) as PermitHeatmapRow[]).map((p) => ({
         position: [p.lng, p.lat] as [number, number],
         weight: JOB_TYPE_WEIGHT[p.job_type ?? ''] ?? 1,
       }))
@@ -88,11 +113,11 @@ export async function GET(request: NextRequest) {
 
         const { data, error } = await q
         if (error) return []
-        return data ?? []
+        return (data ?? []) as PermitScatterRow[]
       })
     )
 
-    const rawData = typeResults.flat()
+    const rawData = typeResults.flatMap((rows) => rows)
 
     const permits = rawData.map((p) => ({
       ...p,

@@ -75,7 +75,7 @@ export function normalizeGooglePlacesSiteContextResponse(
   const safeRadius = Number.isFinite(radiusMeters) ? Math.max(0, Math.floor(radiusMeters)) : 0
   const grouped = new Map<SiteContextCategory, number>()
   const normalizedPlaces = places
-    .map((place) => {
+    .map((place): NormalizedSiteContextPlace | null => {
       const category = categorizeGooglePlaceTypes(place.types ?? [])
       const id = typeof place.id === 'string' ? place.id.trim() : ''
       const name = typeof place.displayName?.text === 'string' ? place.displayName.text.trim() : ''
@@ -91,7 +91,7 @@ export function normalizeGooglePlacesSiteContextResponse(
         name,
         category,
         types: Array.isArray(place.types) ? place.types.filter((type): type is string => typeof type === 'string') : [],
-      } satisfies NormalizedSiteContextPlace
+      }
     })
     .filter((place): place is NormalizedSiteContextPlace => place != null)
 

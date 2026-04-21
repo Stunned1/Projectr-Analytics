@@ -3,6 +3,7 @@ import type { ClientReportPayload } from './types'
 import { buildZoriProxySeries } from './zori-proxy'
 
 export type ZoriMonthlyPoint = { date: string; value: number }
+type ZillowMonthlyRow = { month: string | Date; zori: number | string | null; zip?: string }
 
 /** Minimum points before we treat the series as credible for the PDF chart. */
 export const ZORI_SERIES_MIN_POINTS = 6
@@ -23,7 +24,7 @@ export async function fetchZoriMonthlyForZip(zip: string, maxMonths = 24): Promi
 
   if (error || !data?.length) return []
 
-  return data.map((r) => ({
+  return (data as ZillowMonthlyRow[]).map((r) => ({
     date: typeof r.month === 'string' ? r.month.slice(0, 7) : String(r.month).slice(0, 7),
     value: Math.round(Number(r.zori)),
   }))
@@ -51,7 +52,7 @@ export async function fetchZoriMonthlyAveraged(zips: string[], maxMonths = 24): 
   if (error || !data?.length) return []
 
   const byMonth = new Map<string, { sum: number; n: number }>()
-  for (const row of data) {
+  for (const row of data as ZillowMonthlyRow[]) {
     const key = typeof row.month === 'string' ? row.month.slice(0, 7) : String(row.month).slice(0, 7)
     const v = Number(row.zori)
     if (!Number.isFinite(v)) continue

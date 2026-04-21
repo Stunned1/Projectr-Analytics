@@ -279,10 +279,13 @@ async function defaultFetchSpecializedHistorySeries(
   subject: AnalyticalSubject,
   timeWindow: NormalizedAnalyticalTimeWindow
 ): Promise<TexasPermitHistorySeries | null> {
-  const specializedSource = selectSpecializedHistorySource(metric, subject, {
-    mode: timeWindow.mode,
-    startDate: timeWindow.startDate,
-  })
+  const specializedSource = selectSpecializedHistorySource(
+    metric,
+    subject,
+    timeWindow.mode === 'since'
+      ? { mode: 'since', startDate: timeWindow.startDate }
+      : { mode: 'relative', unit: 'months', value: timeWindow.monthsBack }
+  )
   if (!specializedSource) return null
 
   if (specializedSource.id === 'texas_permits') {
@@ -313,10 +316,13 @@ async function getHistoricalSeriesForMetric(
   dependencies: AnalyticalComparisonDependencies = {}
 ): Promise<HistoricalSeriesResult> {
   const config = ANALYTICAL_METRIC_CONFIG[metric]
-  const specializedSource = selectSpecializedHistorySource(metric, subject, {
-    mode: timeWindow.mode,
-    startDate: timeWindow.startDate,
-  })
+  const specializedSource = selectSpecializedHistorySource(
+    metric,
+    subject,
+    timeWindow.mode === 'since'
+      ? { mode: 'since', startDate: timeWindow.startDate }
+      : { mode: 'relative', unit: 'months', value: timeWindow.monthsBack }
+  )
   if (metric === 'rent') {
     if (subject.kind !== 'zip') {
       throw new Error(`Rent history requires a ZIP subject, received ${subject.kind}`)

@@ -49,7 +49,9 @@ export default function SavedChartsPanel({ className }: { className?: string }) 
                         ? record.payload.title
                         : record.kind === 'stat_card'
                           ? record.payload.title
-                          : record.payload.siteLabel}
+                          : record.kind === 'permit_detail'
+                            ? record.payload.title
+                            : record.payload.siteLabel}
                     </p>
                     <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
                       <span>{formatSavedAt(record.savedAt)}</span>

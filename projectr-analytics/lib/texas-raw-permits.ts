@@ -501,7 +501,7 @@ async function loadHoustonZipCentroids(zips: Iterable<string>): Promise<Map<stri
     for (const row of cityRows) {
       if (!needed.has(row.zcta5)) continue
       if (!Number.isFinite(row.lat) || !Number.isFinite(row.lng)) continue
-      byZip.set(row.zcta5, { lat: row.lat, lng: row.lng })
+      byZip.set(row.zcta5, { lat: Number(row.lat), lng: Number(row.lng) })
     }
   } catch {
     // BigQuery-backed city centroids are optional; ZIP geocoder fallback covers local-only setups.

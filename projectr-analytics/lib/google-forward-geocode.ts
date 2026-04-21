@@ -113,17 +113,18 @@ async function persistForwardGeocodeToDb(
   result: ForwardGeocodeResult | null
 ): Promise<void> {
   try {
+    const row = {
+      normalized_query: normalizedQuery,
+      resolution_status: result ? 'ok' : 'miss',
+      lat: result?.lat ?? null,
+      lng: result?.lng ?? null,
+      formatted_address: result?.formattedAddress ?? null,
+      postal_code: result?.postalCode ?? null,
+      source: 'google_forward_geocode',
+      updated_at: new Date().toISOString(),
+    }
     await supabase.from('address_geocode_cache').upsert(
-      {
-        normalized_query: normalizedQuery,
-        resolution_status: result ? 'ok' : 'miss',
-        lat: result?.lat ?? null,
-        lng: result?.lng ?? null,
-        formatted_address: result?.formattedAddress ?? null,
-        postal_code: result?.postalCode ?? null,
-        source: 'google_forward_geocode',
-        updated_at: new Date().toISOString(),
-      },
+      row as never,
       { onConflict: 'normalized_query' }
     )
   } catch {

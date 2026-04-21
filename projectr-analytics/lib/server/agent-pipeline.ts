@@ -640,7 +640,6 @@ function resolveExplicitHistoryWindow(
     mode: 'relative',
     unit,
     value,
-    label: `Last ${value} ${unit}`,
   }
 }
 
@@ -752,7 +751,6 @@ function resolveAustinMonthlyPermitWindow(userMessage: string): AgentHistoryTime
       mode: 'relative',
       unit: 'months',
       value: 24,
-      label: 'Last 24 months',
     }
   }
 
@@ -765,7 +763,6 @@ function resolveAustinMonthlyPermitWindow(userMessage: string): AgentHistoryTime
     mode: 'relative',
     unit: 'months',
     value,
-    label: `Last ${value} months`,
   }
 }
 
@@ -779,7 +776,7 @@ function normalizeAustinMonthlyTimeWindow(timeWindow: AgentHistoryTimeWindow): {
   const isoDate = `${startDate.getUTCFullYear()}-${String(startDate.getUTCMonth() + 1).padStart(2, '0')}-01`
   return {
     startDate: isoDate,
-    label: timeWindow.label ?? `Last ${timeWindow.value} months`,
+    label: `Last ${timeWindow.value} months`,
   }
 }
 
@@ -1020,8 +1017,6 @@ function hasActiveComparisonMarker(userMessage: string): boolean {
 function resolveActiveComparisonSubject(
   context: MapContext | null | undefined
 ): AgentHistorySubject | null {
-  if (context?.activeSubject) return context.activeSubject
-
   const zip = context?.zip?.trim()
   if (!zip) return null
 
@@ -1745,7 +1740,7 @@ function buildUnsupportedHistoryPayload(message: string): AgentPipelineResult {
 }
 
 function hasPublicMacroIntent(userMessage: string): boolean {
-  return /\b(what(?:'s|\s+is)?|how much(?:\s+is|\s+are)?|tell me|show me|give me|report|estimate|what are)\b/i.test(userMessage)
+  return detectPublicMacroMetric(userMessage) != null
 }
 
 function detectPublicMacroMetric(userMessage: string): AgentPublicMacroMetric | null {
@@ -2191,7 +2186,7 @@ async function maybeBuildPublicMacroResponse(
   const metric = detectPublicMacroMetric(userMessage)
   const subject = resolveHistorySubjectMarket(userMessage, context)
   if (!subject) return buildUnresolvedPublicMacroPayload()
-  if (!metric) return buildUnsupportedPublicMacroPayload(subject)
+  if (!metric) return null
 
   const fetchPublicMacroEvidence =
     dependencies.getPublicMacroEvidence ??

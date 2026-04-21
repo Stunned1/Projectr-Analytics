@@ -27,6 +27,12 @@ interface ZipScore {
 
 const PERMIT_METRICS = ['Permit_Units', 'Permit_Buildings', 'Permit_Count']
 
+type ZillowMomentumRow = {
+  zip: string
+  zori_growth_12m: number | null
+  zhvi_growth_12m: number | null
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
@@ -48,7 +54,7 @@ export async function POST(request: NextRequest) {
       .select('zip, zori_growth_12m, zhvi_growth_12m')
       .in('zip', zips)
 
-    const zillowMap = new Map(zillowRows?.map((r) => [r.zip, r]) ?? [])
+    const zillowMap = new Map(((zillowRows ?? []) as ZillowMomentumRow[]).map((r) => [r.zip, r] as const))
 
     // Latest value per zip per metric
     const byZip: Record<string, Record<string, number>> = {}

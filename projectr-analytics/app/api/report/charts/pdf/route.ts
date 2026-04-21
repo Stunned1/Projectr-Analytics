@@ -1,6 +1,7 @@
-import { createElement } from 'react'
+import React from 'react'
 import { type NextRequest, NextResponse } from 'next/server'
-import { renderToBuffer } from '@react-pdf/renderer'
+import { renderToBuffer, type DocumentProps } from '@react-pdf/renderer'
+import type { ReactElement } from 'react'
 
 import { loadScoutLogoDataUri } from '@/lib/report/load-scout-logo'
 import { SavedChartsPdfDocument } from '@/lib/report/saved-charts-pdf-document'
@@ -19,7 +20,8 @@ function slugify(value: string): string {
 
 async function renderSavedChartsPdf(payload: SavedChartsPdfPayload) {
   const logoDataUri = loadScoutLogoDataUri()
-  return renderToBuffer(createElement(SavedChartsPdfDocument, { payload, logoDataUri }))
+  const document = React.createElement(SavedChartsPdfDocument, { payload, logoDataUri }) as ReactElement<DocumentProps>
+  return renderToBuffer(document)
 }
 
 export async function POST(request: NextRequest) {
