@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import type { AgentAction, AgentCompanionOutput, AgentMessage, AgentStep, AgentTrace, AnalysisSite, MapContext } from '@/lib/agent-types'
+import type { AgentAction, AgentCompanionOutput, AgentMessage, AgentStep, AgentTrace, AnalysisSite, MapContext, PermitDetailArtifact } from '@/lib/agent-types'
 import { consumeAgentNdjsonStream } from '@/lib/consume-agent-ndjson-stream'
 import { buildAgentGreeting } from '@/lib/agent-surface-copy'
 import { evaluateAgentRequestPolicy } from '@/lib/agent-request-policy'
@@ -936,6 +936,18 @@ export function useAgentIntelligence(
     ]
   )
 
+  const appendPermitDetail = useCallback((artifact: PermitDetailArtifact, marketLabel?: string | null) => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: 'agent',
+        text: `Opened permit detail for ${artifact.addressOrPlace}.`,
+        permitDetail: artifact,
+        permitDetailMarketLabel: marketLabel ?? null,
+      },
+    ])
+  }, [])
+
   return {
     messages,
     visibleTerminalMessages,
@@ -949,6 +961,7 @@ export function useAgentIntelligence(
     generateCaseBrief,
     briefLoading,
     briefError,
+    appendPermitDetail,
     ACTION_LOG,
   }
 }

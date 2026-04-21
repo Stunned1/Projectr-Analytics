@@ -370,6 +370,20 @@ export type AgentCompanionOutput =
       items: Array<{ label: string; value: string; note?: string | null }>
     }
 
+export interface PermitDetailArtifact {
+  kind: 'permit_detail'
+  title: string
+  permitLabel: string
+  sourceKind: string
+  sourceName: string
+  addressOrPlace: string
+  categoryLabel: string
+  dateLabel?: string | null
+  sourceUrl?: string | null
+  coordinates?: { lat: number; lng: number } | null
+  stats: Array<{ label: string; value: string; sublabel?: string | null }>
+}
+
 export interface AgentMessage {
   role: 'user' | 'agent'
   text: string
@@ -384,6 +398,8 @@ export interface AgentMessage {
   chartSourcePrompt?: string
   chartSourceMarketLabel?: string | null
   companionOutputs?: AgentCompanionOutput[]
+  permitDetail?: PermitDetailArtifact
+  permitDetailMarketLabel?: string | null
 }
 
 /** Last client CSV ingest — agent uses for “show my upload / pins / sidebar” intents. */

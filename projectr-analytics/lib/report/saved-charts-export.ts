@@ -88,6 +88,56 @@ function normalizeSavedOutputPdfRecord(value: unknown): SavedOutputPdfRecord | n
     }
   }
 
+  if (inferredKind === 'permit_detail') {
+    if (
+      !isRecord(value.payload) ||
+      typeof value.payload.title !== 'string' ||
+      typeof value.payload.permitLabel !== 'string' ||
+      typeof value.payload.sourceKind !== 'string' ||
+      typeof value.payload.sourceName !== 'string' ||
+      typeof value.payload.addressOrPlace !== 'string' ||
+      typeof value.payload.categoryLabel !== 'string' ||
+      !Array.isArray(value.payload.stats)
+    ) {
+      return null
+    }
+    const stats = value.payload.stats.flatMap((entry) => {
+      if (!isRecord(entry) || typeof entry.label !== 'string' || typeof entry.value !== 'string') return []
+      return [
+        {
+          label: clampString(entry.label, 120),
+          value: clampString(entry.value, 120),
+          sublabel: typeof entry.sublabel === 'string' ? clampString(entry.sublabel, 160) : null,
+        },
+      ]
+    })
+    if (stats.length !== value.payload.stats.length) return null
+    return {
+      id: value.id,
+      kind: 'permit_detail',
+      prompt,
+      marketLabel,
+      savedAt: value.savedAt,
+      payload: {
+        title: clampString(value.payload.title, 160),
+        permitLabel: clampString(value.payload.permitLabel, 160),
+        sourceKind: clampString(value.payload.sourceKind, 80),
+        sourceName: clampString(value.payload.sourceName, 160),
+        addressOrPlace: clampString(value.payload.addressOrPlace, 160),
+        categoryLabel: clampString(value.payload.categoryLabel, 120),
+        dateLabel: typeof value.payload.dateLabel === 'string' ? clampString(value.payload.dateLabel, 120) : null,
+        sourceUrl: typeof value.payload.sourceUrl === 'string' ? clampString(value.payload.sourceUrl, 400) : null,
+        coordinates:
+          isRecord(value.payload.coordinates) &&
+          typeof value.payload.coordinates.lat === 'number' &&
+          typeof value.payload.coordinates.lng === 'number'
+            ? { lat: value.payload.coordinates.lat, lng: value.payload.coordinates.lng }
+            : null,
+        stats,
+      },
+    }
+  }
+
   if (inferredKind === 'places_context') {
     if (
       !isRecord(value.payload) ||

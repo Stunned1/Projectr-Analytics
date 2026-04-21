@@ -194,6 +194,7 @@ function renderChart(record: Extract<SavedOutputPdfRecord, { kind: 'chart' }>) {
 function outputTitle(record: SavedOutputPdfRecord): string {
   if (record.kind === 'chart') return record.payload.title
   if (record.kind === 'stat_card') return record.payload.title
+  if (record.kind === 'permit_detail') return record.payload.title
   return record.payload.siteLabel
 }
 
@@ -201,6 +202,7 @@ function outputKindLabel(record: SavedOutputPdfRecord): string {
   if (record.kind === 'chart') return 'Chart'
   if (record.kind === 'stat_card') return 'Stat card'
   if (record.kind === 'places_context') return 'Nearby context'
+  if (record.kind === 'permit_detail') return 'Permit detail'
   return 'Site snapshot'
 }
 
@@ -386,6 +388,25 @@ export function SavedChartsPdfDocument({
                       <Text style={styles.statValue}>{String(value)}</Text>
                     </View>
                   ))}
+                </View>
+              ) : null}
+
+              {group.record.kind === 'permit_detail' ? (
+                <View style={styles.card}>
+                  <Text style={styles.body}>{group.record.payload.addressOrPlace}</Text>
+                  <Text style={styles.subhead}>
+                    {group.record.payload.categoryLabel} | {group.record.payload.sourceName}
+                    {group.record.payload.dateLabel ? ` | ${group.record.payload.dateLabel}` : ''}
+                  </Text>
+                  {group.record.payload.stats.map((stat) => (
+                    <View key={`${stat.label}:${stat.value}`} style={styles.statRow}>
+                      <Text style={styles.statLabel}>{stat.label}</Text>
+                      <Text style={styles.statValue}>{stat.value}</Text>
+                    </View>
+                  ))}
+                  {group.record.payload.sourceUrl ? (
+                    <Text style={styles.footer}>Source: {group.record.payload.sourceUrl}</Text>
+                  ) : null}
                 </View>
               ) : null}
 

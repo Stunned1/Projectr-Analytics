@@ -9,3 +9,11 @@ test('AgentTerminal wires non-chart retail companions through saveOutput', async
   assert.match(source, /kind: 'stat_card'/)
   assert.match(source, /Save output/)
 })
+
+test('AgentTerminal renders saveable permit detail cards', async () => {
+  const source = await readFile(new URL('../../components/AgentTerminal.tsx', import.meta.url), 'utf8')
+
+  assert.match(source, /permit_detail/)
+  assert.match(source, /Save output/)
+  assert.match(source, /sourceName|addressOrPlace|categoryLabel/)
+})

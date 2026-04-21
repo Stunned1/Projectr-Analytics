@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 
 import { buildSavedOutputRenderGroups } from '@/lib/report/saved-charts-pdf-document'
 import type { SavedOutputPdfRecord } from '@/lib/report/saved-charts-export'
@@ -83,4 +84,11 @@ test('leaves unrelated site outputs on separate render pages', () => {
   assert.equal(groups.length, 2)
   assert.equal(groups[0]?.kind, 'single')
   assert.equal(groups[1]?.kind, 'site')
+})
+
+test('pdf document treats permit detail as a structured non-chart section', async () => {
+  const source = await readFile(new URL('../../../lib/report/saved-charts-pdf-document.tsx', import.meta.url), 'utf8')
+
+  assert.match(source, /permit_detail/)
+  assert.match(source, /sourceName|addressOrPlace|categoryLabel/)
 })

@@ -8,7 +8,7 @@ import { AgentThinkingPanel } from '@/components/AgentThinkingPanel'
 import AgentTerminal, { type AgentTerminalSize } from '@/components/AgentTerminal'
 import { ImportedDataPanel } from '@/components/ImportedDataPanel'
 import SavedChartsExportDialog from '@/components/SavedChartsExportDialog'
-import type { AgentAction, AgentTrace, AnalysisSite } from '@/lib/agent-types'
+import type { AgentAction, AgentTrace, AnalysisSite, PermitDetailArtifact } from '@/lib/agent-types'
 import type { MapLayersSnapshot } from '@/lib/report/types'
 import { useSitesStore } from '@/lib/sites-store'
 import { useClientUploadMarkersStore, type ClientUploadMarker } from '@/lib/client-upload-markers-store'
@@ -702,6 +702,11 @@ export default function Home() {
   const [trends, setTrends] = useState<TrendsData | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [panelOpen, setPanelOpen] = useState(false)
+  const [permitDetailEvent, setPermitDetailEvent] = useState<{
+    artifact: PermitDetailArtifact
+    marketLabel?: string | null
+    nonce: number
+  } | null>(null)
   const [mapLayersSnapshot, setMapLayersSnapshot] = useState<MapLayersSnapshot>(DEFAULT_MAP_LAYERS)
   const layerStateResyncIdRef = useRef(0)
   const [layerStateResync, setLayerStateResync] = useState<{ id: number; state: LayerState } | null>(null)
@@ -1515,6 +1520,13 @@ export default function Home() {
           onToggleMap3D={handleMap3DToggle}
           mapViewportRef={mapViewportRef}
           onUploadedMarkerSelect={handleUploadedMarkerSelect}
+          onPermitDetailSelect={(detail) =>
+            setPermitDetailEvent({
+              artifact: detail,
+              marketLabel: mapContext.label ?? null,
+              nonce: Date.now(),
+            })
+          }
         />
         </div>
 
@@ -1529,6 +1541,7 @@ export default function Home() {
           onShowThinking={handleShowAgentThinking}
           onAgentThinkingUpdate={handleAgentThinkingUpdate}
           onAgentThinkingStreamFinished={handleAgentThinkingStreamFinished}
+          permitDetailEvent={permitDetailEvent}
         />
         <SavedChartsExportDialog
           open={savedChartsExportOpen}

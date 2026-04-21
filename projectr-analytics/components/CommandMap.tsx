@@ -13,7 +13,7 @@ import { latLngToCell } from 'h3-js'
 import { Layers } from 'lucide-react'
 import { dedupedFetchJson } from '@/lib/request-cache'
 import type { Site } from '@/lib/sites-store'
-import type { AnalysisSite } from '@/lib/agent-types'
+import type { AnalysisSite, PermitDetailArtifact } from '@/lib/agent-types'
 import type { ClientUploadMarker } from '@/lib/client-upload-markers-store'
 import { detectNycBoroughFromZips, isNycZip } from '@/lib/geography'
 import { selectMultiZipBoundaryTargets } from '@/lib/area-boundaries'
@@ -459,6 +459,70 @@ function formatPermitDate(value: string | null | undefined): string | null {
   return parsed.toLocaleDateString()
 }
 
+function buildNycPermitDetail(permit: PermitPayload): PermitDetailArtifact {
+  return {
+    kind: 'permit_detail',
+    title: permit.address,
+    permitLabel: permit.job_type_label,
+    sourceKind: 'nyc_permit',
+    sourceName: 'NYC DOB permits',
+    addressOrPlace: permit.address,
+    categoryLabel: permit.job_type_label,
+    dateLabel: permit.filing_date,
+    coordinates: { lat: permit.lat, lng: permit.lng },
+    stats: [
+      permit.initial_cost != null && permit.initial_cost > 0 ? { label: 'Est. cost', value: `$${permit.initial_cost.toLocaleString()}` } : null,
+      permit.proposed_stories != null && permit.proposed_stories > 0 ? { label: 'Stories', value: permit.proposed_stories.toLocaleString() } : null,
+      permit.proposed_units != null && permit.proposed_units > 0 ? { label: 'Units', value: permit.proposed_units.toLocaleString() } : null,
+      permit.job_status ? { label: 'Status', value: permit.job_status } : null,
+      permit.owner_business ? { label: 'Owner', value: permit.owner_business } : null,
+    ].filter(Boolean) as PermitDetailArtifact['stats'],
+  }
+}
+
+function buildTexasRawPermitDetail(permit: TexasRawPermitPayload): PermitDetailArtifact {
+  return {
+    kind: 'permit_detail',
+    title: permit.address ?? `${permit.source_city}, TX permit`,
+    permitLabel: permit.category_label,
+    sourceKind: 'texas_raw',
+    sourceName: permit.source_name,
+    addressOrPlace: permit.address ?? `${permit.source_city}, TX`,
+    categoryLabel: permit.category_label,
+    dateLabel: formatPermitDate(permit.issue_date),
+    sourceUrl: permit.source_url,
+    coordinates: { lat: permit.lat, lng: permit.lng },
+    stats: [
+      permit.valuation != null && permit.valuation > 0 ? { label: 'Valuation', value: `$${permit.valuation.toLocaleString()}` } : null,
+      permit.square_feet != null && permit.square_feet > 0 ? { label: 'Sq Ft', value: permit.square_feet.toLocaleString() } : null,
+      permit.housing_units != null && permit.housing_units > 0 ? { label: 'Units', value: permit.housing_units.toLocaleString() } : null,
+      permit.work_class ? { label: 'Work class', value: permit.work_class } : null,
+      permit.permit_number ? { label: 'Permit #', value: permit.permit_number } : null,
+    ].filter(Boolean) as PermitDetailArtifact['stats'],
+  }
+}
+
+function buildTexasPermitActivityDetail(place: TexasPermitActivityPayload): PermitDetailArtifact {
+  return {
+    kind: 'permit_detail',
+    title: place.place_name,
+    permitLabel: 'Residential Permit Activity',
+    sourceKind: 'texas_activity',
+    sourceName: 'Texas place-level permit activity',
+    addressOrPlace: place.place_name,
+    categoryLabel: 'Residential Permit Activity',
+    dateLabel: place.latest_month ?? null,
+    coordinates: { lat: place.lat, lng: place.lng },
+    stats: [
+      { label: 'Units', value: place.total_units.toLocaleString() },
+      { label: 'Buildings', value: place.total_buildings.toLocaleString() },
+      { label: 'Single-family', value: place.single_family_units.toLocaleString() },
+      { label: 'Multi-family', value: place.multi_family_units.toLocaleString() },
+      { label: 'Construction value', value: `$${place.total_value.toLocaleString()}` },
+    ],
+  }
+}
+
 // ── Color scale: blue (low rent) → red (high rent) ───────────────────────────
 // Normalized across the set of loaded ZIPs for relative contrast
 
@@ -805,6 +869,7 @@ interface CommandMapProps {
   /** When set, updated on map idle for `/save` without a loaded market. */
   mapViewportRef?: MutableRefObject<MapViewportSnapshot | null>
   onUploadedMarkerSelect?: (marker: ClientUploadMarker | null) => void
+  onPermitDetailSelect?: ((detail: PermitDetailArtifact) => void) | null
 }
 
 function CommandMap({
@@ -832,6 +897,7 @@ function CommandMap({
   onToggleMap3D,
   mapViewportRef,
   onUploadedMarkerSelect,
+  onPermitDetailSelect,
 }: CommandMapProps) {
   const perfDebug = process.env.NEXT_PUBLIC_PERF_DEBUG === '1'
 
@@ -860,9 +926,6 @@ function CommandMap({
     !(cityZips && cityZips.length > 0) &&
     (uploadedMarkers?.length ?? 0) > 0
   const fitUploadedMarkersRequested = uploadedMarkersFitNonce > 0 && (uploadedMarkers?.length ?? 0) > 0
-  const [selectedPermit, setSelectedPermit] = useState<PermitPayload | null>(null)
-  const [selectedTexasRawPermit, setSelectedTexasRawPermit] = useState<TexasRawPermitPayload | null>(null)
-  const [selectedTexasPermit, setSelectedTexasPermit] = useState<TexasPermitActivityPayload | null>(null)
   const [layerStateSnapshot, setLayerStateSnapshot] = useState<KeyedValue<LayerState>>({ key: '0', value: DEFAULT_LAYER_STATE })
   const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null)
   const [activeMetric, setActiveMetric] = useState<'zori' | 'zhvi'>('zori')
@@ -1107,8 +1170,6 @@ function CommandMap({
             setPermitHeatPoints(buildPermitHeatPoints(d.permits))
             setTexasRawPermitData([])
             setTexasRawPermitCategoryFilter(new Set())
-            setSelectedTexasRawPermit(null)
-            setSelectedTexasPermit(null)
           }
         })
         .catch(() => {})
@@ -1230,8 +1291,6 @@ function CommandMap({
               setPermitHeatPoints(buildPermitHeatPoints(d.permits))
               setTexasRawPermitData([])
               setTexasRawPermitCategoryFilter(new Set())
-              setSelectedTexasRawPermit(null)
-              setSelectedTexasPermit(null)
             }
           })
           .catch(() => {})
@@ -1256,9 +1315,6 @@ function CommandMap({
             setTexasPermitActivity([])
             setPermitHeatPoints(buildTexasRawPermitHeatPoints(permits))
             setTexasRawPermitCategoryFilter(new Set())
-            setSelectedPermit(null)
-            setSelectedTexasRawPermit(null)
-            setSelectedTexasPermit(null)
             return
           }
         } catch {
@@ -1276,17 +1332,12 @@ function CommandMap({
         setTexasPermitActivity(places)
         setPermitHeatPoints(buildTexasPermitHeatPoints(places))
         setTexasRawPermitCategoryFilter(new Set())
-        setSelectedPermit(null)
-        setSelectedTexasRawPermit(null)
-        setSelectedTexasPermit(null)
       } catch {
         if (cancelled) return
         setTexasRawPermitData([])
         setTexasPermitActivity([])
         setPermitHeatPoints([])
         setTexasRawPermitCategoryFilter(new Set())
-        setSelectedTexasRawPermit(null)
-        setSelectedTexasPermit(null)
       }
     }
 
@@ -1853,7 +1904,7 @@ function CommandMap({
                 pickable: true,
                 onClick: (info: PickingInfo) => {
                   const permit = info.object as PermitPayload | undefined
-                  setSelectedPermit(permit ?? null)
+                  if (permit) onPermitDetailSelect?.(buildNycPermitDetail(permit))
                 },
                 onHover: (info: PickingInfo) => {
                   const permit = info.object as PermitPayload | undefined
@@ -1920,8 +1971,7 @@ function CommandMap({
                 pickable: true,
                 onClick: (info: PickingInfo) => {
                   const permit = info.object as TexasRawPermitPayload | undefined
-                  setSelectedTexasRawPermit(permit ?? null)
-                  if (permit) setSelectedTexasPermit(null)
+                  if (permit) onPermitDetailSelect?.(buildTexasRawPermitDetail(permit))
                 },
                 onHover: (info: PickingInfo) => {
                   const permit = info.object as TexasRawPermitPayload | undefined
@@ -1990,7 +2040,7 @@ function CommandMap({
                 pickable: true,
                 onClick: (info: PickingInfo) => {
                   const place = info.object as TexasPermitActivityPayload | undefined
-                  setSelectedTexasPermit(place ?? null)
+                  if (place) onPermitDetailSelect?.(buildTexasPermitActivityDetail(place))
                 },
                 onHover: (info: PickingInfo) => {
                   const place = info.object as TexasPermitActivityPayload | undefined
@@ -2205,7 +2255,7 @@ function CommandMap({
     }
 
     return result
-  }, [visiblePrimaryBoundary, visibleNeighborBoundaries, visibleCityBoundaries, aggregateBoundaryGeoJson, boroughBoundary, transitStops, transitRoutes, parcelData, parcelColorMode, tractData, amenityPoints, poiPoints, floodData, nycPermitData, texasRawPermitData, texasPermitActivity, permitHeatPoints, permitTypeFilter, texasRawPermitCategoryFilter, agentPermitFilter, mapZoom, momentumScores, effectiveLayers, colorScale, primaryMetricValue, effectiveMetric, zip, setTooltipStable, uploadedMarkers, shortlistSites, analysisSites, nycFeatureAvailable, texasPermitAvailable, usingTexasRawPermits, usingAustinTexasRawPermits, onUploadedMarkerSelect])
+  }, [visiblePrimaryBoundary, visibleNeighborBoundaries, visibleCityBoundaries, aggregateBoundaryGeoJson, boroughBoundary, transitStops, transitRoutes, parcelData, parcelColorMode, tractData, amenityPoints, poiPoints, floodData, nycPermitData, texasRawPermitData, texasPermitActivity, permitHeatPoints, permitTypeFilter, texasRawPermitCategoryFilter, agentPermitFilter, mapZoom, momentumScores, effectiveLayers, colorScale, primaryMetricValue, effectiveMetric, zip, setTooltipStable, uploadedMarkers, shortlistSites, analysisSites, nycFeatureAvailable, texasPermitAvailable, usingTexasRawPermits, usingAustinTexasRawPermits, onPermitDetailSelect, onUploadedMarkerSelect])
 
   const handleToggle = useCallback((key: keyof LayerState) => {
     const nextKey =
@@ -2268,230 +2318,6 @@ function CommandMap({
         </div>
       )}
 
-      {/* Permit detail panel */}
-      {nycFeatureAvailable && effectiveLayers.nycPermits && selectedPermit && (
-        <div className="absolute bottom-4 left-4 z-40 w-72 rounded-xl overflow-hidden shadow-2xl"
-          style={{ background: 'rgba(6,6,6,0.88)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.08)' }}>
-          <div className="flex items-start justify-between px-4 pt-3 pb-2" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-            <div>
-              <p className="text-white text-sm font-semibold leading-tight">{selectedPermit.address}</p>
-              <p className="text-zinc-500 text-[10px] mt-0.5">{selectedPermit.zip_code} · {selectedPermit.nta_name}</p>
-            </div>
-            <button onClick={() => setSelectedPermit(null)} className="text-zinc-600 hover:text-white ml-2 flex-shrink-0">×</button>
-          </div>
-          <div className="px-4 py-3 space-y-2">
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                style={{
-                  background: selectedPermit.job_type === 'NB' ? 'rgba(215,107,61,0.2)' : selectedPermit.job_type === 'DM' ? 'rgba(220,80,80,0.2)' : 'rgba(100,180,255,0.2)',
-                  color: selectedPermit.job_type === 'NB' ? '#D76B3D' : selectedPermit.job_type === 'DM' ? '#f87171' : '#60a5fa',
-                  border: `1px solid ${selectedPermit.job_type === 'NB' ? 'rgba(215,107,61,0.3)' : selectedPermit.job_type === 'DM' ? 'rgba(220,80,80,0.3)' : 'rgba(100,180,255,0.3)'}`,
-                }}>
-                {selectedPermit.job_type_label}
-              </span>
-              <span className="text-zinc-500 text-[10px]">{selectedPermit.job_status}</span>
-            </div>
-            {selectedPermit.job_description && (
-              <p className="text-zinc-300 text-[11px] leading-relaxed">{selectedPermit.job_description.slice(0, 200)}{selectedPermit.job_description.length > 200 ? '...' : ''}</p>
-            )}
-            <div className="grid grid-cols-2 gap-2 pt-1">
-              {selectedPermit.initial_cost != null && selectedPermit.initial_cost > 0 && (
-                <div>
-                  <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Est. Cost</p>
-                  <p className="text-white text-xs font-medium">${selectedPermit.initial_cost.toLocaleString()}</p>
-                </div>
-              )}
-              {selectedPermit.proposed_stories != null && selectedPermit.proposed_stories > 0 && (
-                <div>
-                  <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Stories</p>
-                  <p className="text-white text-xs font-medium">{selectedPermit.proposed_stories}</p>
-                </div>
-              )}
-              {selectedPermit.proposed_units != null && selectedPermit.proposed_units > 0 && (
-                <div>
-                  <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Units</p>
-                  <p className="text-white text-xs font-medium">{selectedPermit.proposed_units}</p>
-                </div>
-              )}
-              {selectedPermit.filing_date && (
-                <div>
-                  <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Filed</p>
-                  <p className="text-white text-xs font-medium">{selectedPermit.filing_date}</p>
-                </div>
-              )}
-            </div>
-            {selectedPermit.owner_business && (
-              <p className="text-zinc-500 text-[10px] pt-1">{selectedPermit.owner_business}</p>
-            )}
-          </div>
-        </div>
-      )}
-
-      {!nycFeatureAvailable &&
-        texasPermitAvailable &&
-        usingTexasRawPermits &&
-        effectiveLayers.nycPermits &&
-        selectedTexasRawPermit && (
-        <div
-          className="absolute bottom-4 left-4 z-40 w-72 rounded-xl overflow-hidden shadow-2xl"
-          style={{ background: 'rgba(6,6,6,0.88)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.08)' }}
-        >
-          <div className="flex items-start justify-between px-4 pt-3 pb-2" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-            <div>
-              <p className="text-white text-sm font-semibold leading-tight">
-                {selectedTexasRawPermit.address ?? `${selectedTexasRawPermit.source_city}, TX`}
-              </p>
-              <p className="text-zinc-500 text-[10px] mt-0.5">
-                {selectedTexasRawPermit.zip_code ?? 'Austin, TX'} · {selectedTexasRawPermit.source_name}
-              </p>
-            </div>
-            <button onClick={() => setSelectedTexasRawPermit(null)} className="text-zinc-600 hover:text-white ml-2 flex-shrink-0">×</button>
-          </div>
-          <div className="px-4 py-3 space-y-2">
-            <div className="flex items-center gap-2">
-              <span
-                className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                style={{
-                  background:
-                    selectedTexasRawPermit.category === 'new_construction'
-                      ? 'rgba(215,107,61,0.2)'
-                      : selectedTexasRawPermit.category === 'demolition'
-                        ? 'rgba(220,80,80,0.2)'
-                        : 'rgba(100,180,255,0.2)',
-                  color:
-                    selectedTexasRawPermit.category === 'new_construction'
-                      ? '#D76B3D'
-                      : selectedTexasRawPermit.category === 'demolition'
-                        ? '#f87171'
-                        : '#60a5fa',
-                  border: `1px solid ${
-                    selectedTexasRawPermit.category === 'new_construction'
-                      ? 'rgba(215,107,61,0.3)'
-                      : selectedTexasRawPermit.category === 'demolition'
-                        ? 'rgba(220,80,80,0.3)'
-                        : 'rgba(100,180,255,0.3)'
-                  }`,
-                }}
-              >
-                {selectedTexasRawPermit.category_label}
-              </span>
-              <span className="text-zinc-500 text-[10px]">
-                {formatPermitDate(selectedTexasRawPermit.issue_date) ?? 'Recent'}
-              </span>
-            </div>
-            {selectedTexasRawPermit.description && (
-              <p className="text-zinc-300 text-[11px] leading-relaxed">
-                {selectedTexasRawPermit.description.slice(0, 220)}
-                {selectedTexasRawPermit.description.length > 220 ? '...' : ''}
-              </p>
-            )}
-            <div className="grid grid-cols-2 gap-2 pt-1">
-              {selectedTexasRawPermit.valuation != null && selectedTexasRawPermit.valuation > 0 && (
-                <div>
-                  <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Valuation</p>
-                  <p className="text-white text-xs font-medium">${selectedTexasRawPermit.valuation.toLocaleString()}</p>
-                </div>
-              )}
-              {selectedTexasRawPermit.square_feet != null && selectedTexasRawPermit.square_feet > 0 && (
-                <div>
-                  <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Sq Ft</p>
-                  <p className="text-white text-xs font-medium">{selectedTexasRawPermit.square_feet.toLocaleString()}</p>
-                </div>
-              )}
-              {selectedTexasRawPermit.housing_units != null && selectedTexasRawPermit.housing_units > 0 && (
-                <div>
-                  <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Units</p>
-                  <p className="text-white text-xs font-medium">{selectedTexasRawPermit.housing_units.toLocaleString()}</p>
-                </div>
-              )}
-              {selectedTexasRawPermit.work_class && (
-                <div>
-                  <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Work Class</p>
-                  <p className="text-white text-xs font-medium">{selectedTexasRawPermit.work_class}</p>
-                </div>
-              )}
-            </div>
-            <div className="flex items-center justify-between pt-1">
-              {selectedTexasRawPermit.permit_number ? (
-                <p className="text-zinc-500 text-[10px]">{selectedTexasRawPermit.permit_number}</p>
-              ) : (
-                <span />
-              )}
-              {selectedTexasRawPermit.source_url && (
-                <a
-                  href={selectedTexasRawPermit.source_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-[10px] font-medium text-[#D76B3D] hover:text-[#f3b18d]"
-                >
-                  View source
-                </a>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {!nycFeatureAvailable &&
-        texasPermitAvailable &&
-        !usingTexasRawPermits &&
-        effectiveLayers.nycPermits &&
-        selectedTexasPermit && (
-        <div
-          className="absolute bottom-4 left-4 z-40 w-72 rounded-xl overflow-hidden shadow-2xl"
-          style={{ background: 'rgba(6,6,6,0.88)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.08)' }}
-        >
-          <div className="flex items-start justify-between px-4 pt-3 pb-2" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-            <div>
-              <p className="text-white text-sm font-semibold leading-tight">{selectedTexasPermit.place_name}</p>
-              <p className="text-zinc-500 text-[10px] mt-0.5">
-                {selectedTexasPermit.county_name ?? 'Texas'}{selectedTexasPermit.metro_name ? ` · ${selectedTexasPermit.metro_name}` : ''}
-              </p>
-            </div>
-            <button onClick={() => setSelectedTexasPermit(null)} className="text-zinc-600 hover:text-white ml-2 flex-shrink-0">×</button>
-          </div>
-          <div className="px-4 py-3 space-y-2">
-            <div className="flex items-center gap-2">
-              <span
-                className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                style={{
-                  background: 'rgba(215,107,61,0.2)',
-                  color: '#D76B3D',
-                  border: '1px solid rgba(215,107,61,0.3)',
-                }}
-              >
-                Residential Permit Activity
-              </span>
-              <span className="text-zinc-500 text-[10px]">{selectedTexasPermit.latest_month ?? 'Recent'}</span>
-            </div>
-            <p className="text-zinc-400 text-[10px] leading-relaxed">
-              Aggregated from the last 12 months of official Texas place-level permit activity; columns sit on place centroids, not parcel-level filings.
-            </p>
-            <div className="grid grid-cols-2 gap-2 pt-1">
-              <div>
-                <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Units</p>
-                <p className="text-white text-xs font-medium">{selectedTexasPermit.total_units.toLocaleString()}</p>
-              </div>
-              <div>
-                <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Buildings</p>
-                <p className="text-white text-xs font-medium">{selectedTexasPermit.total_buildings.toLocaleString()}</p>
-              </div>
-              <div>
-                <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Single-Family</p>
-                <p className="text-white text-xs font-medium">{selectedTexasPermit.single_family_units.toLocaleString()}</p>
-              </div>
-              <div>
-                <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Multi-Family</p>
-                <p className="text-white text-xs font-medium">{selectedTexasPermit.multi_family_units.toLocaleString()}</p>
-              </div>
-              <div className="col-span-2">
-                <p className="text-zinc-600 text-[9px] uppercase tracking-widest">Construction Value</p>
-                <p className="text-white text-xs font-medium">${selectedTexasPermit.total_value.toLocaleString()}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Map controls: top-left of map (adjacent to sidebar). [dots + Layers][sheet] opens toward map center. */}
       <div

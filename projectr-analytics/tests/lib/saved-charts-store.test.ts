@@ -289,6 +289,36 @@ test('detects already-saved uploaded pin outputs by stable payload identity', ()
   assert.equal(useSavedChartsStore.getState().hasSavedOutput(input), true)
 })
 
+test('saves and deduplicates permit detail outputs by stable payload identity', () => {
+  useSavedChartsStore.getState().resetForTests()
+
+  const input = {
+    kind: 'permit_detail' as const,
+    marketLabel: 'Austin, TX',
+    payload: {
+      title: 'South Lamar candidate permit',
+      permitLabel: 'New Construction',
+      sourceKind: 'texas_raw',
+      sourceName: 'City of Austin Open Data',
+      addressOrPlace: '111 Example St',
+      categoryLabel: 'New construction',
+      dateLabel: '2026-04-01',
+      sourceUrl: 'https://example.com/permit/1',
+      coordinates: { lat: 30.25012, lng: -97.76543 },
+      stats: [
+        { label: 'Units', value: '220' },
+        { label: 'Value', value: '$48,000,000' },
+      ],
+    },
+  }
+
+  const firstId = useSavedChartsStore.getState().saveOutput(input)
+  const secondId = useSavedChartsStore.getState().saveOutput(input)
+
+  assert.equal(secondId, firstId)
+  assert.equal(useSavedChartsStore.getState().outputs[0]?.kind, 'permit_detail')
+})
+
 test('hydrates mixed saved outputs from sessionStorage', () => {
   useSavedChartsStore.getState().resetForTests()
 

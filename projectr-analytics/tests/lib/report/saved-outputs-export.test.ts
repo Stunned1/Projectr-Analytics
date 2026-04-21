@@ -43,3 +43,28 @@ test('normalizes chart and non-chart saved outputs for pdf export', () => {
   assert.equal(payload?.outputs[0]?.kind, 'chart')
   assert.equal(payload?.outputs[1]?.kind, 'places_context')
 })
+
+test('normalizes permit detail outputs for pdf export', () => {
+  const payload = normalizeSavedChartsPdfPayload({
+    title: 'Scout saved outputs',
+    outputs: [
+      {
+        id: 'permit-1',
+        kind: 'permit_detail',
+        savedAt: '2026-04-20T12:00:00.000Z',
+        marketLabel: 'Austin, TX',
+        payload: {
+          title: 'South Lamar candidate permit',
+          permitLabel: 'New Construction',
+          sourceKind: 'texas_raw',
+          sourceName: 'City of Austin Open Data',
+          addressOrPlace: '111 Example St',
+          categoryLabel: 'New construction',
+          stats: [{ label: 'Units', value: '220' }],
+        },
+      },
+    ],
+  })
+
+  assert.equal(payload?.outputs[0]?.kind, 'permit_detail')
+})

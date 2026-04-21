@@ -28,6 +28,25 @@ export type SavedOutputRecord =
     }
   | {
       id: string
+      kind: 'permit_detail'
+      savedAt: string
+      prompt?: string | null
+      marketLabel?: string | null
+      payload: {
+        title: string
+        permitLabel: string
+        sourceKind: string
+        sourceName: string
+        addressOrPlace: string
+        categoryLabel: string
+        dateLabel?: string | null
+        sourceUrl?: string | null
+        coordinates?: { lat: number; lng: number } | null
+        stats: Array<{ label: string; value: string; sublabel?: string | null }>
+      }
+    }
+  | {
+      id: string
       kind: 'places_context'
       savedAt: string
       prompt?: string | null
@@ -79,6 +98,23 @@ export type SaveOutputInput =
       payload: {
         title: string
         summary?: string | null
+        stats: Array<{ label: string; value: string; sublabel?: string | null }>
+      }
+    }
+  | {
+      kind: 'permit_detail'
+      prompt?: string | null
+      marketLabel?: string | null
+      payload: {
+        title: string
+        permitLabel: string
+        sourceKind: string
+        sourceName: string
+        addressOrPlace: string
+        categoryLabel: string
+        dateLabel?: string | null
+        sourceUrl?: string | null
+        coordinates?: { lat: number; lng: number } | null
         stats: Array<{ label: string; value: string; sublabel?: string | null }>
       }
     }
@@ -272,6 +308,47 @@ function normalizeSavedOutputRecord(record: unknown): SavedOutputRecord | null {
     }
   }
 
+  if (record.kind === 'permit_detail') {
+    if (
+      !isStringRecord(record.payload) ||
+      typeof record.payload.title !== 'string' ||
+      typeof record.payload.permitLabel !== 'string' ||
+      typeof record.payload.sourceKind !== 'string' ||
+      typeof record.payload.sourceName !== 'string' ||
+      typeof record.payload.addressOrPlace !== 'string' ||
+      typeof record.payload.categoryLabel !== 'string'
+    ) {
+      return null
+    }
+    const stats = normalizeStatList(record.payload.stats)
+    if (!stats) return null
+    const coordinates =
+      isStringRecord(record.payload.coordinates) &&
+      typeof record.payload.coordinates.lat === 'number' &&
+      typeof record.payload.coordinates.lng === 'number'
+        ? { lat: record.payload.coordinates.lat, lng: record.payload.coordinates.lng }
+        : null
+    return {
+      id: record.id,
+      kind: 'permit_detail',
+      savedAt: record.savedAt,
+      prompt,
+      marketLabel,
+      payload: {
+        title: record.payload.title,
+        permitLabel: record.payload.permitLabel,
+        sourceKind: record.payload.sourceKind,
+        sourceName: record.payload.sourceName,
+        addressOrPlace: record.payload.addressOrPlace,
+        categoryLabel: record.payload.categoryLabel,
+        dateLabel: typeof record.payload.dateLabel === 'string' ? record.payload.dateLabel : null,
+        sourceUrl: typeof record.payload.sourceUrl === 'string' ? record.payload.sourceUrl : null,
+        coordinates,
+        stats,
+      },
+    }
+  }
+
   if (record.kind === 'places_context') {
     if (
       !isStringRecord(record.payload) ||
@@ -384,6 +461,28 @@ function buildSavedOutputSignature(input: SaveOutputInput): string {
         marketLabel: input.marketLabel ?? null,
         payload: input.payload,
       })
+    case 'permit_detail':
+      return JSON.stringify({
+        kind: input.kind,
+        prompt: input.prompt ?? null,
+        marketLabel: input.marketLabel ?? null,
+        payload: {
+          title: input.payload.title,
+          permitLabel: input.payload.permitLabel,
+          sourceKind: input.payload.sourceKind,
+          sourceName: input.payload.sourceName,
+          addressOrPlace: input.payload.addressOrPlace,
+          categoryLabel: input.payload.categoryLabel,
+          dateLabel: input.payload.dateLabel ?? null,
+          sourceUrl: input.payload.sourceUrl ?? null,
+          coordinates: input.payload.coordinates ?? null,
+          stats: input.payload.stats.map((stat) => ({
+            label: stat.label,
+            value: stat.value,
+            sublabel: stat.sublabel ?? null,
+          })),
+        },
+      })
     case 'places_context':
       return JSON.stringify({
         kind: input.kind,
@@ -428,6 +527,30 @@ function toSavedOutputRecord(input: SaveOutputInput, id = generateSavedOutputId(
         payload: {
           title: input.payload.title,
           summary: input.payload.summary ?? null,
+          stats: input.payload.stats.map((stat) => ({
+            label: stat.label,
+            value: stat.value,
+            sublabel: stat.sublabel ?? null,
+          })),
+        },
+      }
+    case 'permit_detail':
+      return {
+        id,
+        kind: 'permit_detail',
+        savedAt,
+        prompt: input.prompt ?? null,
+        marketLabel: input.marketLabel ?? null,
+        payload: {
+          title: input.payload.title,
+          permitLabel: input.payload.permitLabel,
+          sourceKind: input.payload.sourceKind,
+          sourceName: input.payload.sourceName,
+          addressOrPlace: input.payload.addressOrPlace,
+          categoryLabel: input.payload.categoryLabel,
+          dateLabel: input.payload.dateLabel ?? null,
+          sourceUrl: input.payload.sourceUrl ?? null,
+          coordinates: input.payload.coordinates ?? null,
           stats: input.payload.stats.map((stat) => ({
             label: stat.label,
             value: stat.value,

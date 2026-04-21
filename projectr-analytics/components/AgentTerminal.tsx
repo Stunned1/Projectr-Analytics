@@ -1,7 +1,7 @@
 'use client'
 
 import { Fragment, useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react'
-import type { AgentAction, AgentCompanionOutput, AgentTrace, AnalysisSite } from '@/lib/agent-types'
+import type { AgentAction, AgentCompanionOutput, AgentTrace, AnalysisSite, PermitDetailArtifact } from '@/lib/agent-types'
 import type { MapContext } from '@/lib/agent-types'
 import {buildAgentStarterSuggestions } from '@/lib/agent-surface-copy'
 import { useAgentIntelligence, formatActionLogLine } from '@/lib/use-agent-intelligence'
@@ -76,6 +76,56 @@ function SavedCompanionStatsCard({ companion }: { companion: Extract<AgentCompan
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+function PermitDetailCard({
+  title,
+  addressOrPlace,
+  categoryLabel,
+  sourceName,
+  dateLabel,
+  sourceUrl,
+  stats,
+}: {
+  title: string
+  addressOrPlace: string
+  categoryLabel: string
+  sourceName: string
+  dateLabel?: string | null
+  sourceUrl?: string | null
+  stats: Array<{ label: string; value: string; sublabel?: string | null }>
+}) {
+  return (
+    <div className="mt-3 rounded border border-zinc-800/80 bg-zinc-950/60 px-3 py-2">
+      <p className="font-mono text-[11px] font-semibold text-zinc-100">{title}</p>
+      <p className="mt-1 text-[10px] text-zinc-400">{addressOrPlace}</p>
+      <p className="text-[10px] text-zinc-500">
+        {categoryLabel} Â· {sourceName}
+        {dateLabel ? ` Â· ${dateLabel}` : ''}
+      </p>
+      <div className="mt-2 space-y-1">
+        {stats.map((stat) => (
+          <div key={stat.label} className="flex items-start justify-between gap-3 font-mono text-[10px]">
+            <div className="min-w-0">
+              <div className="text-zinc-300">{stat.label}</div>
+              {stat.sublabel ? <div className="text-[9px] text-zinc-500">{stat.sublabel}</div> : null}
+            </div>
+            <div className="shrink-0 text-zinc-100">{stat.value}</div>
+          </div>
+        ))}
+      </div>
+      {sourceUrl ? (
+        <a
+          href={sourceUrl}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="mt-2 inline-flex text-[10px] text-primary hover:underline"
+        >
+          Open source
+        </a>
+      ) : null}
     </div>
   )
 }
@@ -174,6 +224,7 @@ interface AgentTerminalProps {
   /** Live updates while `/api/agent` streams notes progress (Notes tab opens automatically). */
   onAgentThinkingUpdate?: (u: { trace: AgentTrace; phase: 'thinking' | 'json' | 'done' }) => void
   onAgentThinkingStreamFinished?: () => void
+  permitDetailEvent?: { artifact: PermitDetailArtifact; marketLabel?: string | null; nonce: number } | null
 }
 
 export default function AgentTerminal({
@@ -189,6 +240,7 @@ export default function AgentTerminal({
   onShowThinking,
   onAgentThinkingUpdate,
   onAgentThinkingStreamFinished,
+  permitDetailEvent = null,
 }: AgentTerminalProps) {
   const [size, setSize] = useState<AgentTerminalSize>('collapsed')
   const [openHeightPx, setOpenHeightPx] = useState(TERMINAL_DEFAULT_OPEN_PX)
@@ -225,6 +277,7 @@ export default function AgentTerminal({
     generateCaseBrief,
     briefLoading,
     briefError,
+    appendPermitDetail,
   } = useAgentIntelligence(mapContext, onAction, {
     shouldNotifyWhileClosed,
     onNotifyWhileClosed: () => {
@@ -248,6 +301,11 @@ export default function AgentTerminal({
     const latest = [...messages].reverse().find((m) => m.analysisSites?.length)
     return Boolean(latest?.analysisSites?.length) && !isRunningSequence && !loading
   }, [messages, isRunningSequence, loading])
+
+  useEffect(() => {
+    if (!permitDetailEvent) return
+    appendPermitDetail(permitDetailEvent.artifact, permitDetailEvent.marketLabel ?? null)
+  }, [appendPermitDetail, permitDetailEvent])
 
   useEffect(() => {
     onSizeChange?.(size)
@@ -590,6 +648,16 @@ export default function AgentTerminal({
                   : null
               const chartSaveInput = buildChartSaveInput(msg.chart)
               const chartAlreadySaved = chartSaveInput ? savedOutputs.length > 0 && hasSavedChart(chartSaveInput) : false
+              const permitSaveInput =
+                msg.permitDetail
+                  ? {
+                      kind: 'permit_detail' as const,
+                      marketLabel: msg.permitDetailMarketLabel ?? null,
+                      payload: msg.permitDetail,
+                    }
+                  : null
+              const permitAlreadySaved =
+                permitSaveInput ? savedOutputs.length > 0 && hasSavedOutput(permitSaveInput) : false
 
               return (
                 <div key={i}>
@@ -702,6 +770,34 @@ export default function AgentTerminal({
                           </div>
                         )
                       })}
+                    </div>
+                  ) : null}
+                  {msg.permitDetail ? (
+                    <div className="pl-[2ch]">
+                      <PermitDetailCard
+                        title={msg.permitDetail.title}
+                        addressOrPlace={msg.permitDetail.addressOrPlace}
+                        categoryLabel={msg.permitDetail.categoryLabel}
+                        sourceName={msg.permitDetail.sourceName}
+                        dateLabel={msg.permitDetail.dateLabel}
+                        sourceUrl={msg.permitDetail.sourceUrl}
+                        stats={msg.permitDetail.stats}
+                      />
+                      {permitSaveInput ? (
+                        <div className="mt-2 flex justify-end pl-[2ch]">
+                          <button
+                            type="button"
+                            disabled={permitAlreadySaved}
+                            onClick={() => {
+                              if (!permitSaveInput || permitAlreadySaved) return
+                              saveOutput(permitSaveInput)
+                            }}
+                            className="rounded border border-primary/30 px-2 py-0.5 text-[10px] font-semibold text-primary transition-colors hover:bg-primary/10 disabled:cursor-default disabled:opacity-60"
+                          >
+                            {permitAlreadySaved ? 'Saved' : 'Save output'}
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                   {msg.trace && onShowThinking && !msg.isAnalyzing && (
