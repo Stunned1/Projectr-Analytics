@@ -14,7 +14,13 @@ async function loadGoogleAuthModule(): Promise<GoogleAuthModule> {
 
 export async function getGoogleCloudAccessToken(scopes: string[] = [CLOUD_PLATFORM_SCOPE]): Promise<string> {
   const { GoogleAuth } = await loadGoogleAuthModule()
-  const auth = new GoogleAuth({ scopes })
+  const options: any = { scopes }
+  if (process.env.GOOGLE_CREDENTIALS) {
+    try {
+      options.credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS)
+    } catch {}
+  }
+  const auth = new GoogleAuth(options)
   const client = await auth.getClient()
   const tokenResponse = await client.getAccessToken()
   const token = typeof tokenResponse === 'string' ? tokenResponse : tokenResponse?.token

@@ -36,7 +36,13 @@ function defaultLoadModule(): Promise<BigQueryModule> {
 
 function clientOptions() {
   const projectId = getBigQueryReadConfig().projectId ?? undefined
-  return projectId ? { projectId } : {}
+  const options: any = projectId ? { projectId } : {}
+  if (process.env.GOOGLE_CREDENTIALS) {
+    try {
+      options.credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS)
+    } catch {}
+  }
+  return options
 }
 
 export function getBigQueryReadConfig(): BigQueryReadConfig {
