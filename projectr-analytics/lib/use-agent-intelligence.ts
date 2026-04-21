@@ -12,10 +12,12 @@ import { ALL_LAYERS_OFF } from '@/lib/slash-layer-keys'
 import {
   buildSlashHelpMessage,
   clearSlashUsageLines,
+  exportSlashUsageLines,
   goSlashUsageLines,
   isUnknownSlashOnly,
   layersSlashUsageLines,
   parseClearSlashCommand,
+  parseExportSlashCommand,
   parseGoSlashCommand,
   parseSaveSlashCommand,
   parseLayersSlashCommand,
@@ -119,6 +121,8 @@ export function useAgentIntelligence(
     onNotifyWhileClosed?: () => void
     /** `/save` — persist ZIP, aggregate, or map camera to Saved (map page). */
     onSlashSave?: (customLabel: string | null) => Promise<{ ok: boolean; message: string }>
+    /** `/export` — open the saved-chart PDF export dialog (map page). */
+    onSlashExport?: () => void
     /** Live Notes panel: streamed notes updates, JSON phase, then final trace (`done`). */
     onAgentThinkingUpdate?: (u: { trace: AgentTrace; phase: AgentThinkingStreamPhase }) => void
     /** Always called when the agent request finishes (success, error, or abort) so UI can clear a “streaming” state. */
@@ -146,11 +150,13 @@ export function useAgentIntelligence(
   const notifyCbRef = useRef(options?.onNotifyWhileClosed)
 
   const onSlashSaveRef = useRef(options?.onSlashSave)
+  const onSlashExportRef = useRef(options?.onSlashExport)
   useEffect(() => {
     shouldNotifyRef.current = options?.shouldNotifyWhileClosed
     notifyCbRef.current = options?.onNotifyWhileClosed
     onSlashSaveRef.current = options?.onSlashSave
-  }, [options?.shouldNotifyWhileClosed, options?.onNotifyWhileClosed, options?.onSlashSave])
+    onSlashExportRef.current = options?.onSlashExport
+  }, [options?.shouldNotifyWhileClosed, options?.onNotifyWhileClosed, options?.onSlashSave, options?.onSlashExport])
 
   useEffect(() => {
     const p = readPersistedSession()
@@ -563,6 +569,35 @@ export function useAgentIntelligence(
             text: `Searching for “${goCmd.query}”…`,
             action: { type: 'search', query: goCmd.query },
           },
+        ])
+        return
+      }
+
+      const exportCmd = parseExportSlashCommand(userPrompt)
+      if (exportCmd) {
+        setInput('')
+        if (exportCmd.kind === 'bad_arg') {
+          setMessages((prev) => [
+            ...prev,
+            { role: 'user', text: userPrompt, ts: Date.now() },
+            { role: 'agent', text: exportCmd.message },
+          ])
+          return
+        }
+        const openExport = onSlashExportRef.current
+        if (!openExport) {
+          setMessages((prev) => [
+            ...prev,
+            { role: 'user', text: userPrompt, ts: Date.now() },
+            { role: 'agent', text: exportSlashUsageLines() },
+          ])
+          return
+        }
+        openExport()
+        setMessages((prev) => [
+          ...prev,
+          { role: 'user', text: userPrompt, ts: Date.now() },
+          { role: 'agent', text: 'Opening the saved-chart PDF export dialog.' },
         ])
         return
       }

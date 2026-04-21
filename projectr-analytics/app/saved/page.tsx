@@ -49,8 +49,11 @@ export default function SavedPage() {
       />
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-l border-border/60">
-        <header className="shrink-0 border-b border-border bg-muted/20 px-5 py-3">
-          <h1 className="text-base font-semibold tracking-tight text-foreground">Saved Artifacts</h1>
+        <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border bg-muted/20 px-5 py-3">
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-primary">Workspace</p>
+            <h1 className="text-base font-semibold tracking-tight text-foreground">Saved Artifacts</h1>
+          </div>
         </header>
 
         <main className="min-h-0 flex-1 overflow-auto px-5 py-4 xl:overflow-hidden">

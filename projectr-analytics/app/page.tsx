@@ -7,6 +7,7 @@ import AgenticNormalizer from '@/components/AgenticNormalizer'
 import { AgentThinkingPanel } from '@/components/AgentThinkingPanel'
 import AgentTerminal, { type AgentTerminalSize } from '@/components/AgentTerminal'
 import { ImportedDataPanel } from '@/components/ImportedDataPanel'
+import SavedChartsExportDialog from '@/components/SavedChartsExportDialog'
 import type { AgentAction, AgentTrace, AnalysisSite } from '@/lib/agent-types'
 import type { MapLayersSnapshot } from '@/lib/report/types'
 import { useSitesStore } from '@/lib/sites-store'
@@ -387,23 +388,6 @@ function fmtGrowth(n: number | null | undefined) {
   return `${sign}${Number(n).toFixed(2)}%`
 }
 
-/** PDF / payload: fold geo note, empty, and errors into keyword_scope; omit series on hard failure. */
-function trendsShapeForReport(t: TrendsData | null): { series: { date: string; value: number }[]; keyword_scope: string } | null {
-  if (!t) return null
-  if (t.error) {
-    return {
-      series: [],
-      keyword_scope: `Search sentiment unavailable - ${t.error}`,
-    }
-  }
-  const scopeParts = [t.geo_note, t.keyword_scope].filter((s): s is string => Boolean(s && String(s).trim()))
-  let keyword_scope = scopeParts.join(' · ')
-  if (t.empty_message) {
-    keyword_scope = keyword_scope ? `${keyword_scope} - ${t.empty_message}` : t.empty_message
-  }
-  return { series: t.series, keyword_scope: keyword_scope || t.keyword_scope || 'Google Trends' }
-}
-
 const MONEY_METRICS = ['Rent', 'Income', 'FMR', 'Value', 'Price']
 const RATE_METRICS = ['Unemployment', 'Rate', 'Pct', 'Ratio']
 const CORE_AGGREGATE_AREA_METRICS = new Set([
@@ -724,6 +708,7 @@ export default function Home() {
   const [marketPanelTab, setMarketPanelTab] = useState<'data' | 'imported' | 'assistant'>('data')
   const [agentSidebarTrace, setAgentSidebarTrace] = useState<AgentTrace | null>(null)
   const [agentThinkingStreaming, setAgentThinkingStreaming] = useState(false)
+  const [savedChartsExportOpen, setSavedChartsExportOpen] = useState(false)
   const mapViewportRef = useRef<MapViewportSnapshot | null>(null)
 
   const handleShowAgentThinking = useCallback((trace: AgentTrace) => {
@@ -791,17 +776,6 @@ export default function Home() {
   }, [])
 
   const sitesForMap = useSitesStore((s) => s.sites)
-  const selectedComparisonIds = useSitesStore((s) => s.selectedForComparison)
-  const pdfComparisonPins = useMemo(() => {
-    const sel = sitesForMap.filter((s) => selectedComparisonIds.includes(s.id))
-    if (sel.length < 2) return null
-    return sel.map((s) => ({
-      lat: s.lat,
-      lng: s.lng,
-      label: s.label,
-      value: s.momentumScore ?? null,
-    }))
-  }, [sitesForMap, selectedComparisonIds])
 
   const handleAgentAction = useCallback((action: AgentAction) => {
     switch (action.type) {
@@ -1058,6 +1032,16 @@ export default function Home() {
     },
     [result, aggregateData, analysisSites.length, clientUploadAgg, mapLayersSnapshot, transit]
   )
+
+  const savedChartsExportTitle = useMemo(() => {
+    const marketLabel =
+      aggregateData?.label?.trim() ||
+      result?.zillow?.city?.trim() ||
+      result?.zip?.trim() ||
+      mapContext.label?.trim() ||
+      null
+    return marketLabel ? `${marketLabel} chart report` : 'Scout chart report'
+  }, [aggregateData?.label, mapContext.label, result?.zip, result?.zillow?.city])
 
   /** Normalize `/api/trends` JSON into panel + PDF state (always sets `trends` so analysts see errors). */
   const applyTrendsApiBody = useCallback((body: Record<string, unknown> | null, httpOk: boolean) => {
@@ -1541,9 +1525,15 @@ export default function Home() {
           onSizeChange={setAgentTerminalSize}
           onOpenHeightPxChange={setAgentTerminalOpenHeightPx}
           onSlashSave={handleSlashSave}
+          onSlashExport={() => setSavedChartsExportOpen(true)}
           onShowThinking={handleShowAgentThinking}
           onAgentThinkingUpdate={handleAgentThinkingUpdate}
           onAgentThinkingStreamFinished={handleAgentThinkingStreamFinished}
+        />
+        <SavedChartsExportDialog
+          open={savedChartsExportOpen}
+          onOpenChange={setSavedChartsExportOpen}
+          suggestedTitle={savedChartsExportTitle}
         />
 
         {/* Floating stats bubble */}
