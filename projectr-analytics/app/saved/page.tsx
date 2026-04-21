@@ -68,8 +68,8 @@ export default function SavedPage() {
 
             <section className="flex min-h-[24rem] flex-col gap-3 xl:min-h-0">
               <div>
-                <h2 className="text-[10px] font-semibold tracking-widest text-primary uppercase">Saved Charts</h2>
-                <p className="mt-1 text-xs text-muted-foreground">Terminal charts persist for the current session and can be removed here.</p>
+                <h2 className="text-[10px] font-semibold tracking-widest text-primary uppercase">Saved Outputs</h2>
+                <p className="mt-1 text-xs text-muted-foreground">Charts, companion cards, and imported-site context persist for the current session and can be removed here.</p>
               </div>
               <SavedChartsPanel className="min-h-[20rem] flex-1 xl:min-h-0" />
             </section>

@@ -3,7 +3,7 @@ import { Document, Image, Page, StyleSheet, Text, View } from '@react-pdf/render
 
 import { BarChartPdf, SparklinePdf } from '@/lib/report/pdf-charts'
 import { buildPdfBarRowsFromScoutChart, buildPdfSeriesFromScoutChart } from '@/lib/report/scout-chart-pdf-adapter'
-import type { SavedChartPdfRecord, SavedChartsPdfPayload } from '@/lib/report/saved-charts-export'
+import type { SavedChartsPdfPayload, SavedOutputPdfRecord } from '@/lib/report/saved-charts-export'
 
 const accent = '#D76B3D'
 const ink = '#18181B'
@@ -79,12 +79,6 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 14,
   },
-  sectionTitle: {
-    fontSize: 11,
-    fontWeight: 'bold',
-    marginBottom: 8,
-    color: ink,
-  },
   noteTitle: {
     fontSize: 9,
     fontWeight: 'bold',
@@ -96,7 +90,7 @@ const styles = StyleSheet.create({
     lineHeight: 1.5,
     color: '#3F3F46',
   },
-  chartListItem: {
+  listItem: {
     borderWidth: 1,
     borderColor: border,
     borderRadius: 6,
@@ -104,83 +98,55 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     backgroundColor: soft,
   },
-  chartListTitle: {
+  listTitle: {
     fontSize: 10,
     fontWeight: 'bold',
     color: ink,
     marginBottom: 3,
   },
-  chartListMeta: {
+  listMeta: {
     fontSize: 8,
     color: muted,
     lineHeight: 1.4,
   },
-  chartPageTitle: {
+  sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 6,
     lineHeight: 1.2,
   },
-  chartPageSubhead: {
+  subhead: {
     fontSize: 9,
     color: muted,
     marginBottom: 8,
   },
-  chartSummary: {
+  body: {
     fontSize: 9,
     lineHeight: 1.5,
     color: '#27272A',
     marginBottom: 12,
   },
-  metricsRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 14,
-  },
-  metricCard: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: border,
-    borderRadius: 6,
-    padding: 8,
-    backgroundColor: '#FFFFFF',
-  },
-  metricLabel: {
-    fontSize: 7,
-    color: muted,
-    textTransform: 'uppercase',
-    marginBottom: 3,
-  },
-  metricValue: {
-    fontSize: 11,
-    fontWeight: 'bold',
-    color: ink,
-  },
-  chartWrap: {
+  card: {
     borderWidth: 1,
     borderColor: border,
     borderRadius: 6,
     padding: 12,
-    marginBottom: 14,
+    marginBottom: 12,
   },
-  sourceBox: {
-    borderWidth: 1,
-    borderColor: border,
-    borderRadius: 6,
-    padding: 10,
-    backgroundColor: soft,
-  },
-  sourceTitle: {
-    fontSize: 8,
-    fontWeight: 'bold',
-    color: accent,
+  statRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 10,
     marginBottom: 6,
   },
-  sourceLine: {
+  statLabel: {
     fontSize: 8,
-    color: '#3F3F46',
-    lineHeight: 1.45,
-    marginBottom: 4,
+    color: muted,
+  },
+  statValue: {
+    fontSize: 9,
+    color: ink,
+    fontWeight: 'bold',
   },
   footer: {
     marginTop: 14,
@@ -202,88 +168,104 @@ function formatTimestamp(value: string): string {
   }).format(date)
 }
 
-function formatChartValue(value: number, format: SavedChartPdfRecord['chart']['yAxis']['valueFormat']): string {
-  if (!Number.isFinite(value)) return 'N/A'
-  const sign = value < 0 ? '-' : ''
-  const absValue = Math.abs(value)
-  switch (format) {
-    case 'currency':
-      return `${sign}$${Math.round(absValue).toLocaleString('en-US')}`
-    case 'percent':
-      return `${value.toFixed(1)}%`
-    case 'index':
-      return value.toFixed(1)
-    case 'number':
-    default:
-      return absValue >= 1000 ? `${sign}${Math.round(absValue).toLocaleString('en-US')}` : value.toFixed(1)
-  }
-}
-
-function chartNarrative(record: SavedChartPdfRecord): string {
-  const summary = record.chart.summary?.trim()
-  if (summary) return summary
-  const seriesLabel = record.chart.series[0]?.label?.trim() || record.chart.yAxis.label
-  if (record.chart.kind === 'line') {
-    return `This chart shows how ${seriesLabel.toLowerCase()} changed over the recorded periods. Use it to spot direction, volatility, and whether the latest reading looks stronger or softer than earlier periods.`
-  }
-  return `This chart compares ${seriesLabel.toLowerCase()} across the listed categories. Use it to see which segments stand out and how concentrated the overall distribution is.`
-}
-
-function chartMetrics(record: SavedChartPdfRecord): Array<{ label: string; value: string }> {
-  const format = record.chart.yAxis.valueFormat
-  const points = record.chart.series.flatMap((series) => series.points)
-  if (points.length === 0) {
-    return [
-      { label: 'Data points', value: '0' },
-      { label: 'Series', value: String(record.chart.series.length) },
-      { label: 'Coverage', value: 'No rows' },
-    ]
-  }
-
-  const values = points.map((point) => point.y)
-  const latest = points[points.length - 1]?.y ?? values[values.length - 1]
-  const max = Math.max(...values)
-  const min = Math.min(...values)
-
-  if (record.chart.kind === 'line') {
-    const start = points[0]?.y ?? latest
-    const delta = latest - start
-    return [
-      { label: 'Latest', value: formatChartValue(latest, format) },
-      { label: 'Change', value: `${delta >= 0 ? '+' : ''}${formatChartValue(delta, format)}` },
-      { label: 'Range', value: `${formatChartValue(min, format)} to ${formatChartValue(max, format)}` },
-    ]
-  }
-
-  const total = values.reduce((sum, value) => sum + value, 0)
-  return [
-    { label: 'Highest bar', value: formatChartValue(max, format) },
-    { label: 'Total', value: formatChartValue(total, format) },
-    { label: 'Categories', value: String(points.length) },
-  ]
-}
-
-function renderChart(record: SavedChartPdfRecord) {
-  if (record.chart.kind === 'line') {
+function renderChart(record: Extract<SavedOutputPdfRecord, { kind: 'chart' }>) {
+  if (record.payload.kind === 'line') {
     return (
       <SparklinePdf
-        data={buildPdfSeriesFromScoutChart(record.chart)}
+        data={buildPdfSeriesFromScoutChart(record.payload)}
         width={470}
         height={180}
-        color={record.chart.series[0]?.color ?? accent}
+        color={record.payload.series[0]?.color ?? accent}
       />
     )
   }
 
   return (
     <BarChartPdf
-      bars={buildPdfBarRowsFromScoutChart(record.chart)}
+      bars={buildPdfBarRowsFromScoutChart(record.payload)}
       width={470}
       height={200}
-      color={record.chart.series[0]?.color ?? accent}
-      caption={record.chart.yAxis.label}
+      color={record.payload.series[0]?.color ?? accent}
+      caption={record.payload.yAxis.label}
     />
   )
+}
+
+function outputTitle(record: SavedOutputPdfRecord): string {
+  if (record.kind === 'chart') return record.payload.title
+  if (record.kind === 'stat_card') return record.payload.title
+  return record.payload.siteLabel
+}
+
+function outputKindLabel(record: SavedOutputPdfRecord): string {
+  if (record.kind === 'chart') return 'Chart'
+  if (record.kind === 'stat_card') return 'Stat card'
+  if (record.kind === 'places_context') return 'Nearby context'
+  return 'Site snapshot'
+}
+
+type SavedOutputRenderGroup =
+  | { kind: 'single'; record: SavedOutputPdfRecord }
+  | {
+      kind: 'site'
+      siteLabel: string
+      marketLabel?: string | null
+      uploadedPin: Extract<SavedOutputPdfRecord, { kind: 'uploaded_pin' }>
+      placesContext?: Extract<SavedOutputPdfRecord, { kind: 'places_context' }> | null
+    }
+
+function buildSiteGroupKey(record: Extract<SavedOutputPdfRecord, { kind: 'uploaded_pin' | 'places_context' }>): string {
+  return [
+    record.payload.siteLabel.trim().toLowerCase(),
+    record.payload.lat.toFixed(5),
+    record.payload.lng.toFixed(5),
+  ].join(':')
+}
+
+export function buildSavedOutputRenderGroups(records: SavedOutputPdfRecord[]): SavedOutputRenderGroup[] {
+  const groups: SavedOutputRenderGroup[] = []
+  const siteGroupIndexes = new Map<string, number>()
+
+  for (const record of records) {
+    if (record.kind !== 'uploaded_pin' && record.kind !== 'places_context') {
+      groups.push({ kind: 'single', record })
+      continue
+    }
+
+    const siteKey = buildSiteGroupKey(record)
+    const existingIndex = siteGroupIndexes.get(siteKey)
+    if (existingIndex == null) {
+      if (record.kind === 'uploaded_pin') {
+        groups.push({
+          kind: 'site',
+          siteLabel: record.payload.siteLabel,
+          marketLabel: record.marketLabel ?? null,
+          uploadedPin: record,
+          placesContext: null,
+        })
+        siteGroupIndexes.set(siteKey, groups.length - 1)
+        continue
+      }
+
+      groups.push({ kind: 'single', record })
+      continue
+    }
+
+    const existingGroup = groups[existingIndex]
+    if (!existingGroup || existingGroup.kind !== 'site') {
+      groups.push({ kind: 'single', record })
+      continue
+    }
+
+    if (record.kind === 'places_context' && !existingGroup.placesContext) {
+      existingGroup.placesContext = record
+      continue
+    }
+
+    groups.push({ kind: 'single', record })
+  }
+
+  return groups
 }
 
 export function SavedChartsPdfDocument({
@@ -295,104 +277,161 @@ export function SavedChartsPdfDocument({
 }) {
   const generatedAt = formatTimestamp(payload.generatedAt)
   const notes = payload.notes.trim()
+  const renderGroups = buildSavedOutputRenderGroups(payload.outputs)
 
   return (
     <Document title={payload.title}>
       <Page size="A4" style={styles.page}>
         <View style={styles.headerBand}>
           <View style={styles.brandWrap}>
-            {/* react-pdf Image is not a DOM img element. */}
-            {/* eslint-disable-next-line jsx-a11y/alt-text */}
             {logoDataUri ? <Image src={logoDataUri} style={styles.logo} /> : null}
             <Text style={styles.brand}>SCOUT</Text>
           </View>
           <Text style={styles.meta}>{generatedAt}</Text>
         </View>
 
-        <Text style={styles.kicker}>Saved Chart Export</Text>
+        <Text style={styles.kicker}>Saved Output Export</Text>
         <Text style={styles.title}>{payload.title}</Text>
         <Text style={styles.intro}>
-          This PDF groups the saved charts you selected in Scout into a plain-language export that is easier to scan, share,
+          This PDF groups the saved outputs you selected in Scout into a plain-language export that is easier to scan, share,
           and review outside the product.
         </Text>
 
         <View style={styles.noteBox}>
           <Text style={styles.noteTitle}>Notes for readers</Text>
           <Text style={styles.noteText}>
-            {notes || 'No custom notes were added for this export. The pages that follow keep the chart title, saved prompt, and source notes so the reader can understand what each view is showing.'}
+            {notes || 'No custom notes were added for this export. The pages that follow keep the saved output title, source prompt, and context metadata so the reader can understand what each item is showing.'}
           </Text>
         </View>
 
-        <Text style={styles.sectionTitle}>Included charts</Text>
-        {payload.charts.map((record, index) => (
-          <View key={record.id} style={styles.chartListItem}>
-            <Text style={styles.chartListTitle}>
-              {index + 1}. {record.chart.title}
+        {payload.outputs.map((record, index) => (
+          <View key={record.id} style={styles.listItem}>
+            <Text style={styles.listTitle}>
+              {index + 1}. {outputTitle(record)}
             </Text>
-            <Text style={styles.chartListMeta}>Prompt: {record.prompt}</Text>
-            {record.marketLabel ? <Text style={styles.chartListMeta}>Market: {record.marketLabel}</Text> : null}
-            <Text style={styles.chartListMeta}>Saved: {formatTimestamp(record.savedAt)}</Text>
+            <Text style={styles.listMeta}>Type: {outputKindLabel(record)}</Text>
+            {'prompt' in record && record.prompt ? <Text style={styles.listMeta}>Prompt: {record.prompt}</Text> : null}
+            {record.marketLabel ? <Text style={styles.listMeta}>Market: {record.marketLabel}</Text> : null}
+            <Text style={styles.listMeta}>Saved: {formatTimestamp(record.savedAt)}</Text>
           </View>
         ))}
 
         <Text style={styles.footer}>
-          Charts are exported from the saved-chart workspace in this browser session. Values and source notes come from the
-          chart contract that Scout stores when each chart is generated.
+          Saved outputs are exported from the current browser session. Charts keep their chart contract, while saved context cards
+          and site snapshots render as structured report sections.
         </Text>
       </Page>
 
-      {payload.charts.map((record, index) => (
-        <Page key={record.id} size="A4" style={styles.page}>
+      {renderGroups.map((group, index) => (
+        <Page
+          key={group.kind === 'single' ? group.record.id : group.uploadedPin.id}
+          size="A4"
+          style={styles.page}
+        >
           <View style={styles.headerBand}>
             <View style={styles.brandWrap}>
-              {/* react-pdf Image is not a DOM img element. */}
-              {/* eslint-disable-next-line jsx-a11y/alt-text */}
               {logoDataUri ? <Image src={logoDataUri} style={styles.logo} /> : null}
               <Text style={styles.brand}>SCOUT</Text>
             </View>
             <Text style={styles.meta}>
-              Chart {index + 1} of {payload.charts.length}
+              Output {index + 1} of {renderGroups.length}
             </Text>
           </View>
 
-          <Text style={styles.kicker}>Chart detail</Text>
-          <Text style={styles.chartPageTitle}>{record.chart.title}</Text>
-          <Text style={styles.chartPageSubhead}>
-            Prompt: {record.prompt}
-            {record.marketLabel ? `  |  Market: ${record.marketLabel}` : ''}
-          </Text>
-          <Text style={styles.chartSummary}>{chartNarrative(record)}</Text>
-
-          <View style={styles.metricsRow}>
-            {chartMetrics(record).map((metric) => (
-              <View key={metric.label} style={styles.metricCard}>
-                <Text style={styles.metricLabel}>{metric.label}</Text>
-                <Text style={styles.metricValue}>{metric.value}</Text>
-              </View>
-            ))}
-          </View>
-
-          <View style={styles.chartWrap}>{renderChart(record)}</View>
-
-          <View style={styles.sourceBox}>
-            <Text style={styles.sourceTitle}>How to read this chart</Text>
-            <Text style={styles.sourceLine}>Type: {record.chart.kind === 'line' ? 'Trend over time' : 'Category comparison'}</Text>
-            <Text style={styles.sourceLine}>Y-axis: {record.chart.yAxis.label}</Text>
-            <Text style={styles.sourceLine}>
-              Confidence: {record.chart.confidenceLabel?.trim() || 'Not explicitly labeled'}
-            </Text>
-            {record.chart.citations.map((citation) => (
-              <Text key={citation.id} style={styles.sourceLine}>
-                Source: {citation.label}
-                {citation.note ? ` - ${citation.note}` : ''}
+          {group.kind === 'single' ? (
+            <>
+              <Text style={styles.kicker}>{outputKindLabel(group.record)}</Text>
+              <Text style={styles.sectionTitle}>{outputTitle(group.record)}</Text>
+              <Text style={styles.subhead}>
+                {'prompt' in group.record && group.record.prompt ? `Prompt: ${group.record.prompt}` : 'Saved sidebar artifact'}
+                {group.record.marketLabel ? `  |  Market: ${group.record.marketLabel}` : ''}
               </Text>
-            ))}
-          </View>
 
-          <Text style={styles.footer}>
-            Saved in Scout on {formatTimestamp(record.savedAt)}. If this chart is a placeholder or derived series, the source
-            note above should be treated as the controlling explanation.
-          </Text>
+              {group.record.kind === 'chart' ? (
+                <View style={styles.card}>{renderChart(group.record)}</View>
+              ) : null}
+
+              {group.record.kind === 'stat_card' ? (
+                <View style={styles.card}>
+                  {group.record.payload.summary ? <Text style={styles.body}>{group.record.payload.summary}</Text> : null}
+                  {group.record.payload.stats.map((stat) => (
+                    <View key={stat.label} style={styles.statRow}>
+                      <Text style={styles.statLabel}>{stat.label}</Text>
+                      <Text style={styles.statValue}>{stat.value}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+
+              {group.record.kind === 'places_context' ? (
+                <View style={styles.card}>
+                  <Text style={styles.body}>{group.record.payload.summary}</Text>
+                  {group.record.payload.countsByCategory.map((entry) => (
+                    <View key={entry.category} style={styles.statRow}>
+                      <Text style={styles.statLabel}>{entry.label}</Text>
+                      <Text style={styles.statValue}>{String(entry.count)}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+
+              {group.record.kind === 'uploaded_pin' ? (
+                <View style={styles.card}>
+                  <Text style={styles.body}>
+                    {group.record.payload.lat.toFixed(5)}, {group.record.payload.lng.toFixed(5)}
+                  </Text>
+                  {Object.entries(group.record.payload.rowPreview).slice(0, 8).map(([label, value]) => (
+                    <View key={label} style={styles.statRow}>
+                      <Text style={styles.statLabel}>{label}</Text>
+                      <Text style={styles.statValue}>{String(value)}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+
+              <Text style={styles.footer}>Saved in Scout on {formatTimestamp(group.record.savedAt)}.</Text>
+            </>
+          ) : (
+            <>
+              <Text style={styles.kicker}>Site bundle</Text>
+              <Text style={styles.sectionTitle}>{group.siteLabel}</Text>
+              <Text style={styles.subhead}>
+                Saved uploaded-site bundle
+                {group.marketLabel ? `  |  Market: ${group.marketLabel}` : ''}
+              </Text>
+
+              <View style={styles.card}>
+                <Text style={styles.noteTitle}>Site snapshot</Text>
+                <Text style={styles.body}>
+                  {group.uploadedPin.payload.lat.toFixed(5)}, {group.uploadedPin.payload.lng.toFixed(5)}
+                </Text>
+                {Object.entries(group.uploadedPin.payload.rowPreview).slice(0, 8).map(([label, value]) => (
+                  <View key={label} style={styles.statRow}>
+                    <Text style={styles.statLabel}>{label}</Text>
+                    <Text style={styles.statValue}>{String(value)}</Text>
+                  </View>
+                ))}
+              </View>
+
+              {group.placesContext ? (
+                <View style={styles.card}>
+                  <Text style={styles.noteTitle}>Nearby context</Text>
+                  <Text style={styles.body}>{group.placesContext.payload.summary}</Text>
+                  {group.placesContext.payload.countsByCategory.map((entry) => (
+                    <View key={entry.category} style={styles.statRow}>
+                      <Text style={styles.statLabel}>{entry.label}</Text>
+                      <Text style={styles.statValue}>{String(entry.count)}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+
+              <Text style={styles.footer}>
+                Saved in Scout on {formatTimestamp(group.uploadedPin.savedAt)}
+                {group.placesContext ? `; nearby context saved on ${formatTimestamp(group.placesContext.savedAt)}.` : '.'}
+              </Text>
+            </>
+          )}
         </Page>
       ))}
     </Document>

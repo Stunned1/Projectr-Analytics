@@ -597,7 +597,7 @@ export function useAgentIntelligence(
         setMessages((prev) => [
           ...prev,
           { role: 'user', text: userPrompt, ts: Date.now() },
-          { role: 'agent', text: 'Opening the saved-chart PDF export dialog.' },
+          { role: 'agent', text: 'Opening the saved-output PDF export dialog.' },
         ])
         return
       }

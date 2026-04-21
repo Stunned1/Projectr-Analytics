@@ -37,7 +37,7 @@ export default function SavedChartsExportDialog({
   onOpenChange,
   suggestedTitle,
 }: SavedChartsExportDialogProps) {
-  const charts = useSavedChartsStore((state) => state.charts)
+  const outputs = useSavedChartsStore((state) => state.outputs)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [title, setTitle] = useState(suggestedTitle)
   const [notes, setNotes] = useState('')
@@ -46,15 +46,15 @@ export default function SavedChartsExportDialog({
 
   useEffect(() => {
     if (!open) return
-    setSelectedIds(charts.map((chart) => chart.id))
+    setSelectedIds(outputs.map((output) => output.id))
     setTitle((current) => current.trim() || suggestedTitle)
     setError(null)
-  }, [open, charts, suggestedTitle])
+  }, [open, outputs, suggestedTitle])
 
-  const selectedCharts = useMemo(() => {
+  const selectedOutputs = useMemo(() => {
     const selected = new Set(selectedIds)
-    return charts.filter((chart) => selected.has(chart.id))
-  }, [charts, selectedIds])
+    return outputs.filter((output) => selected.has(output.id))
+  }, [outputs, selectedIds])
 
   function toggleChart(id: string, checked: boolean) {
     setSelectedIds((current) => {
@@ -65,8 +65,8 @@ export default function SavedChartsExportDialog({
 
   async function handleExport() {
     setError(null)
-    if (selectedCharts.length === 0) {
-      setError('Choose at least one saved chart before exporting.')
+    if (selectedOutputs.length === 0) {
+      setError('Choose at least one saved output before exporting.')
       return
     }
 
@@ -80,13 +80,7 @@ export default function SavedChartsExportDialog({
           title: cleanTitle,
           notes,
           generatedAt: new Date().toISOString(),
-          charts: selectedCharts.map((chart) => ({
-            id: chart.id,
-            prompt: chart.prompt,
-            marketLabel: chart.marketLabel ?? null,
-            savedAt: chart.savedAt,
-            chart: chart.chart,
-          })),
+          outputs: selectedOutputs,
         }),
       })
 
@@ -120,9 +114,9 @@ export default function SavedChartsExportDialog({
         showCloseButton
       >
         <DialogHeader className="shrink-0 border-b border-border px-6 py-5 pr-14">
-          <DialogTitle>Export saved charts</DialogTitle>
+          <DialogTitle>Export saved outputs</DialogTitle>
           <DialogDescription>
-            Choose the saved charts you want to include, add reader notes, then download a PDF.
+            Choose the saved outputs you want to include, add reader notes, then download a PDF.
           </DialogDescription>
         </DialogHeader>
 
@@ -130,16 +124,16 @@ export default function SavedChartsExportDialog({
           <section className="flex min-h-0 flex-col border-b border-border lg:border-r lg:border-b-0">
             <div className="flex shrink-0 flex-wrap items-start justify-between gap-3 px-6 py-4">
               <div>
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-primary">Saved charts</p>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-primary">Saved outputs</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {charts.length === 0
-                    ? 'No charts are saved in this session yet.'
-                    : `${selectedCharts.length} of ${charts.length} charts selected`}
+                  {outputs.length === 0
+                    ? 'No outputs are saved in this session yet.'
+                    : `${selectedOutputs.length} of ${outputs.length} outputs selected`}
                 </p>
               </div>
-              {charts.length > 0 ? (
+              {outputs.length > 0 ? (
                 <div className="flex gap-2">
-                  <Button type="button" size="xs" variant="outline" onClick={() => setSelectedIds(charts.map((chart) => chart.id))}>
+                  <Button type="button" size="xs" variant="outline" onClick={() => setSelectedIds(outputs.map((output) => output.id))}>
                     Select all
                   </Button>
                   <Button type="button" size="xs" variant="ghost" onClick={() => setSelectedIds([])}>
@@ -151,17 +145,17 @@ export default function SavedChartsExportDialog({
 
             <ScrollArea className="min-h-0 flex-1 px-6 pb-6">
               <div className="pr-4">
-                {charts.length === 0 ? (
+                {outputs.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-border bg-muted/20 p-4 text-sm leading-relaxed text-muted-foreground">
-                    Save at least one terminal chart first, then run <span className="font-semibold text-foreground">/export</span>.
+                    Save at least one output first, then run <span className="font-semibold text-foreground">/export</span>.
                   </div>
                 ) : (
                   <div className="grid gap-4 xl:grid-cols-2">
-                    {charts.map((chart) => {
-                      const checked = selectedIds.includes(chart.id)
+                    {outputs.map((output) => {
+                      const checked = selectedIds.includes(output.id)
                       return (
                         <label
-                          key={chart.id}
+                          key={output.id}
                           className={`flex h-full min-h-0 cursor-pointer flex-col rounded-xl border p-4 transition-colors ${
                             checked
                               ? 'border-primary/60 bg-primary/5'
@@ -169,31 +163,68 @@ export default function SavedChartsExportDialog({
                           }`}
                         >
                           <div className="flex items-start gap-3">
-                            <Checkbox checked={checked} onCheckedChange={(value) => toggleChart(chart.id, value === true)} />
+                            <Checkbox checked={checked} onCheckedChange={(value) => toggleChart(output.id, value === true)} />
                             <div className="min-w-0 flex-1">
                               <div className="flex flex-wrap items-start justify-between gap-2">
                                 <div className="min-w-0">
-                                  <p className="text-sm font-semibold leading-snug text-foreground">{chart.chart.title}</p>
-                                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{chart.prompt}</p>
+                                  <p className="text-sm font-semibold leading-snug text-foreground">
+                                    {output.kind === 'chart'
+                                      ? output.payload.title
+                                      : output.kind === 'stat_card'
+                                        ? output.payload.title
+                                        : output.payload.siteLabel}
+                                  </p>
+                                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                                    {'prompt' in output && output.prompt ? output.prompt : 'Saved sidebar artifact'}
+                                  </p>
                                 </div>
                                 <span className="rounded-full border border-border/80 bg-background/70 px-2 py-0.5 text-[10px] text-muted-foreground">
-                                  {chart.chart.kind === 'line' ? 'Trend chart' : 'Comparison chart'}
+                                  {output.kind === 'chart'
+                                    ? output.payload.kind === 'line'
+                                      ? 'Trend chart'
+                                      : 'Comparison chart'
+                                    : output.kind === 'stat_card'
+                                      ? 'Stat card'
+                                      : output.kind === 'places_context'
+                                        ? 'Nearby context'
+                                        : 'Site snapshot'}
                                 </span>
                               </div>
                               <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
-                                <span>{formatSavedAt(chart.savedAt)}</span>
-                                {chart.marketLabel?.trim() ? <span>Market: {chart.marketLabel.trim()}</span> : null}
+                                <span>{formatSavedAt(output.savedAt)}</span>
+                                {output.marketLabel?.trim() ? <span>Market: {output.marketLabel.trim()}</span> : null}
                               </div>
                             </div>
                           </div>
 
-                          <ScoutChartCard
-                            chart={chart.chart}
-                            className="mt-4 border-border/70 bg-[#111114]/80 p-3"
-                            showHeader={false}
-                            showSources={false}
-                            chartHeightClass="h-44"
-                          />
+                          {output.kind === 'chart' ? (
+                            <ScoutChartCard
+                              chart={output.payload}
+                              className="mt-4 border-border/70 bg-[#111114]/80 p-3"
+                              showHeader={false}
+                              showSources={false}
+                              chartHeightClass="h-44"
+                            />
+                          ) : (
+                            <div className="mt-4 rounded-lg border border-border/70 bg-[#111114]/50 p-3 text-xs text-muted-foreground">
+                              {output.kind === 'stat_card' ? (
+                                <div className="space-y-2">
+                                  {output.payload.stats.map((stat) => (
+                                    <div key={stat.label} className="flex items-start justify-between gap-3">
+                                      <span>{stat.label}</span>
+                                      <span className="font-semibold text-foreground">{stat.value}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : null}
+                              {output.kind === 'places_context' ? <p>{output.payload.summary}</p> : null}
+                              {output.kind === 'uploaded_pin' ? (
+                                <p>
+                                  {output.payload.siteLabel} · {output.payload.lat.toFixed(5)}, {output.payload.lng.toFixed(5)}
+                                </p>
+                              ) : null}
+                            </div>
+                          )}
                         </label>
                       )
                     })}
@@ -246,7 +277,7 @@ export default function SavedChartsExportDialog({
               <p className="text-xs text-destructive">{error}</p>
             ) : (
               <p className="text-xs text-muted-foreground">
-                Pick the charts you want to include, then export a clean PDF for sharing.
+                Pick the outputs you want to include, then export a clean PDF for sharing.
               </p>
             )}
           </div>
@@ -257,7 +288,7 @@ export default function SavedChartsExportDialog({
             <Button
               type="button"
               onClick={handleExport}
-              disabled={loading || charts.length === 0 || selectedCharts.length === 0}
+              disabled={loading || outputs.length === 0 || selectedOutputs.length === 0}
             >
               {loading ? 'Building PDF...' : 'Export PDF'}
             </Button>

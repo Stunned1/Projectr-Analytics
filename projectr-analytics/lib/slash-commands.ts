@@ -32,7 +32,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   },
   {
     command: 'export',
-    summary: '`/export`: open the saved-chart PDF export dialog',
+    summary: '`/export`: open the saved-output PDF export dialog',
   },
   {
     command: 'layers',
@@ -123,7 +123,7 @@ export type ParsedExportSlash =
 
 export function exportSlashUsageLines(): string {
   return [
-    'Usage: `/export`: opens the saved-chart PDF export dialog.',
+    'Usage: `/export`: opens the saved-output PDF export dialog.',
     '• The dialog lists charts saved from the terminal in this browser session.',
     '• Pick the charts you want, add notes, then export a PDF.',
   ].join('\n')
@@ -136,7 +136,7 @@ export function parseExportSlashCommand(trimmed: string): ParsedExportSlash | nu
   if (!rest) return { kind: 'run' }
   return {
     kind: 'bad_arg',
-    message: 'Use `/export` with no extra text. Choose charts and add notes in the export dialog.',
+    message: 'Use `/export` with no extra text. Choose saved outputs and add notes in the export dialog.',
   }
 }
 

@@ -4,7 +4,7 @@ import type { MutableRefObject } from 'react'
 import { memo, useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { APIProvider, Map, useMap } from '@vis.gl/react-google-maps'
 import { GoogleMapsOverlay } from '@deck.gl/google-maps'
-import { GeoJsonLayer, ScatterplotLayer, ColumnLayer, PathLayer } from '@deck.gl/layers'
+import { GeoJsonLayer, ScatterplotLayer, ColumnLayer, PathLayer, IconLayer } from '@deck.gl/layers'
 import { HeatmapLayer } from '@deck.gl/aggregation-layers'
 import { H3HexagonLayer } from '@deck.gl/geo-layers'
 import type { Layer, PickingInfo } from '@deck.gl/core'
@@ -26,6 +26,20 @@ function shortlistPinColor(stage: string | undefined): [number, number, number, 
   if (stage === 'Recovery') return [245, 158, 11, 255]
   return [239, 68, 68, 255]
 }
+
+const UPLOADED_MARKER_PIN_ID = 'uploaded-marker-pin'
+const uploadedMarkerPin = `data:image/svg+xml;utf8,${encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+    <path d="M64 10C38.6 10 18 30.6 18 56c0 34.8 39.7 60.4 43.1 62.6a6 6 0 0 0 5.8 0C70.3 116.4 110 90.8 110 56 110 30.6 89.4 10 64 10Z" fill="#18beb2"/>
+    <path d="M64 22c-18.8 0-34 15.2-34 34 0 23.5 24.2 43.6 34 50.7 9.8-7.1 34-27.2 34-50.7 0-18.8-15.2-34-34-34Z" fill="#0f766e"/>
+    <circle cx="64" cy="56" r="18" fill="#e6fffb"/>
+  </svg>`
+)}`
+const UPLOADED_MARKER_ICON_MAPPING = {
+  pin: { x: 0, y: 0, width: 128, height: 128, mask: false },
+} as const
+const uploadedPinColor: [number, number, number, number] = [24, 190, 178, 255]
+const uploadedPinStemColor: [number, number, number, number] = [15, 118, 110, 255]
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -2128,40 +2142,66 @@ function CommandMap({
       )
     }
 
-    // Uploaded client data — extruded column with few sides reads as a cone / pyramid from the map
+    // Uploaded client data — dedicated pin icon at lower zoom, compact 3D pin columns when zoomed in
     if (effectiveLayers.clientData && uploadedMarkers?.length) {
       const values = uploadedMarkers.map((d) => d.value ?? 0).filter((v) => v > 0)
       const maxVal = values.length ? Math.max(...values) : 1
       const minVal = values.length ? Math.min(...values) : 0
+      const useUploadedPinColumns = mapZoom >= 14
 
-      result.push(
-        new ColumnLayer({
-          id: 'uploaded-markers',
-          data: uploadedMarkers,
-          diskResolution: 4, // square pyramid frustum (cone-like silhouette when tilted)
-          radius: 22,
-          extruded: true,
-          getPosition: (d: { lat: number; lng: number }) => [d.lng, d.lat],
-          getElevation: (d: { value: number | null }) => {
-            const v = d.value ?? 0
-            const t = maxVal === minVal ? 0.5 : Math.min(Math.max((v - minVal) / (maxVal - minVal), 0), 1)
-            return 30 + t * 120 // 30m–150m - more subtle
-          },
-          getFillColor: [215, 107, 61, 255],
-          getLineColor: [255, 255, 255, 200],
-          lineWidthMinPixels: 1,
-          pickable: true,
-          onHover: (info: PickingInfo) => {
-            const d = info.object as ClientUploadMarker | undefined
-            if (d) setTooltipStable({ x: info.x, y: info.y, text: `Client pin · ${d.label}${d.value != null ? ': $' + d.value.toLocaleString() : ''}` })
-            else setTooltipStable(null)
-          },
-          onClick: (info: PickingInfo) => {
-            const d = info.object as ClientUploadMarker | undefined
-            onUploadedMarkerSelect?.(d ?? null)
-          },
-        })
-      )
+      if (useUploadedPinColumns) {
+        result.push(
+          new ColumnLayer({
+            id: 'client-upload-column-layer',
+            data: uploadedMarkers,
+            diskResolution: 20,
+            radius: 10,
+            extruded: true,
+            getPosition: (d: { lat: number; lng: number }) => [d.lng, d.lat],
+            getElevation: (d: { value: number | null }) => {
+              const v = d.value ?? 0
+              const t = maxVal === minVal ? 0.5 : Math.min(Math.max((v - minVal) / (maxVal - minVal), 0), 1)
+              return 120 + t * 80
+            },
+            getFillColor: uploadedPinColor,
+            getLineColor: uploadedPinStemColor,
+            lineWidthMinPixels: 1,
+            pickable: true,
+            onHover: (info: PickingInfo) => {
+              const d = info.object as ClientUploadMarker | undefined
+              if (d) setTooltipStable({ x: info.x, y: info.y, text: `Client pin · ${d.label}${d.value != null ? ': $' + d.value.toLocaleString() : ''}` })
+              else setTooltipStable(null)
+            },
+            onClick: (info: PickingInfo) => {
+              const d = info.object as ClientUploadMarker | undefined
+              onUploadedMarkerSelect?.(d ?? null)
+            },
+          })
+        )
+      } else {
+        result.push(
+          new IconLayer({
+            id: 'client-upload-icon-layer',
+            data: uploadedMarkers,
+            pickable: true,
+            iconAtlas: uploadedMarkerPin,
+            iconMapping: UPLOADED_MARKER_ICON_MAPPING,
+            getIcon: () => UPLOADED_MARKER_PIN_ID.replace('uploaded-marker-', ''),
+            getPosition: (d: { lat: number; lng: number }) => [d.lng, d.lat],
+            getSize: () => 28,
+            getColor: () => uploadedPinColor,
+            onHover: (info: PickingInfo) => {
+              const d = info.object as ClientUploadMarker | undefined
+              if (d) setTooltipStable({ x: info.x, y: info.y, text: `Client pin · ${d.label}${d.value != null ? ': $' + d.value.toLocaleString() : ''}` })
+              else setTooltipStable(null)
+            },
+            onClick: (info: PickingInfo) => {
+              const d = info.object as ClientUploadMarker | undefined
+              onUploadedMarkerSelect?.(d ?? null)
+            },
+          })
+        )
+      }
     }
 
     return result
@@ -2561,7 +2601,7 @@ function CommandMap({
               },
               { key: 'pois' as const, label: 'POIs', color: '#f59e0b' },
               { key: 'momentum' as const, label: 'Momentum', color: '#a78bfa' },
-              { key: 'clientData' as const, label: 'Client', color: '#D76B3D', showWhen: !!uploadedMarkers?.length },
+              { key: 'clientData' as const, label: 'Client', color: '#18beb2', showWhen: !!uploadedMarkers?.length },
             ]).filter(({ nycOnly, showWhen }) => {
               if (showWhen === false) return false
               if (nycOnly) return nycFeatureAvailable

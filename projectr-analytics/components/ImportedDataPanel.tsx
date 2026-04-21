@@ -23,6 +23,7 @@ import {
   resolveImportedMarkerSelection,
 } from '@/lib/imported-marker-focus'
 import type { SitePlacesContextResponse } from '@/lib/google-places-site-context'
+import { useSavedChartsStore } from '@/lib/saved-charts-store'
 
 const SITE_CONTEXT_RADIUS_METERS = 500
 
@@ -51,6 +52,13 @@ const WORKFLOW_STATUS_LABELS: Record<string, string> = {
 
 function SourceBadge({ label }: { label: string }) {
   return <span className="rounded bg-white/6 px-1.5 py-0.5 text-[9px] text-zinc-300">{label}</span>
+}
+
+function buildTopPlaceKey(
+  place: SitePlacesContextResponse['topPlaces'][number],
+  index: number
+): string {
+  return [place.name, place.categoryLabel, place.distanceMeters ?? 'na', index].join(':')
 }
 
 function SelectedMarkerDetail({
@@ -116,6 +124,9 @@ export function ImportedDataPanel({
   const [selectedMarkerSiteContext, setSelectedMarkerSiteContext] = useState<SitePlacesContextResponse | null>(null)
   const [selectedMarkerSiteContextLoading, setSelectedMarkerSiteContextLoading] = useState(false)
   const [selectedMarkerSiteContextError, setSelectedMarkerSiteContextError] = useState<string | null>(null)
+  useSavedChartsStore((state) => state.outputs)
+  const saveOutput = useSavedChartsStore((state) => state.saveOutput)
+  const hasSavedOutput = useSavedChartsStore((state) => state.hasSavedOutput)
   const { selectedSourceKey, markerBelongsToSelected } = resolveImportedMarkerSelection({
     sources,
     selectedMarker,
@@ -217,6 +228,38 @@ export function ImportedDataPanel({
     loading: selectedMarkerSiteContextLoading,
     error: selectedMarkerSiteContextError,
   })
+  const pinSaveInput =
+    markerBelongsToSelected && selectedMarker
+      ? {
+          kind: 'uploaded_pin' as const,
+          marketLabel: currentZip ? `ZIP ${currentZip}` : null,
+          payload: {
+            siteLabel: selectedMarker.label,
+            lat: selectedMarker.lat,
+            lng: selectedMarker.lng,
+            sourceLabel: selectedSource?.fileName ?? null,
+            rowPreview: selectedMarker.row_preview ?? {},
+          },
+        }
+      : null
+  const pinAlreadySaved = pinSaveInput ? hasSavedOutput(pinSaveInput) : false
+  const placesSaveInput =
+    markerBelongsToSelected && selectedMarker && selectedMarkerSiteContextState.status === 'ready'
+      ? {
+          kind: 'places_context' as const,
+          marketLabel: currentZip ? `ZIP ${currentZip}` : null,
+          payload: {
+            siteLabel: selectedMarker.label,
+            lat: selectedMarker.lat,
+            lng: selectedMarker.lng,
+            radiusMeters: selectedMarkerSiteContextState.context.radiusMeters,
+            summary: selectedMarkerSiteContextState.context.summary,
+            countsByCategory: selectedMarkerSiteContextState.context.countsByCategory,
+            topPlaces: selectedMarkerSiteContextState.context.topPlaces,
+          },
+        }
+      : null
+  const placesAlreadySaved = placesSaveInput ? hasSavedOutput(placesSaveInput) : false
 
   useEffect(() => {
     if (
@@ -501,8 +544,32 @@ export function ImportedDataPanel({
       {markerBelongsToSelected && selectedMarker ? (
         <>
           <SelectedMarkerDetail marker={selectedMarker} onClear={onClearSelectedMarker} />
+          {pinSaveInput ? (
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => saveOutput(pinSaveInput)}
+                disabled={pinAlreadySaved}
+                className="rounded-full border border-white/10 px-2 py-1 text-[10px] text-zinc-300 transition hover:border-white/20 hover:text-white disabled:opacity-50"
+              >
+                {pinAlreadySaved ? 'Saved' : 'Save site snapshot'}
+              </button>
+            </div>
+          ) : null}
           <div className="rounded-lg border border-border/50 bg-muted/10 p-3">
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Around this site</p>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Around this site</p>
+              {placesSaveInput ? (
+                <button
+                  type="button"
+                  onClick={() => saveOutput(placesSaveInput)}
+                  disabled={placesAlreadySaved}
+                  className="rounded-full border border-white/10 px-2 py-1 text-[10px] text-zinc-300 transition hover:border-white/20 hover:text-white disabled:opacity-50"
+                >
+                  {placesAlreadySaved ? 'Saved' : 'Save nearby context'}
+                </button>
+              ) : null}
+            </div>
             {selectedMarkerSiteContextState.status === 'loading' ? (
               <p className="mt-2 text-[11px] text-zinc-400">Loading nearby place context...</p>
             ) : null}
@@ -528,8 +595,8 @@ export function ImportedDataPanel({
                   ))}
                 </div>
                 <div className="space-y-1">
-                  {selectedMarkerSiteContextState.context.topPlaces.map((place) => (
-                    <p key={`${place.name}:${place.categoryLabel}`} className="text-[11px] text-zinc-400">
+                  {selectedMarkerSiteContextState.context.topPlaces.map((place, index) => (
+                    <p key={buildTopPlaceKey(place, index)} className="text-[11px] text-zinc-400">
                       <span className="text-zinc-200">{place.name}</span> · {place.categoryLabel}
                     </p>
                   ))}

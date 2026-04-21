@@ -44,6 +44,36 @@ const baseChart: ScoutChartOutput = {
   citations: [],
 }
 
+const statCardOutput = {
+  id: 'retail-income-card',
+  kind: 'stat_card',
+  savedAt: '2026-04-20T12:00:00.000Z',
+  prompt: 'compare retail for Austin vs. Houston',
+  marketLabel: 'Austin vs Houston',
+  payload: {
+    title: 'Median household income',
+    summary: 'Houston leads slightly on the latest bounded macro companion.',
+    stats: [
+      { label: 'Austin', value: '$92,000' },
+      { label: 'Houston', value: '$78,000' },
+    ],
+  },
+} as const
+
+const uploadedPinOutput = {
+  id: 'uploaded-pin-1',
+  kind: 'uploaded_pin',
+  savedAt: '2026-04-20T12:01:00.000Z',
+  marketLabel: 'Austin, TX',
+  payload: {
+    siteLabel: 'South Lamar candidate',
+    lat: 30.2501,
+    lng: -97.7654,
+    sourceLabel: 'sites.csv',
+    rowPreview: { Address: '111 Example St', Units: 220 },
+  },
+} as const
+
 test('adds a saved chart record', () => {
   useSavedChartsStore.getState().resetForTests()
 
@@ -220,4 +250,62 @@ test('hydrates saved charts from sessionStorage', () => {
   assert.equal(state.charts[0]?.savedAt, '2026-04-20T12:00:00.000Z')
   assert.equal(state.charts[0]?.chart.yAxis.valueFormat, 'number')
   assert.equal(state.charts[0]?.chart.series[0]?.color, null)
+})
+
+test('saves chart and non-chart outputs in newest-first order', () => {
+  useSavedChartsStore.getState().resetForTests()
+
+  useSavedChartsStore.getState().saveOutput({
+    kind: 'chart',
+    prompt: 'compare retail for Austin vs. Houston',
+    marketLabel: 'Austin vs Houston',
+    payload: baseChart,
+  })
+  const statId = useSavedChartsStore.getState().saveOutput({
+    kind: 'stat_card',
+    prompt: statCardOutput.prompt,
+    marketLabel: statCardOutput.marketLabel,
+    payload: statCardOutput.payload,
+  })
+
+  const state = useSavedChartsStore.getState()
+  assert.equal(state.outputs.length, 2)
+  assert.equal(state.outputs[0]?.kind, 'stat_card')
+  assert.equal(state.outputs[0]?.id, statId)
+  assert.equal(state.outputs[1]?.kind, 'chart')
+})
+
+test('detects already-saved uploaded pin outputs by stable payload identity', () => {
+  useSavedChartsStore.getState().resetForTests()
+
+  const input = {
+    kind: 'uploaded_pin' as const,
+    marketLabel: 'Austin, TX',
+    payload: uploadedPinOutput.payload,
+  }
+
+  useSavedChartsStore.getState().saveOutput(input)
+
+  assert.equal(useSavedChartsStore.getState().hasSavedOutput(input), true)
+})
+
+test('hydrates mixed saved outputs from sessionStorage', () => {
+  useSavedChartsStore.getState().resetForTests()
+
+  sessionStorage.setItem(
+    SAVED_CHARTS_STORAGE_KEY,
+    JSON.stringify({
+      state: {
+        outputs: [statCardOutput, uploadedPinOutput],
+      },
+      version: 1,
+    })
+  )
+
+  useSavedChartsStore.persist.rehydrate()
+
+  const state = useSavedChartsStore.getState()
+  assert.equal(state.outputs.length, 2)
+  assert.equal(state.outputs[0]?.kind, 'stat_card')
+  assert.equal(state.outputs[1]?.kind, 'uploaded_pin')
 })

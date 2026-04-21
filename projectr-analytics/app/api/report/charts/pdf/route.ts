@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const payload = normalizeSavedChartsPdfPayload(body)
     if (!payload) {
-      return NextResponse.json({ error: 'Invalid saved-chart export payload' }, { status: 400 })
+      return NextResponse.json({ error: 'Invalid saved-output export payload' }, { status: 400 })
     }
 
     const buffer = await renderSavedChartsPdf(payload)

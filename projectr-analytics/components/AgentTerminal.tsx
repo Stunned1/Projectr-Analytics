@@ -206,9 +206,11 @@ export default function AgentTerminal({
   const slashOpenPendingRef = useRef(false)
   const [unread, setUnread] = useState(false)
   const [slashHighlight, setSlashHighlight] = useState(0)
-  const savedCharts = useSavedChartsStore((state) => state.charts)
+  const savedOutputs = useSavedChartsStore((state) => state.outputs)
   const hasSavedChart = useSavedChartsStore((state) => state.hasSavedChart)
   const saveChart = useSavedChartsStore((state) => state.saveChart)
+  const hasSavedOutput = useSavedChartsStore((state) => state.hasSavedOutput)
+  const saveOutput = useSavedChartsStore((state) => state.saveOutput)
 
   const shouldNotifyWhileClosed = useCallback(() => size === 'collapsed', [size])
 
@@ -587,7 +589,7 @@ export default function AgentTerminal({
                     }
                   : null
               const chartSaveInput = buildChartSaveInput(msg.chart)
-              const chartAlreadySaved = chartSaveInput ? savedCharts.length > 0 && hasSavedChart(chartSaveInput) : false
+              const chartAlreadySaved = chartSaveInput ? savedOutputs.length > 0 && hasSavedChart(chartSaveInput) : false
 
               return (
                 <div key={i}>
@@ -633,7 +635,7 @@ export default function AgentTerminal({
                         if (companion.kind === 'chart') {
                           const companionSaveInput = buildChartSaveInput(companion.chart)
                           const companionAlreadySaved =
-                            companionSaveInput ? savedCharts.length > 0 && hasSavedChart(companionSaveInput) : false
+                            companionSaveInput ? savedOutputs.length > 0 && hasSavedChart(companionSaveInput) : false
 
                           return (
                             <div key={`companion-chart-${i}-${companionIndex}`} className="mt-3">
@@ -659,11 +661,45 @@ export default function AgentTerminal({
                           )
                         }
 
+                        const statsSaveInput =
+                          msg.chartSourcePrompt && companion.items.length > 0
+                            ? {
+                                kind: 'stat_card' as const,
+                                prompt: msg.chartSourcePrompt,
+                                marketLabel: msg.chartSourceMarketLabel ?? null,
+                                payload: {
+                                  title: companion.title,
+                                  summary: null,
+                                  stats: companion.items.map((item) => ({
+                                    label: item.label,
+                                    value: item.value,
+                                    sublabel: item.note ?? null,
+                                  })),
+                                },
+                              }
+                            : null
+                        const companionAlreadySaved =
+                          statsSaveInput ? savedOutputs.length > 0 && hasSavedOutput(statsSaveInput) : false
+
                         return (
-                          <SavedCompanionStatsCard
-                            key={`companion-stats-${i}-${companionIndex}`}
-                            companion={companion}
-                          />
+                          <div key={`companion-stats-${i}-${companionIndex}`} className="mt-3">
+                            <SavedCompanionStatsCard companion={companion} />
+                            {statsSaveInput ? (
+                              <div className="mt-2 flex justify-end">
+                                <button
+                                  type="button"
+                                  disabled={companionAlreadySaved}
+                                  onClick={() => {
+                                    if (!statsSaveInput || companionAlreadySaved) return
+                                    saveOutput(statsSaveInput)
+                                  }}
+                                  className="rounded border border-primary/30 px-2 py-0.5 text-[10px] font-semibold text-primary transition-colors hover:bg-primary/10 disabled:cursor-default disabled:opacity-60"
+                                >
+                                  {companionAlreadySaved ? 'Saved' : 'Save output'}
+                                </button>
+                              </div>
+                            ) : null}
+                          </div>
                         )
                       })}
                     </div>
