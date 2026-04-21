@@ -388,23 +388,6 @@ function fmtGrowth(n: number | null | undefined) {
   return `${sign}${Number(n).toFixed(2)}%`
 }
 
-/** PDF / payload: fold geo note, empty, and errors into keyword_scope; omit series on hard failure. */
-function trendsShapeForReport(t: TrendsData | null): { series: { date: string; value: number }[]; keyword_scope: string } | null {
-  if (!t) return null
-  if (t.error) {
-    return {
-      series: [],
-      keyword_scope: `Search sentiment unavailable - ${t.error}`,
-    }
-  }
-  const scopeParts = [t.geo_note, t.keyword_scope].filter((s): s is string => Boolean(s && String(s).trim()))
-  let keyword_scope = scopeParts.join(' · ')
-  if (t.empty_message) {
-    keyword_scope = keyword_scope ? `${keyword_scope} - ${t.empty_message}` : t.empty_message
-  }
-  return { series: t.series, keyword_scope: keyword_scope || t.keyword_scope || 'Google Trends' }
-}
-
 const MONEY_METRICS = ['Rent', 'Income', 'FMR', 'Value', 'Price']
 const RATE_METRICS = ['Unemployment', 'Rate', 'Pct', 'Ratio']
 const CORE_AGGREGATE_AREA_METRICS = new Set([
@@ -793,17 +776,6 @@ export default function Home() {
   }, [])
 
   const sitesForMap = useSitesStore((s) => s.sites)
-  const selectedComparisonIds = useSitesStore((s) => s.selectedForComparison)
-  const pdfComparisonPins = useMemo(() => {
-    const sel = sitesForMap.filter((s) => selectedComparisonIds.includes(s.id))
-    if (sel.length < 2) return null
-    return sel.map((s) => ({
-      lat: s.lat,
-      lng: s.lng,
-      label: s.label,
-      value: s.momentumScore ?? null,
-    }))
-  }, [sitesForMap, selectedComparisonIds])
 
   const handleAgentAction = useCallback((action: AgentAction) => {
     switch (action.type) {

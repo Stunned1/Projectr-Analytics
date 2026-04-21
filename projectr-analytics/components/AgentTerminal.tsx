@@ -395,7 +395,6 @@ export default function AgentTerminal({
   }, [endResize])
 
   const terminalMsgOffset = messages.length - visibleTerminalMessages.length
-  const hasUserMessage = useMemo(() => messages.some((m) => m.role === 'user'), [messages])
   // const inputPlaceholder = useMemo(
   //   () => buildAgentInputPlaceholder(mapContext, hasUserMessage, isRunningSequence),
   //   [mapContext, hasUserMessage, isRunningSequence]
