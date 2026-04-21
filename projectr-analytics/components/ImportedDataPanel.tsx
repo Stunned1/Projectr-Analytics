@@ -3,18 +3,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useClientUploadMarkersStore, type ClientUploadMarker } from '@/lib/client-upload-markers-store'
 import { getClientUploadWorkingRows } from '@/lib/client-upload-working-rows'
-import { resolveImportedSourceToMarkers, buildImportedResolvePreview } from '@/lib/client-upload-map-resolver'
+import { buildImportedResolvePreview, resolveImportedSourceToMarkers } from '@/lib/client-upload-map-resolver'
 import {
   attachImportedMarkerSourceKey,
-  getImportedDatasetView,
-  buildImportedChartModel,
   buildImportedSummaryStats,
   formatImportedCell,
   getImportedSourceKey,
-  getImportedTableHeaders,
-  getImportedTableRows,
   isImportedWorkingRowsHydrating,
-  toScoutChartOutputFromImportedChart,
 } from '@/lib/client-upload-presentation'
 import { useClientUploadSessionStore, type ClientUploadSession } from '@/lib/client-upload-session-store'
 import {
@@ -22,7 +17,6 @@ import {
   getSessionSources,
   updateSessionSourceAtIndex,
 } from '@/lib/client-upload-session-aggregate'
-import { ScoutChartCard } from '@/components/ScoutChartCard'
 import { useSiteContextStore } from '@/lib/site-context-store'
 import {
   buildImportedMarkerSiteContextState,
@@ -30,13 +24,12 @@ import {
 } from '@/lib/imported-marker-focus'
 import type { SitePlacesContextResponse } from '@/lib/google-places-site-context'
 
-type ImportedPanelView = 'recommended' | 'map' | 'chart' | 'table'
 const SITE_CONTEXT_RADIUS_METERS = 500
 
 const MAPABILITY_LABELS: Record<string, string> = {
   map_ready: 'Ready for map',
   map_normalizable: 'Needs map normalization',
-  non_map_visualizable: 'Sidebar or chart',
+  non_map_visualizable: 'Sidebar only',
   unusable: 'Unusable',
 }
 
@@ -56,100 +49,8 @@ const WORKFLOW_STATUS_LABELS: Record<string, string> = {
   errored: 'Errored',
 }
 
-const VISUALIZATION_MODE_LABELS: Record<string, string> = {
-  map: 'Map',
-  chart: 'Chart',
-  table: 'Table',
-}
-
-const INITIAL_TABLE_ROW_LIMIT = 100
-const TABLE_ROW_PAGE_SIZE = 100
-
 function SourceBadge({ label }: { label: string }) {
-  return (
-    <span className="rounded bg-white/6 px-1.5 py-0.5 text-[9px] text-zinc-300">
-      {label}
-    </span>
-  )
-}
-
-function SimpleLineChart({
-  points,
-  stroke = '#D76B3D',
-}: {
-  points: Array<{ label: string; value: number }>
-  stroke?: string
-}) {
-  const width = 520
-  const height = 170
-  const padX = 14
-  const padY = 16
-  const values = points.map((point) => point.value)
-  const min = Math.min(...values)
-  const max = Math.max(...values)
-  const span = max - min || 1
-  const step = points.length > 1 ? (width - padX * 2) / (points.length - 1) : 0
-
-  const line = points
-    .map((point, index) => {
-      const x = padX + index * step
-      const y = height - padY - ((point.value - min) / span) * (height - padY * 2)
-      return `${x},${y}`
-    })
-    .join(' ')
-
-  return (
-    <div className="rounded-lg border border-border/50 bg-muted/10 p-3">
-      <svg viewBox={`0 0 ${width} ${height}`} className="h-40 w-full">
-        <polyline
-          fill="none"
-          stroke={stroke}
-          strokeWidth="3"
-          strokeLinejoin="round"
-          strokeLinecap="round"
-          points={line}
-        />
-        {points.map((point, index) => {
-          const x = padX + index * step
-          const y = height - padY - ((point.value - min) / span) * (height - padY * 2)
-          return <circle key={`${point.label}:${index}`} cx={x} cy={y} r="3" fill={stroke} />
-        })}
-      </svg>
-      <div className="mt-2 flex justify-between gap-2 text-[10px] text-zinc-500">
-        <span className="truncate">{points[0]?.label ?? ''}</span>
-        <span className="truncate text-right">{points.at(-1)?.label ?? ''}</span>
-      </div>
-    </div>
-  )
-}
-
-function SimpleBarChart({
-  points,
-  fill = '#60a5fa',
-}: {
-  points: Array<{ label: string; value: number }>
-  fill?: string
-}) {
-  const max = Math.max(...points.map((point) => point.value), 1)
-
-  return (
-    <div className="space-y-2 rounded-lg border border-border/50 bg-muted/10 p-3">
-      {points.map((point) => {
-        const widthPct = Math.max((point.value / max) * 100, 4)
-        return (
-          <div key={point.label} className="space-y-1">
-            <div className="flex items-center justify-between gap-2 text-[10px]">
-              <span className="truncate text-zinc-300">{point.label}</span>
-              <span className="font-medium text-white">{point.value.toLocaleString()}</span>
-            </div>
-            <div className="h-2 rounded-full bg-white/6">
-              <div className="h-full rounded-full" style={{ width: `${widthPct}%`, background: fill }} />
-            </div>
-          </div>
-        )
-      })}
-    </div>
-  )
+  return <span className="rounded bg-white/6 px-1.5 py-0.5 text-[9px] text-zinc-300">{label}</span>
 }
 
 function SelectedMarkerDetail({
@@ -206,20 +107,12 @@ export function ImportedDataPanel({
 }) {
   const updateSession = useClientUploadSessionStore((state) => state.updateSession)
   const setMarkers = useClientUploadMarkersStore((state) => state.setMarkers)
-  const sources = useMemo(
-    () => (session ? getSessionSources(session) : []),
-    [session]
-  )
+  const sources = useMemo(() => (session ? getSessionSources(session) : []), [session])
   const [preferredSourceKey, setPreferredSourceKey] = useState<string | null>(null)
-  const [viewState, setViewState] = useState<{ sourceKey: string | null; view: ImportedPanelView }>({
-    sourceKey: null,
-    view: 'recommended',
-  })
   const [resolvingSourceKey, setResolvingSourceKey] = useState<string | null>(null)
   const [resolveError, setResolveError] = useState<string | null>(null)
   const [hydratingRowsSourceKey, setHydratingRowsSourceKey] = useState<string | null>(null)
   const [workingRowsError, setWorkingRowsError] = useState<string | null>(null)
-  const [tableRowLimit, setTableRowLimit] = useState(INITIAL_TABLE_ROW_LIMIT)
   const [selectedMarkerSiteContext, setSelectedMarkerSiteContext] = useState<SitePlacesContextResponse | null>(null)
   const [selectedMarkerSiteContextLoading, setSelectedMarkerSiteContextLoading] = useState(false)
   const [selectedMarkerSiteContextError, setSelectedMarkerSiteContextError] = useState<string | null>(null)
@@ -234,33 +127,7 @@ export function ImportedDataPanel({
   const selectedSourceIndex = sources.findIndex(
     (source, index) => getImportedSourceKey(source, index) === selectedSourceKey
   )
-
-  const recommendedView = selectedSource ? getImportedDatasetView(selectedSource) : 'table'
-  const chartModel = selectedSource ? buildImportedChartModel(selectedSource) : null
-  const selectedView =
-    viewState.sourceKey === selectedSourceKey
-      ? viewState.view
-      : selectedSource?.visualizationMode ?? recommendedView
-  const activeView =
-    selectedView === 'recommended'
-      ? recommendedView
-      : selectedView === 'chart' && !chartModel
-        ? 'table'
-        : selectedView === 'map' && !selectedSource?.mapPinsActive
-          ? recommendedView
-          : selectedView
   const summaryStats = selectedSource ? buildImportedSummaryStats(selectedSource) : []
-  const tableHeaders = selectedSource ? getImportedTableHeaders(selectedSource) : []
-  const tableRows = useMemo(
-    () => (selectedSource ? getImportedTableRows(selectedSource) : []),
-    [selectedSource]
-  )
-  const visibleTableRows = useMemo(
-    () => tableRows.slice(0, tableRowLimit),
-    [tableRowLimit, tableRows]
-  )
-  const totalTableRows = selectedSource?.rawTable?.total_rows ?? selectedSource?.rowsIngested ?? tableRows.length
-  const hasMoreTableRows = visibleTableRows.length < tableRows.length
   const selectedSourceNeedsWorkingRows = selectedSource ? isImportedWorkingRowsHydrating(selectedSource) : false
   const rowsHydrationInFlight = hydratingRowsSourceKey === selectedSourceKey
   const resolvePreview = useMemo(
@@ -280,11 +147,6 @@ export function ImportedDataPanel({
           radiusMeters: SITE_CONTEXT_RADIUS_METERS,
         })
       : null
-
-  useEffect(() => {
-    setTableRowLimit(INITIAL_TABLE_ROW_LIMIT)
-    setWorkingRowsError(null)
-  }, [selectedSourceKey])
 
   useEffect(() => {
     if (!selectedMarkerSiteContextKey || !selectedMarker) {
@@ -419,21 +281,6 @@ export function ImportedDataPanel({
     }
   }, [selectedSource, selectedSourceIndex, selectedSourceKey, selectedSourceNeedsWorkingRows, updateSession])
 
-  const persistVisualizationMode = useCallback(
-    (mode: 'map' | 'chart' | 'table') => {
-      setViewState({ sourceKey: selectedSourceKey, view: mode })
-      setResolveError(null)
-      if (selectedSourceIndex < 0) return
-      updateSession((currentSession) =>
-        updateSessionSourceAtIndex(currentSession, selectedSourceIndex, (source) => ({
-          ...source,
-          visualizationMode: mode,
-        }))
-      )
-    },
-    [selectedSourceIndex, selectedSourceKey, updateSession]
-  )
-
   const handleResolveGeography = useCallback(async () => {
     if (selectedSourceIndex < 0 || !selectedSourceKey || !selectedSource) return
 
@@ -452,7 +299,7 @@ export function ImportedDataPanel({
             message: null,
           }),
           status: 'resolving',
-          message: 'Resolving geography for map rendering…',
+          message: 'Resolving geography for map rendering...',
         },
       }))
     )
@@ -483,7 +330,7 @@ export function ImportedDataPanel({
                 : resolved.normalization.status === 'failed'
                   ? 'errored'
                   : 'sidebar_only',
-            visualizationMode: markers.length > 0 ? 'map' : source.visualizationMode ?? 'table',
+            visualizationMode: 'map',
             normalization: resolved.normalization,
             persistenceWarning: source.persistenceWarning ?? null,
           }
@@ -495,7 +342,6 @@ export function ImportedDataPanel({
       setMarkers(mergedMarkers.length > 0 ? mergedMarkers : null)
 
       if (markers.length > 0) {
-        setViewState({ sourceKey: selectedSourceKey, view: 'map' })
         onMarkersResolved?.(mergedMarkers)
       }
 
@@ -538,12 +384,6 @@ export function ImportedDataPanel({
           />
           <SourceBadge
             label={
-              VISUALIZATION_MODE_LABELS[selectedSource.visualizationMode ?? recommendedView] ??
-              (selectedSource.visualizationMode ?? recommendedView)
-            }
-          />
-          <SourceBadge
-            label={
               MAPABILITY_LABELS[selectedSource.triage.mapability_classification] ??
               selectedSource.triage.mapability_classification
             }
@@ -556,18 +396,14 @@ export function ImportedDataPanel({
           />
           <SourceBadge label={`${(selectedSource.triage.confidence * 100).toFixed(0)}% confidence`} />
         </div>
-        <p className="mt-2 text-sm font-semibold text-white">
-          {selectedSource.fileName ?? selectedSource.triage.metric_name}
-        </p>
+        <p className="mt-2 text-sm font-semibold text-white">{selectedSource.fileName ?? selectedSource.triage.metric_name}</p>
         <p className="mt-1 text-[10px] text-zinc-500">
           Imported {new Date(session?.ingestedAt ?? Date.now()).toLocaleString()} · {selectedSource.triage.inferred_dataset_type}
         </p>
-        <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
-          {selectedSource.triage.explanation}
-        </p>
+        <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">{selectedSource.triage.explanation}</p>
       </div>
 
-      {sources.length > 1 && (
+      {sources.length > 1 ? (
         <div className="flex flex-wrap gap-2">
           {sources.map((source, index) => {
             const key = getImportedSourceKey(source, index)
@@ -578,7 +414,8 @@ export function ImportedDataPanel({
                 type="button"
                 onClick={() => {
                   setPreferredSourceKey(key)
-                  setViewState({ sourceKey: key, view: 'recommended' })
+                  setResolveError(null)
+                  setWorkingRowsError(null)
                 }}
                 className={`rounded-full border px-2.5 py-1 text-[10px] transition-colors ${
                   active
@@ -591,7 +428,7 @@ export function ImportedDataPanel({
             )
           })}
         </div>
-      )}
+      ) : null}
 
       <div className="grid grid-cols-2 gap-2">
         {summaryStats.map((stat) => (
@@ -603,15 +440,15 @@ export function ImportedDataPanel({
         ))}
       </div>
 
-      {(selectedSource.persistenceWarning || selectedSource.triage.warnings.length > 0 || rowsHydrationInFlight || workingRowsError) && (
+      {(selectedSource.persistenceWarning || selectedSource.triage.warnings.length > 0 || rowsHydrationInFlight || workingRowsError) ? (
         <div className="rounded-lg border border-amber-900/40 bg-amber-950/20 px-3 py-2 text-[10px] text-amber-200">
           {rowsHydrationInFlight
-            ? 'Loading the full imported dataset from browser storage…'
+            ? 'Loading the full imported dataset from browser storage...'
             : workingRowsError ?? selectedSource.persistenceWarning ?? selectedSource.triage.warnings[0]}
         </div>
-      )}
+      ) : null}
 
-      {selectedSource.triage.mapability_classification === 'map_normalizable' && (
+      {selectedSource.triage.mapability_classification === 'map_normalizable' ? (
         <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
@@ -636,18 +473,18 @@ export function ImportedDataPanel({
               className="rounded-md border border-primary/35 bg-primary/10 px-3 py-1.5 text-[11px] font-semibold text-primary transition-colors hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {rowsHydrationInFlight
-                ? 'Loading rows…'
+                ? 'Loading rows...'
                 : resolveInFlight
-                ? 'Resolving…'
-                : selectedSource.normalization?.status === 'resolved'
-                  ? 'Re-run geography normalization'
-                  : 'Resolve geography'}
+                  ? 'Resolving...'
+                  : selectedSource.normalization?.status === 'resolved'
+                    ? 'Re-run geography normalization'
+                    : 'Resolve geography'}
             </button>
           </div>
 
           {(selectedSource.normalization?.status === 'resolved' ||
             selectedSource.normalization?.status === 'failed' ||
-            resolveError) && (
+            resolveError) ? (
             <div className="mt-3 rounded-md border border-white/10 bg-white/5 px-3 py-2 text-[10px] text-zinc-300">
               <p className="font-medium text-white">
                 {selectedSource.normalization?.resolvedCount?.toLocaleString() ?? 0} resolved ·{' '}
@@ -657,9 +494,9 @@ export function ImportedDataPanel({
                 {resolveError ?? selectedSource.normalization?.message ?? 'Scout has not attempted geography normalization yet.'}
               </p>
             </div>
-          )}
+          ) : null}
         </div>
-      )}
+      ) : null}
 
       {markerBelongsToSelected && selectedMarker ? (
         <>
@@ -667,7 +504,7 @@ export function ImportedDataPanel({
           <div className="rounded-lg border border-border/50 bg-muted/10 p-3">
             <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Around this site</p>
             {selectedMarkerSiteContextState.status === 'loading' ? (
-              <p className="mt-2 text-[11px] text-zinc-400">Loading nearby place context…</p>
+              <p className="mt-2 text-[11px] text-zinc-400">Loading nearby place context...</p>
             ) : null}
             {selectedMarkerSiteContextState.status === 'unavailable' ? (
               <p className="mt-2 text-[11px] text-zinc-400">{selectedMarkerSiteContextState.message}</p>
@@ -703,58 +540,7 @@ export function ImportedDataPanel({
         </>
       ) : null}
 
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={() => setViewState({ sourceKey: selectedSourceKey, view: 'recommended' })}
-          className={`rounded-md border px-2.5 py-1 text-[10px] ${
-            selectedView === 'recommended'
-              ? 'border-primary/45 bg-primary/10 text-primary'
-              : 'border-white/10 text-zinc-400 hover:border-white/20 hover:text-white'
-          }`}
-        >
-          Recommended
-        </button>
-        {selectedSource.mapPinsActive && (
-          <button
-            type="button"
-            onClick={() => persistVisualizationMode('map')}
-            className={`rounded-md border px-2.5 py-1 text-[10px] ${
-              selectedView === 'map'
-                ? 'border-primary/45 bg-primary/10 text-primary'
-                : 'border-white/10 text-zinc-400 hover:border-white/20 hover:text-white'
-            }`}
-          >
-            Map
-          </button>
-        )}
-        {chartModel && (
-          <button
-            type="button"
-            onClick={() => persistVisualizationMode('chart')}
-            className={`rounded-md border px-2.5 py-1 text-[10px] ${
-              selectedView === 'chart'
-                ? 'border-primary/45 bg-primary/10 text-primary'
-                : 'border-white/10 text-zinc-400 hover:border-white/20 hover:text-white'
-            }`}
-          >
-            Chart
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={() => persistVisualizationMode('table')}
-          className={`rounded-md border px-2.5 py-1 text-[10px] ${
-            selectedView === 'table'
-              ? 'border-primary/45 bg-primary/10 text-primary'
-              : 'border-white/10 text-zinc-400 hover:border-white/20 hover:text-white'
-          }`}
-        >
-          Table
-        </button>
-      </div>
-
-      {activeView === 'map' && (
+      {selectedSource.mapPinsActive ? (
         <div className="rounded-lg border border-border/50 bg-muted/10 px-3 py-3 text-[11px] leading-relaxed text-zinc-400">
           <p className="font-medium text-white">
             {selectedSource.markerCount.toLocaleString()} imported pin
@@ -765,74 +551,12 @@ export function ImportedDataPanel({
             aggregate state and can be toggled off independently.
           </p>
         </div>
-      )}
-
-      {activeView === 'chart' && chartModel && (
-        <div className="space-y-3">
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
-              {chartModel.kind === 'line' ? 'Trend view' : 'Category view'}
-            </p>
-            <p className="text-xs text-zinc-300">{chartModel.title}</p>
-          </div>
-          {(() => {
-            const scoutChart = toScoutChartOutputFromImportedChart(chartModel)
-            if (scoutChart) return <ScoutChartCard chart={scoutChart} />
-
-            return chartModel.kind === 'line' ? (
-              <SimpleLineChart points={chartModel.points} />
-            ) : (
-              <SimpleBarChart points={chartModel.points} />
-            )
-          })()}
-        </div>
-      )}
-
-      {(activeView === 'table' || activeView === 'chart' || activeView === 'map') && tableHeaders.length > 0 && (
-        <div>
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Raw table</p>
-            {totalTableRows > 0 ? (
-              <p className="text-[10px] text-zinc-500">
-                Showing {visibleTableRows.length.toLocaleString()} of {totalTableRows.toLocaleString()} rows
-              </p>
-            ) : null}
-          </div>
-          <div className="max-h-64 overflow-auto rounded-lg border border-border/50 text-[10px]">
-            <table className="w-full border-collapse">
-              <thead>
-                <tr className="border-b border-border/60 bg-muted/30 text-left uppercase text-[9px] text-zinc-500">
-                  {tableHeaders.map((header) => (
-                    <th key={header} className="p-1.5 font-mono">
-                      {header}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {visibleTableRows.map((row, index) => (
-                  <tr key={index} className="border-b border-border/40 last:border-b-0">
-                    {tableHeaders.map((header) => (
-                      <td key={`${index}:${header}`} className="p-1.5 align-top text-zinc-300">
-                        {formatImportedCell(row[header])}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {hasMoreTableRows ? (
-            <div className="mt-2 flex justify-end">
-              <button
-                type="button"
-                onClick={() => setTableRowLimit((current) => current + TABLE_ROW_PAGE_SIZE)}
-                className="rounded-md border border-white/10 px-2.5 py-1 text-[10px] text-zinc-300 transition-colors hover:border-white/20 hover:text-white"
-              >
-                Load {Math.min(TABLE_ROW_PAGE_SIZE, tableRows.length - visibleTableRows.length).toLocaleString()} more rows
-              </button>
-            </div>
-          ) : null}
+      ) : (
+        <div className="rounded-lg border border-border/50 bg-muted/10 px-3 py-3 text-[11px] leading-relaxed text-zinc-400">
+          <p className="font-medium text-white">Map view unavailable</p>
+          <p className="mt-1">
+            This dataset does not have usable mapped rows in the sidebar.
+          </p>
         </div>
       )}
     </div>

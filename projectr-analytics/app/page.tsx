@@ -1452,9 +1452,25 @@ export default function Home() {
     })
   }, [])
 
-  const rightPanelVisible =
-    panelOpen &&
-    (result != null || aggregateData != null || selectedSite != null || agentSidebarTrace != null || clientUploadAgg != null)
+  const hasSharedPanelContent =
+    result != null || aggregateData != null || clientUploadAgg != null || agentSidebarTrace != null
+
+  const rightPanelVisible = panelOpen && (hasSharedPanelContent || selectedSite != null)
+
+  const sharedPanelTitle = result
+    ? (result.zillow?.city ?? result.zip)
+    : aggregateData
+      ? aggregateData.label
+      : 'Workspace'
+
+  const sharedPanelSubtitle = result
+    ? `${result.zillow?.metro_name ?? ''} Â· ${result.zip}`
+    : aggregateData
+      ? formatAggregateScopeLabel(aggregateData)
+      : clientUploadAgg?.fileNameLabel ?? 'Imported data and assistant context'
+
+  const importedPanelCurrentZip =
+    result?.zip ?? cityZips?.find((candidate) => /^\d{5}$/.test(candidate.zip))?.zip ?? null
 
   const sidebarActiveMarket =
     result != null
@@ -1653,31 +1669,12 @@ export default function Home() {
         )}
         style={{ width: rightPanelVisible ? RIGHT_PANEL_WIDTH_PX : 0 }}
       >
-        {panelOpen &&
-          agentSidebarTrace != null &&
-          !selectedSite &&
-          !result &&
-          !aggregateData &&
-          !clientUploadAgg && (
-            <div className="flex min-h-0 min-w-[360px] flex-1 flex-col overflow-hidden">
-              <AgentThinkingPanel
-                trace={agentSidebarTrace}
-                embedded={false}
-                streaming={agentThinkingStreaming}
-                onDismiss={() => {
-                  setAgentSidebarTrace(null)
-                  setPanelOpen(false)
-                }}
-              />
-            </div>
-          )}
-
-        {panelOpen && !selectedSite && !result && !aggregateData && clientUploadAgg && (
+        {false && panelOpen && !selectedSite && !result && !aggregateData && clientUploadAgg && (
           <div className="flex min-h-0 min-w-[360px] flex-1 flex-col overflow-hidden">
             <div className="shrink-0 border-b border-border/50 p-4 pb-3">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <h2 className="text-base font-bold leading-tight text-foreground">Imported Data</h2>
+                  <h2 className="text-base font-bold leading-tight text-foreground">Workspace</h2>
                   <p className="mt-0.5 text-xs text-muted-foreground">
                     {clientUploadAgg.fileNameLabel ?? 'Last imported dataset'}
                   </p>
@@ -1710,13 +1707,13 @@ export default function Home() {
           </div>
         )}
 
-        {!selectedSite && aggregateData && panelOpen && !result && (
+        {panelOpen && !selectedSite && !result && (aggregateData != null || clientUploadAgg != null || agentSidebarTrace != null) && (
           <div className="flex min-h-0 min-w-[360px] flex-1 flex-col overflow-hidden">
             <div className="shrink-0 border-b border-border/50 p-4 pb-3">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <h2 className="text-base font-bold leading-tight text-foreground">{aggregateData.label}</h2>
-                  <p className="mt-0.5 text-xs text-muted-foreground">{formatAggregateScopeLabel(aggregateData)}</p>
+                  <h2 className="text-base font-bold leading-tight text-foreground">{sharedPanelTitle}</h2>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{sharedPanelSubtitle}</p>
                 </div>
                 <div className="flex flex-shrink-0 items-center gap-1.5">
                   <button type="button" onClick={() => setPanelOpen(false)} className="text-xl leading-none text-muted-foreground hover:text-foreground">×</button>
@@ -1750,6 +1747,8 @@ export default function Home() {
             )}
 
             {marketPanelTab === 'data' && (
+              <>
+            {aggregateData ? (
               <>
             <PanelSection title="Market Pricing (Zillow)">
               <MetricRow metricKey="zori" label="Avg Median Rent (ZORI)" value={fmtMoney(aggregateData.zillow.avg_zori)} sub={aggregateData.zillow.zori_growth_12m != null ? `${fmtGrowth(aggregateData.zillow.zori_growth_12m)} YoY avg` : undefined} />
@@ -1867,6 +1866,17 @@ export default function Home() {
                   />
                 )}
                   </>
+                ) : (
+                  <PanelSection title="Market Data">
+                    <div className="rounded-lg border border-border/50 bg-muted/10 px-3 py-3 text-[11px] leading-relaxed text-zinc-400">
+                      <p className="font-medium text-white">No market loaded yet</p>
+                      <p className="mt-1">
+                        Load a ZIP, city, county, or metro to inspect market metrics here.
+                      </p>
+                    </div>
+                  </PanelSection>
+                )}
+                  </>
                 )}
                 {marketPanelTab === 'imported' && (
                   <PanelSection title="Imported Data">
@@ -1875,7 +1885,7 @@ export default function Home() {
                         session={clientUploadSession}
                         selectedMarker={selectedUploadedMarker}
                         onClearSelectedMarker={() => setSelectedUploadedMarker(null)}
-                        currentZip={cityZips?.find((candidate) => /^\d{5}$/.test(candidate.zip))?.zip ?? null}
+                        currentZip={importedPanelCurrentZip}
                         onMarkersResolved={focusImportedMarkers}
                       />
                     ) : (
@@ -1892,7 +1902,7 @@ export default function Home() {
               </div>
             )}
 
-        {!selectedSite && result && panelOpen && (
+        {false && !selectedSite && result && panelOpen && (
           <div className="flex min-h-0 min-w-[360px] flex-1 flex-col overflow-hidden">
             <div className="shrink-0 border-b border-border/50 p-4 pb-3">
               <div className="flex items-start justify-between gap-2">

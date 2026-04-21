@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 
-import { buildFallbackChartedResponseForTest, buildRentTrendChartForTest, buildRouterBackedChartForTest, buildHistoryChartedResponseForTest, buildRetailComparisonResponseForTest } from '@/app/api/agent/agent-pipeline'
+import { buildFallbackChartedResponseForTest, buildRentTrendChartForTest, buildRouterBackedChartForTest, buildHistoryChartedResponseForTest, buildRetailComparisonResponseForTest } from '@/lib/server/agent-pipeline'
 import type { AgentMessage, MapContext } from '@/lib/agent-types'
 import type { AgentDriveTimeQuery } from '@/lib/agent-types'
 import type { AgentInternalProvenanceQuery } from '@/lib/agent-types'
@@ -23,6 +23,13 @@ test('route entry declares segment config inline instead of re-exporting it', as
   assert.match(routeSource, /export const dynamic = 'force-dynamic'/)
   assert.match(routeSource, /export const maxDuration = 60/)
   assert.doesNotMatch(routeSource, /export\s*\{\s*dynamic\b/)
+})
+
+test('agent route helper implementation lives outside the route directory', async () => {
+  const routeSource = await readFile(new URL('../../../app/api/agent/route.ts', import.meta.url), 'utf8')
+
+  assert.match(routeSource, /@\/lib\/server\/agent-pipeline/)
+  assert.doesNotMatch(routeSource, /\.\/agent-pipeline/)
 })
 
 function createActiveZipContext(zip: string, label = zip): MapContext {
